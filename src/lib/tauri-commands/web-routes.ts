@@ -189,7 +189,12 @@ export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
   // 列表只读缓存行，不取数；`/resolve` 才会真的发出站请求。
   [COMMANDS.dynamicVariablesList]: {
     method: 'GET',
-    path: (a) => `/api/dynamic-variables${buildQuery({ projectId: a.projectId })}`,
+    // `environmentId` 是调用方此刻选中的环境：只影响继承取数环境的定义读哪一格缓存。
+    path: (a) =>
+      `/api/dynamic-variables${buildQuery({
+        projectId: a.projectId,
+        environmentId: a.environmentId,
+      })}`,
   },
   [COMMANDS.dynamicVariablesCreate]: {
     method: 'POST',
@@ -228,6 +233,8 @@ export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
       names: a.names,
       // `projectId` 不传就是跨项目取值。
       projectId: a.projectId || null,
+      // 调用方此刻选中的环境：继承取数环境的定义按它取数（空 = 没有环境，回落默认环境）。
+      environmentId: a.environmentId || null,
       force: a.force ?? false,
     }),
   },
@@ -238,12 +245,30 @@ export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
       value: a.value ?? null,
       expiresAt: a.expiresAt ?? null,
       forever: a.forever ?? false,
+      // 覆盖值写进 (定义 × 生效环境) 那一行，故这里也要说清是哪个环境。
+      environmentId: a.environmentId || null,
     }),
   },
   [COMMANDS.dynamicVariablesRefresh]: {
     method: 'POST',
     path: (a) => `/api/dynamic-variables/${encodeURIComponent(String(a.id))}/refresh`,
-    body: () => ({}),
+    body: (a) => ({ environmentId: a.environmentId || null }),
+  },
+  [COMMANDS.dynamicVariablesPreview]: {
+    method: 'POST',
+    // 字面量段 `/preview` 与 `/resolve` 一样排在 `/{id}` 之前（见 router.rs）。
+    path: () => '/api/dynamic-variables/preview',
+    // 显式投影：这些就是预览的全部线上契约。`environmentId` 是**调用方此刻选中的环境**，
+    // 与草稿自己点名的 `sourceEnvironmentId` 不是同一个值；空串一律发 null（= 继承/没有）。
+    body: (a) => ({
+      name: a.name || null,
+      sourceEndpointId: a.sourceEndpointId || null,
+      sourceInlineJson: a.sourceInlineJson || null,
+      sourceEnvironmentId: a.sourceEnvironmentId || null,
+      extractPath: a.extractPath || null,
+      transformScript: a.transformScript || null,
+      environmentId: a.environmentId || null,
+    }),
   },
 
   // ----- request settings -----

@@ -4,20 +4,35 @@ use rusqlite::Connection;
 
 use crate::error::AppError;
 
-/// 校验取数用的环境，并给出真正落库的那个 id。
+/// 数据源端点是否可绑，并给出它所属的项目。内联请求没有项目，故 `Ok(None)`。
 ///
-/// 环境必须属于数据源端点所属的项目：环境的格子按 (环境 × 模块) 寻址，拿别的项目的环境去
-/// 取数会取到别处的内容。数据源是内联请求时它清空——内联请求自带完整地址。
-pub(super) fn check_source_bindings(
+/// 分开成两半是为了让「改一条已有定义」能只纠正环境而保留端点：环境是数据源的一层细化
+/// （它决定 base URL 与变量），端点才是数据源本身。
+pub(super) fn check_source_endpoint(
     conn: &mut Connection,
     endpoint_id: Option<&str>,
-    environment_id: Option<&str>,
 ) -> Result<Option<String>, AppError> {
     let Some(endpoint_id) = endpoint_id else {
         return Ok(None);
     };
     let project_id = crate::db::nodes::root_id_of(conn, endpoint_id)
         .map_err(|_| AppError::Validation(format!("数据源接口 {endpoint_id} 不存在")))?;
+    Ok(Some(project_id))
+}
+
+/// 校验取数用的环境，并给出真正落库的那个 id。
+///
+/// 环境必须属于数据源端点所属的项目（`endpoint_project`）：环境的格子按 (环境 × 模块)
+/// 寻址，拿别的项目的环境去取数会取到别处的内容。数据源是内联请求时它清空——内联请求自带
+/// 完整地址。
+pub(super) fn check_source_environment(
+    conn: &mut Connection,
+    environment_id: Option<&str>,
+    endpoint_project: Option<&str>,
+) -> Result<Option<String>, AppError> {
+    let Some(project_id) = endpoint_project else {
+        return Ok(None);
+    };
     if let Some(env_id) = environment_id {
         let owner = crate::db::environments::lookup_project_id(conn, env_id)
             .map_err(|_| AppError::Validation(format!("环境 {env_id} 不存在")))?;
@@ -28,6 +43,16 @@ pub(super) fn check_source_bindings(
         }
     }
     Ok(environment_id.map(str::to_string))
+}
+
+/// 两半一起校验。新建走这条：新填的一对来源就是用户此刻的意图，错一处就该报出来。
+pub(super) fn check_source_bindings(
+    conn: &mut Connection,
+    endpoint_id: Option<&str>,
+    environment_id: Option<&str>,
+) -> Result<Option<String>, AppError> {
+    let project_id = check_source_endpoint(conn, endpoint_id)?;
+    check_source_environment(conn, environment_id, project_id.as_deref())
 }
 
 /// 变量名是否合法：只允许字母、数字与下划线，且非空。与 `crate::template::is_word` 同一套

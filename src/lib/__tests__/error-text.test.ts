@@ -18,3 +18,15 @@ test('errorText: 转不成字符串的取值给出回退文案，不抛异常', 
   const bare = Object.create(null);
   assert.equal(errorText(bare), '未知错误');
 });
+
+test('errorText: 后端的 { code, message } 对象取它的 message', () => {
+  // 桌面端 invoke 失败时 Tauri 2 把 `AppError` 当作普通对象 reject：它不是 `Error`，
+  // 故这条路径以前会显示 `[object Object]`，把唯一有信息量的那一句丢掉。
+  const appError = { code: 'validation', message: 'validation: 变量名非法' };
+  assert.equal(errorText(appError), 'validation: 变量名非法');
+});
+
+test('errorText: 没有 message 字段的对象仍走 String()', () => {
+  assert.equal(errorText({ code: 'x' }), '[object Object]');
+  assert.equal(errorText({ message: '' }), '[object Object]');
+});

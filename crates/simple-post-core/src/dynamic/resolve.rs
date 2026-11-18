@@ -73,7 +73,7 @@ pub async fn resolve_definition(
     // 取数上下文造不出来（数据源端点已被删掉、那一行读不出来……）时，这一次解析按缺失
     // 处理并记一条错误，而不是让整次发送在请求发出前中止。`dynamic/mod.rs` 的规范
     // 如此要求：取数失败不让整次发送失败。
-    let source = match source_context(&ctx.pool, def) {
+    let source = match source_context(&ctx.pool, def, ctx.environment_id.as_deref()) {
         Ok(source) => source,
         Err(e) => {
             let error = DynamicError {
@@ -229,8 +229,8 @@ async fn fetch_one(
     stale_fallback: Option<String>,
     fetcher: &dyn SourceFetcher,
 ) -> Result<OneOutcome, AppError> {
-    // 缓存键的环境段取自取数上下文（定义点名的环境，或它所属项目的第一个可用环境），
-    // 不是消费方的环境。
+    // 缓存键的环境段取自取数上下文——**实际生效**的那个环境（指定模式是定义点名的那个，
+    // 继承模式是调用方选中的那个）。它随调用方切环境而变，故切环境不会读到上一个环境的值。
     let env_key = source.environment_id.clone().unwrap_or_default();
     let lock = flight_lock(&(def.id.clone(), env_key.clone()));
     let _guard = lock.lock().await;

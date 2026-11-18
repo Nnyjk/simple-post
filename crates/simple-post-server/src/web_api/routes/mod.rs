@@ -21,8 +21,8 @@ pub(crate) mod ws;
 
 pub(crate) use dynamic_variables::{
     dynamic_variables_create, dynamic_variables_delete, dynamic_variables_list,
-    dynamic_variables_refresh, dynamic_variables_resolve, dynamic_variables_set_override,
-    dynamic_variables_update,
+    dynamic_variables_preview, dynamic_variables_refresh, dynamic_variables_resolve,
+    dynamic_variables_set_override, dynamic_variables_update,
 };
 pub(crate) use environments::{
     environments_create, environments_delete, environments_list, environments_rename_var,

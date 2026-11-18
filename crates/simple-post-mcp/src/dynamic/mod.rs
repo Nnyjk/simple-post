@@ -7,9 +7,11 @@
 //! core 那边只留一个抽象（`SourceFetcher`），两侧 transport 共用同一份取数逻辑。
 
 pub mod ops;
+pub mod preview;
 pub mod source;
 
 pub use ops::{CreateOpts, DynamicVariableView};
+pub use preview::{preview, PreviewDraft, PreviewIssue, PreviewResult};
 pub use simple_post_core::dynamic::{
     decide, extract_value, list_names, merge_pool, resolve_names, serialize_value, Decision,
     RawSource, ResolveContext, SourceFetcher, TemplateParts, MAX_VALUE_BYTES,

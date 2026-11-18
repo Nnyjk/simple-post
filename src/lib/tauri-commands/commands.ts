@@ -70,6 +70,10 @@ export const COMMANDS = {
   dynamicVariablesResolve: 'dynamic_variables_resolve',
   dynamicVariablesSetOverride: 'dynamic_variables_set_override',
   dynamicVariablesRefresh: 'dynamic_variables_refresh',
+  // 用表单里当前这份草稿真取一次数，把响应交给用户点选抽取路径。它**不碰持久状态**
+  // （不读不写缓存、不写覆盖值、不写历史），故与 `dynamicVariablesRefresh` 不是一回事：
+  // 后者刷新的是一条已存的定义。
+  dynamicVariablesPreview: 'dynamic_variables_preview',
 
   // ----- request settings -----
   requestSettingsGet: 'request_settings_get',

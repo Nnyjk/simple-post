@@ -28,6 +28,10 @@ use simple_post_core::error::AppError;
 #[derive(Debug, Deserialize)]
 struct GetArgs {
     definition_id: String,
+    /// 调用方此刻选中的环境。缺席 = 没有环境（继承模式下回落到数据源端点所属项目的
+    /// 默认环境）。只影响「继承取数环境」的定义。
+    #[serde(default)]
+    environment_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -35,6 +39,9 @@ struct ListArgs {
     /// 只列这个项目里的定义。缺席 = 列出全部项目。
     #[serde(default)]
     project_id: Option<String>,
+    /// 调用方此刻选中的环境，含义同 `GetArgs::environment_id`。
+    #[serde(default)]
+    environment_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -52,7 +59,8 @@ struct CreateArgs {
     /// 内联请求（method / url / headers / body / auth 的 JSON 文本）。
     #[serde(default)]
     source_inline_json: Option<String>,
-    /// 取数用的环境。缺席 = 数据源端点所属项目的第一个可用环境。
+    /// 取数用的环境。缺席 = 继承调用方此刻选中的环境（不属于数据源端点所属项目时，
+    /// 回落到那个项目的默认环境）。
     #[serde(default)]
     source_environment_id: Option<String>,
     /// JSONPath 表达式。`$` 表示整段响应。
@@ -98,6 +106,9 @@ struct ResolveArgs {
     /// 真 = 跳过缓存，强制重新取数。
     #[serde(default)]
     force: Option<bool>,
+    /// 调用方此刻选中的环境，含义同 `GetArgs::environment_id`。
+    #[serde(default)]
+    environment_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -112,6 +123,10 @@ struct SetOverrideArgs {
     /// 真 = 一直有效，直到手动清除。
     #[serde(default)]
     forever: Option<bool>,
+    /// 调用方此刻选中的环境，含义同 `GetArgs::environment_id`。覆盖值落在（定义 × 实际
+    /// 生效的环境）那个缓存行上，故它决定这次覆盖写在哪一格。
+    #[serde(default)]
+    environment_id: Option<String>,
 }
 
 // =========================================================================
@@ -123,11 +138,12 @@ pub(crate) fn table() -> Vec<ToolEntry> {
     vec![
         ToolEntry {
             name: "dynamic_var_list",
-            description: "List dynamic variables with their current value and cache state. Pass project_id for one project, omit it for every project. Reads the cache only; it never fetches.",
+            description: "List dynamic variables with their current value and cache state. Pass project_id for one project, omit it for every project. environment_id = the environment you have selected, for inherited fetch environments; omit it to use each source endpoint's project default. Reads the cache only; it never fetches.",
             schema: json!({
                 "type": "object",
                 "properties": {
-                    "project_id": { "type": "string" }
+                    "project_id": { "type": "string" },
+                    "environment_id": { "type": "string" }
                 },
                 "additionalProperties": false,
             }),
@@ -135,11 +151,12 @@ pub(crate) fn table() -> Vec<ToolEntry> {
         },
         ToolEntry {
             name: "dynamic_var_get",
-            description: "Read one dynamic variable definition with its current value and cache state.",
+            description: "Read one dynamic variable definition with its current value and cache state. environment_id = the environment you have selected; omit it to use the source endpoint's project default.",
             schema: json!({
                 "type": "object",
                 "properties": {
-                    "definition_id": { "type": "string" }
+                    "definition_id": { "type": "string" },
+                    "environment_id": { "type": "string" }
                 },
                 "required": ["definition_id"],
                 "additionalProperties": false,
@@ -148,7 +165,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
         },
         ToolEntry {
             name: "dynamic_var_create",
-            description: "Create a dynamic variable in a project: a name, a data source (an endpoint id or an inline request), a JSONPath extraction rule, a transform script and a cache TTL. The name must match ^[A-Za-z0-9_]+$ and is unique within the project. Omit the environment to use the source endpoint's first environment.",
+            description: "Create a dynamic variable in a project: a name, a data source (an endpoint id or an inline request), a JSONPath extraction rule, a transform script and a cache TTL. The name must match ^[A-Za-z0-9_]+$ and is unique within the project. Omit source_environment_id to inherit the environment you have selected.",
             schema: json!({
                 "type": "object",
                 "properties": {
@@ -216,13 +233,14 @@ pub(crate) fn table() -> Vec<ToolEntry> {
         },
         ToolEntry {
             name: "dynamic_var_resolve",
-            description: "Resolve dynamic variables by name: fetch from their data source when the cache is cold or expired, extract the value, run the optional transform script and return it. Pass project_id for one project, omit it for all projects, where a name in several projects is ambiguous. This really sends HTTP requests, so it needs the trust level of api_call_endpoint.",
+            description: "Resolve dynamic variables by name: fetch from their data source when the cache is cold or expired, extract the value, run the optional transform script and return it. Pass project_id for one project, omit it for all projects, where a name in several projects is ambiguous. environment_id = the environment you have selected, so inherited definitions see your values; omit it for each source endpoint's project default. This really sends HTTP requests, so it needs the trust level of api_call_endpoint.",
             schema: json!({
                 "type": "object",
                 "properties": {
                     "names": { "type": "array", "items": { "type": "string" } },
                     "project_id": { "type": "string" },
-                    "force": { "type": "boolean" }
+                    "force": { "type": "boolean" },
+                    "environment_id": { "type": "string" }
                 },
                 "required": ["names"],
                 "additionalProperties": false,
@@ -231,14 +249,15 @@ pub(crate) fn table() -> Vec<ToolEntry> {
         },
         ToolEntry {
             name: "dynamic_var_set_override",
-            description: "Set a dynamic variable's value by hand; it wins over the fetched value until it expires or is cleared. A null value clears the override.",
+            description: "Set a dynamic variable's value by hand; it wins over the fetched value until it expires or is cleared. A null value clears the override. The override lives on the (definition × effective environment) row: pass environment_id when the definition inherits its fetch environment.",
             schema: json!({
                 "type": "object",
                 "properties": {
                     "definition_id": { "type": "string" },
                     "value": { "type": ["string", "null"] },
                     "expires_at": { "type": "integer" },
-                    "forever": { "type": "boolean" }
+                    "forever": { "type": "boolean" },
+                    "environment_id": { "type": "string" }
                 },
                 "required": ["definition_id", "value"],
                 "additionalProperties": false,
@@ -300,7 +319,11 @@ async fn tool_dynamic_var_list(state: &AppState, args: Value) -> Result<CallTool
     if let Some(project_id) = a.project_id.as_deref() {
         require_scope(state, Some(project_id.to_string()), "dynamic_var_list").await?;
     }
-    let views = crate::dynamic::ops::list(&state.pool, a.project_id.as_deref())?;
+    let views = crate::dynamic::ops::list(
+        &state.pool,
+        a.project_id.as_deref(),
+        a.environment_id.as_deref(),
+    )?;
     Ok(CallToolResult::json(views))
 }
 
@@ -313,7 +336,8 @@ async fn tool_dynamic_var_get(state: &AppState, args: Value) -> Result<CallToolR
         "dynamic_var_get",
     )
     .await?;
-    let view = crate::dynamic::ops::get(&state.pool, &a.definition_id)?;
+    let view =
+        crate::dynamic::ops::get(&state.pool, &a.definition_id, a.environment_id.as_deref())?;
     Ok(CallToolResult::json(view))
 }
 
@@ -434,6 +458,7 @@ async fn tool_dynamic_var_resolve(
         a.project_id.as_deref(),
         &a.names,
         a.force.unwrap_or(false),
+        a.environment_id.as_deref(),
     )
     .await?;
     Ok(CallToolResult::json(resolution))
@@ -457,8 +482,10 @@ async fn tool_dynamic_var_set_override(
         a.value,
         a.expires_at,
         a.forever.unwrap_or(false),
+        a.environment_id.as_deref(),
     )?;
-    let view = crate::dynamic::ops::get(&state.pool, &a.definition_id)?;
+    let view =
+        crate::dynamic::ops::get(&state.pool, &a.definition_id, a.environment_id.as_deref())?;
     Ok(CallToolResult::json(view))
 }
 

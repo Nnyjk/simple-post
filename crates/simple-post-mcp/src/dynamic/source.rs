@@ -319,6 +319,9 @@ async fn send(
             status: response.status,
             content_type: response.content_type,
             body: response.body,
+            // 预览要如实报告这两条：截断的正文是半段 JSON，二进制正文根本没法做 JSONPath。
+            truncated: response.truncated,
+            body_base64: response.body_base64,
             // 响应头与耗时给处理脚本看（`pm.response.headers` / `pm.response.responseTime`）。
             headers: response
                 .headers

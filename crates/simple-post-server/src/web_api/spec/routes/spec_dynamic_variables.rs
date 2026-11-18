@@ -44,6 +44,16 @@ pub(in crate::web_api::spec) fn routes() -> Vec<RouteSpec> {
         },
         RouteSpec {
             method: "POST",
+            path: "/api/dynamic-variables/preview",
+            summary: "Dry-run one draft definition: fetch from its data source, run the \
+                      extraction and the transform, and report the response body plus the \
+                      extracted and final values. Touches no cache, no override and no \
+                      history, and a failed extraction still returns the body",
+            request: Some("DynamicVariablePreview"),
+            response: Some("DynamicPreviewResult"),
+        },
+        RouteSpec {
+            method: "POST",
             path: "/api/dynamic-variables/resolve",
             summary: "Resolve dynamic variables by name; fetches from the data source when \
                       the cache is cold or expired",

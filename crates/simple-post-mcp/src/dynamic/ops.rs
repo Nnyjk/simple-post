@@ -5,8 +5,9 @@
 //! 它的一层薄壳。
 //!
 //! 定义挂在**项目**里：变量名在项目内唯一，不同项目可以有同名变量而互不覆盖。取数用的
-//! 环境由定义自己决定（点名的那个，或数据源端点所属项目的首个环境），故同一个
-//! `{{name}}` 在不同项目里取到的值可以不同——那正是分项目的意义。
+//! 环境有两种形态：定义点名的那一个（**指定**），或调用方此刻选中的那一个（**继承**，
+//! 它不属于数据源端点所属项目时回落到那个项目的默认环境）。故同一个 `{{name}}` 在不同
+//! 项目、不同环境里取到的值可以不同——那正是分项目与分环境的意义。
 
 use serde::Serialize;
 
@@ -29,7 +30,8 @@ pub struct CreateOpts {
     pub description: Option<String>,
     pub source_endpoint_id: Option<String>,
     pub source_inline_json: Option<String>,
-    /// 取数用的环境。`None` = 数据源端点所属项目的第一个可用环境。
+    /// 取数用的环境。`None` = 继承调用方此刻选中的环境（不属于数据源端点所属项目时，
+    /// 回落到那个项目的默认环境）。
     pub source_environment_id: Option<String>,
     pub extract_path: Option<String>,
     /// 处理脚本。抽取之后跑。
@@ -67,7 +69,7 @@ pub struct DynamicVariableView {
     /// 数据源端点所属项目的名字。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_project_name: Option<String>,
-    /// 实际取数用的环境。定义点名的那个，或数据源项目里的第一个可用环境。
+    /// 实际取数用的环境：定义点名的那个（指定），或继承来的那个（含回落后的默认环境）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effective_environment_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -79,12 +81,20 @@ pub struct DynamicVariableView {
 /// `project_id` 决定列哪个范围：给了就只列那个项目里的，不给就列全部项目——跨项目
 /// 调用接口要靠后者。
 ///
+/// `environment_id` 是**调用方此刻选中的环境**：它只对「继承取数环境」的定义起作用
+/// （见 `core::dynamic::source_context`）。缓存行按实际生效的环境取，故这里给出的值与
+/// 随后解析时看到的是同一行。
+///
 /// **不取数**：读的是缓存行。取数可能发出站请求，而这是一次纯读。
 ///
 /// **不带「哪些端点引用了它」**：那条信息只在接口那侧存在——接口知道自己配了哪些变量，
 /// 变量这一侧不维护反向索引。一个被几乎每个接口用到的通用变量会把这条列表撑爆，
 /// 而那条信息对维护变量本身没有用。
-pub fn list(pool: &DbPool, project_id: Option<&str>) -> Result<Vec<DynamicVariableView>, AppError> {
+pub fn list(
+    pool: &DbPool,
+    project_id: Option<&str>,
+    environment_id: Option<&str>,
+) -> Result<Vec<DynamicVariableView>, AppError> {
     let definitions = match project_id {
         Some(project_id) => db::with_conn(pool, |c| {
             db::dynamic_variables::list_by_project(c, project_id)
@@ -94,7 +104,7 @@ pub fn list(pool: &DbPool, project_id: Option<&str>) -> Result<Vec<DynamicVariab
     let now = now_ms();
     let mut out = Vec::with_capacity(definitions.len());
     for definition in definitions {
-        let source = simple_post_core::dynamic::source_context(pool, &definition)?;
+        let source = simple_post_core::dynamic::source_context(pool, &definition, environment_id)?;
         let env_key = source.environment_id.clone().unwrap_or_default();
         let entry = db::with_conn(pool, |c| {
             db::dynamic_variable_cache::get(c, &definition.id, &env_key)
@@ -105,9 +115,13 @@ pub fn list(pool: &DbPool, project_id: Option<&str>) -> Result<Vec<DynamicVariab
 }
 
 /// 读一条定义，带当前值与缓存状态。
-pub fn get(pool: &DbPool, definition_id: &str) -> Result<DynamicVariableView, AppError> {
+pub fn get(
+    pool: &DbPool,
+    definition_id: &str,
+    environment_id: Option<&str>,
+) -> Result<DynamicVariableView, AppError> {
     let definition = db::with_conn(pool, |c| db::dynamic_variables::get(c, definition_id))?;
-    let source = simple_post_core::dynamic::source_context(pool, &definition)?;
+    let source = simple_post_core::dynamic::source_context(pool, &definition, environment_id)?;
     let env_key = source.environment_id.clone().unwrap_or_default();
     let entry = db::with_conn(pool, |c| {
         db::dynamic_variable_cache::get(c, definition_id, &env_key)
@@ -162,13 +176,19 @@ pub fn delete(pool: &DbPool, definition_id: &str) -> Result<(), AppError> {
 /// `project_id` 决定这些名字在哪个范围里找：给了就只认那个项目里的定义（请求发送走
 /// 的就是这条）；不给就是跨项目取值，同一个名字在多个项目里都有定义时记一条「歧义」
 /// 错误并按缺失处理。
+///
+/// `environment_id` 是调用方此刻选中的环境，只对继承取数环境的定义起作用。
 pub async fn resolve(
     pool: &DbPool,
     project_id: Option<&str>,
     names: &[String],
     force: bool,
+    environment_id: Option<&str>,
 ) -> Result<DynamicResolution, AppError> {
-    let ctx = ResolveContext { pool: pool.clone() };
+    let ctx = ResolveContext {
+        pool: pool.clone(),
+        environment_id: environment_id.map(str::to_string),
+    };
     simple_post_core::dynamic::resolve_names(
         &ctx,
         project_id,
@@ -182,9 +202,16 @@ pub async fn resolve(
 /// 强制重新取一条定义。
 ///
 /// 按 id 解析，不按名字：按名字找会撞上同名定义在别的项目里的那种歧义。
-pub async fn refresh(pool: &DbPool, definition_id: &str) -> Result<DynamicValueStatus, AppError> {
+pub async fn refresh(
+    pool: &DbPool,
+    definition_id: &str,
+    environment_id: Option<&str>,
+) -> Result<DynamicValueStatus, AppError> {
     let definition = db::with_conn(pool, |c| db::dynamic_variables::get(c, definition_id))?;
-    let ctx = ResolveContext { pool: pool.clone() };
+    let ctx = ResolveContext {
+        pool: pool.clone(),
+        environment_id: environment_id.map(str::to_string),
+    };
     simple_post_core::dynamic::resolve_definition(
         &ctx,
         &definition,
@@ -211,11 +238,12 @@ pub fn set_override(
     value: Option<String>,
     expires_at: Option<i64>,
     forever: bool,
+    environment_id: Option<&str>,
 ) -> Result<(), AppError> {
     let definition = db::with_conn(pool, |c| db::dynamic_variables::get(c, definition_id))?;
-    // 缓存键用定义自己的取数环境，与解析时用的那一个同源：否则覆盖值会落到另一个键上，
-    // 手动指定的值看不见自己。
-    let source = simple_post_core::dynamic::source_context(pool, &definition)?;
+    // 缓存键用定义**实际生效**的取数环境，与解析时用的那一个同源：否则覆盖值会落到另一个
+    // 键上，手动指定的值看不见自己。继承模式下这个环境随调用方的选择变，故调用方要给。
+    let source = simple_post_core::dynamic::source_context(pool, &definition, environment_id)?;
     let env_key = source.environment_id.clone().unwrap_or_default();
     let Some(text) = value else {
         // 清除覆盖值：整行删掉，下一次解析重新取数。

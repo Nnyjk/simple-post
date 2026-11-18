@@ -37,6 +37,9 @@ pub struct ScriptResponse {
     /// 响应体的**二进制形态**（base64）。响应字节不是合法 UTF-8 时才有它，此时 `body` 是空串。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body_base64: Option<String>,
+    /// 响应体是否被服务端按 `max_response_size_kb` 裁过。取数预览据此提醒用户「树是不完整的」。
+    #[serde(default)]
+    pub truncated: bool,
     /// 往返耗时（毫秒）。
     pub response_time_ms: u64,
 }

@@ -4,18 +4,28 @@
  * 数据源二选一：引用树里的一个接口（那个接口自己的 base URL、鉴权与前置脚本都会生效），或
  * 一份内联请求（method / url / headers / body / auth 的 JSON 文本，URL 必须写完整）。
  *
- * 引用接口时，表单还会给出**取数用的环境**：默认取那个接口所属项目的第一个可用环境，用户
- * 可以改。取数用的地址由那个接口所属模块在所选环境里的那一格决定，故表单不必再问一次。
+ * 引用接口时，表单还会给出**取数用的环境**，两态：
+ *
+ * - **继承当前环境**（默认，值为空）：发送请求时用户选中的那个环境就用哪个。同一个
+ *   `{{name}}` 于是随用户切环境换值。
+ * - **指定环境**：固定用某个环境。它必须属于数据源接口所属项目——环境那一格是按
+ *   (环境 × 模块) 寻址的，别的项目的环境会读到不属于这个模块的格子。
  *
  * 定义挂在**项目**里，故表单要知道它属于哪个项目：新建时是当前项目，编辑时是这条定义自己的
  * 归属项目。变量名在项目内唯一。
+ *
+ * 表单内容不在组件里：它们存在 store 的 `dynamicDrafts[项目 id]`（见
+ * `stores/dynamic-slice.ts`），因为切到别的标签时面板连同这张表单一起被 `WorkspaceShell`
+ * 卸载，组件 state 留不住用户填了一半的内容。组件只留 `busy` 这类瞬时状态。
  */
 import { useMemo, useState } from 'react';
 import { useAppStore } from '@/stores/app-store';
-import type { DynamicVariableView, ValueMode } from '@/types/domain';
+import { emptyDynamicVariableDraft } from '@/stores/dynamic-slice';
+import type { DynamicVariable, DynamicVariableView, ValueMode } from '@/types/domain';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { EndpointTreePicker } from './EndpointTreePicker';
+import { ExtractPreview } from './ExtractPreview';
 
 export interface DynamicVariableFormProps {
   /** 传了就走编辑模式，不传就是新建。 */
@@ -27,9 +37,10 @@ export interface DynamicVariableFormProps {
   projectId?: string;
   onCancel: () => void;
   onDone: () => void;
-  /** 编辑模式下的一键改名（面板的「改名建议」用）。 */
-  onRename?: (name: string) => void;
 }
+
+/** 没有草稿时的兜底：面板只在草稿存在时挂载表单，故这一份不会出现在正常路径上。 */
+const EMPTY_DRAFT = emptyDynamicVariableDraft();
 
 /** 按代码点比两个字符串。SQLite 的 `ORDER BY name` 比的是 UTF-8 字节，JS 的 `<` 比的是
  * UTF-16 码元 —— 对 BMP 里的常用字符两者一致，故这里直接用 `<`。 */
@@ -43,7 +54,6 @@ export function DynamicVariableForm({
   projectId,
   onCancel,
   onDone,
-  onRename,
 }: DynamicVariableFormProps) {
   const projects = useAppStore((s) => s.projects);
   const environments = useAppStore((s) => s.environments);
@@ -56,39 +66,36 @@ export function DynamicVariableForm({
   // 归属项目。编辑时以定义自己的为准，新建时是当前项目。
   const ownerProjectId = variable?.projectId ?? projectId ?? activeProjectId;
 
-  const [name, setName] = useState(variable?.name ?? '');
-  const [description, setDescription] = useState(variable?.description ?? '');
-  // 数据源有两种形态，故形态本身是状态：它不能从「当前选中的端点」推出来——用户从
-  // 「引用端点」切回「内联请求」时端点 id 还在，但它已经不生效了。
-  //
+  // 表单内容全在 store 的草稿里，按项目分桶。选择器只读当前项目那一份对象：别的项目改草稿
+  // 换的是记录里的另一个键，这里的引用不动，故不会触发重渲染。
+  const draft = useAppStore((s) => s.dynamicDrafts[ownerProjectId]) ?? EMPTY_DRAFT;
+  const patchDraft = useAppStore((s) => s.patchDynamicVariableDraft);
+  const {
+    name,
+    description,
+    sourceKind,
+    sourceEndpointId,
+    sourceProjectId,
+    sourceEndpointName,
+    sourceInlineJson,
+    environmentId,
+    extractPath,
+    transformScript,
+    valueMode,
+    ttlSeconds,
+    staleFallback,
+    enabled,
+  } = draft;
+
+  const [busy, setBusy] = useState(false);
+
   // 「数据源接口已被删除」的定义落在**引用接口**形态：那条路是唯一能救它的（重新挑一个
   // 接口），而内联形态会让用户以为要手写一份请求。
   const sourceDeleted = !!variable && !variable.sourceEndpointId && !variable.sourceInlineJson;
-  const [sourceKind, setSourceKind] = useState<'endpoint' | 'inline'>(
-    variable ? (variable.sourceEndpointId || sourceDeleted ? 'endpoint' : 'inline') : 'inline',
-  );
-  const [sourceEndpointId, setSourceEndpointId] = useState(variable?.sourceEndpointId ?? '');
-  const [sourceProjectId, setSourceProjectId] = useState(variable?.sourceProjectId ?? '');
-  // 数据源接口的名字。树上点一下就有，不必再查一次树。
-  const [sourceEndpointName, setSourceEndpointName] = useState(variable?.sourceEndpointName ?? '');
-  const [sourceInlineJson, setSourceInlineJson] = useState(variable?.sourceInlineJson ?? '');
-  // 取数用的环境。空串 = 跟随默认（数据源接口所属项目的首个可用环境）。
-  const [environmentId, setEnvironmentId] = useState(variable?.sourceEnvironmentId ?? '');
-  const [extractPath, setExtractPath] = useState(variable?.extractPath ?? '$');
-  const [transformScript, setTransformScript] = useState(variable?.transformScript ?? '');
-  const [valueMode, setValueMode] = useState<ValueMode>(variable?.valueMode ?? 'auto');
-  const [ttlSeconds, setTtlSeconds] = useState(String(variable?.ttlSeconds ?? 60));
-  const [staleFallback, setStaleFallback] = useState(variable?.staleFallback ?? false);
-  const [enabled, setEnabled] = useState(variable?.enabled ?? true);
-  const [busy, setBusy] = useState(false);
-
   const usesEndpoint = sourceKind === 'endpoint';
 
-  // 项目里的环境，按名字排序 —— 「第一个可用环境」就是列表里的头一个。
-  //
-  // 后端 `core::dynamic::source_context` 选默认环境时用的是 `list_by_project` 的
-  // `ORDER BY name ASC, id ASC`，故这里必须按同一套顺序排：界面上写的「默认（X）」
-  // 与真正生效的那个是同一个，否则标签与行为各说各话。
+  // 数据源接口所属项目里的环境，按名字排序。选哪一格是用户的事，故给一份稳定的次序：
+  // 名字相同的按 id 兜底，这样同一个项目两次打开表单的顺序一致。
   const projectEnvironments = useMemo(
     () =>
       environments
@@ -96,19 +103,64 @@ export function DynamicVariableForm({
         .sort((a, b) => (a.name === b.name ? cmp(a.id, b.id) : cmp(a.name, b.name))),
     [environments, sourceProjectId],
   );
-  const firstEnvironment = projectEnvironments[0];
 
   const handleSelectEndpoint = (endpointId: string, projectId: string, endpointName: string) => {
-    setSourceKind('endpoint');
-    setSourceEndpointId(endpointId);
-    setSourceProjectId(projectId);
-    setSourceEndpointName(endpointName);
-    setEnvironmentId('');
+    // 一次写完四格：中途的半成品（接口变了、环境还是上一个接口的）会去取错环境的值。
+    patchDraft(ownerProjectId, {
+      sourceKind: 'endpoint',
+      sourceEndpointId: endpointId,
+      sourceProjectId: projectId,
+      sourceEndpointName: endpointName,
+      environmentId: '',
+    });
   };
 
-  // 没有数据源的定义永远解析不出值，故界面不让人存：引用形态要选了接口，内联形态
-  // 要填了请求。
+  // 没有数据源的定义永远解析不出值，故新建时不让人存：引用形态要选了接口，内联形态要填了
+  // 请求。
+  //
+  // 编辑一份「数据源接口已被删除」的定义是例外：它此刻本来就没有来源，用户改的可能是名字、
+  // 抽取规则或缓存时长。按现状存下去不会弄丢任何来源，故放行——否则这条记录会因为一段自己
+  // 修不好的历史而永远存不下去。补一个接口当然也行。
   const hasSource = usesEndpoint ? sourceEndpointId !== '' : sourceInlineJson.trim() !== '';
+  const definitionHadSource =
+    !!variable && !!(variable.sourceEndpointId || variable.sourceInlineJson);
+  const sourceIsAcceptable = hasSource || (variable !== undefined && !definitionHadSource);
+
+  /**
+   * 写成编辑用的 patch：**只发动过的字段**。
+   *
+   * 来源那一组字段尤其如此。「没动过」必须真的缺席，而不是显式发 `null`——后端把 `null`
+   * 读作明确的意图（清除），把没动过的字段也当成清除，一份只改名字的 patch 就顺带宣称
+   * 「这条定义没有数据源」，撞上「必须有一个数据源」的校验，用户的感受是「改个名都存不
+   * 下来」。故这三格逐一比对当前值，一样就缺席。
+   */
+  const editPatch = (ttlValue: number): Partial<DynamicVariable> => {
+    const patch: Partial<DynamicVariable> = {
+      name,
+      description: description || null,
+      extractPath,
+      transformScript: transformScript.trim() === '' ? null : transformScript,
+      valueMode,
+      ttlSeconds: ttlValue,
+      staleFallback,
+      enabled,
+    };
+    // 三种形态各自「保存后应当是什么」：切到内联就把接口引用清掉，切回引用就把内联请求清掉。
+    const nextEndpointId = usesEndpoint ? sourceEndpointId || null : null;
+    const nextInlineJson = usesEndpoint ? null : sourceInlineJson || null;
+    // 内联请求自带完整地址，用不到取数环境，故那种形态下这一格就是「没有」。
+    const nextEnvironmentId = usesEndpoint ? environmentId || null : null;
+    if (nextEndpointId !== (variable?.sourceEndpointId ?? null)) {
+      patch.sourceEndpointId = nextEndpointId;
+    }
+    if (nextInlineJson !== (variable?.sourceInlineJson ?? null)) {
+      patch.sourceInlineJson = nextInlineJson;
+    }
+    if (nextEnvironmentId !== (variable?.sourceEnvironmentId ?? null)) {
+      patch.sourceEnvironmentId = nextEnvironmentId;
+    }
+    return patch;
+  };
 
   const handleSubmit = async () => {
     setBusy(true);
@@ -118,19 +170,7 @@ export function DynamicVariableForm({
       const ttl = Number(ttlSeconds);
       const ttlValue = Number.isFinite(ttl) ? ttl : 60;
       if (variable) {
-        const ok = await updateDynamicVariable(variable.id, {
-          name,
-          description: description || null,
-          sourceEndpointId: usesEndpoint ? sourceEndpointId : null,
-          sourceInlineJson: usesEndpoint ? null : sourceInlineJson || null,
-          sourceEnvironmentId: usesEndpoint ? environmentId || null : null,
-          extractPath,
-          transformScript: transformScript.trim() === '' ? null : transformScript,
-          valueMode,
-          ttlSeconds: ttlValue,
-          staleFallback,
-          enabled,
-        });
+        const ok = await updateDynamicVariable(variable.id, editPatch(ttlValue));
         // 保存失败时表单留着：用户填的内容不丢。
         if (!ok) return;
       } else {
@@ -168,7 +208,7 @@ export function DynamicVariableForm({
           <span className="w-20 shrink-0 text-muted-foreground">变量名</span>
           <Input
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e) => patchDraft(ownerProjectId, { name: e.target.value })}
             placeholder="sns"
             className="font-mono"
           />
@@ -179,7 +219,7 @@ export function DynamicVariableForm({
           <span className="w-20 shrink-0 text-muted-foreground">说明</span>
           <Input
             value={description}
-            onChange={(e) => setDescription(e.target.value)}
+            onChange={(e) => patchDraft(ownerProjectId, { description: e.target.value })}
             placeholder="站点清单"
           />
         </label>
@@ -190,7 +230,11 @@ export function DynamicVariableForm({
             <div className="flex items-center gap-2">
               <select
                 value={sourceKind}
-                onChange={(e) => setSourceKind(e.target.value as 'endpoint' | 'inline')}
+                onChange={(e) =>
+                  patchDraft(ownerProjectId, {
+                    sourceKind: e.target.value as 'endpoint' | 'inline',
+                  })
+                }
                 className="h-8 rounded-md border border-input bg-background px-2 text-sm"
               >
                 <option value="endpoint">引用接口</option>
@@ -213,7 +257,7 @@ export function DynamicVariableForm({
             {!usesEndpoint && (
               <textarea
                 value={sourceInlineJson}
-                onChange={(e) => setSourceInlineJson(e.target.value)}
+                onChange={(e) => patchDraft(ownerProjectId, { sourceInlineJson: e.target.value })}
                 spellCheck={false}
                 placeholder='{"method":"GET","url":"https://example.test/points","headers":[],"body":{"mode":"none","content":""},"auth":{"kind":"none"}}'
                 className="min-h-20 w-full rounded-md border border-input bg-background px-2 py-1 font-mono text-xs"
@@ -228,20 +272,20 @@ export function DynamicVariableForm({
               <span className="w-20 shrink-0 text-muted-foreground">取数环境</span>
               <select
                 value={environmentId}
-                onChange={(e) => setEnvironmentId(e.target.value)}
+                onChange={(e) => patchDraft(ownerProjectId, { environmentId: e.target.value })}
                 className="h-8 w-48 rounded-md border border-input bg-background px-2 text-sm"
               >
-                <option value="">
-                  默认（{firstEnvironment ? `${firstEnvironment.name}` : '该项目没有环境'}）
-                </option>
+                <option value="">继承当前环境</option>
                 {projectEnvironments.map((env) => (
                   <option key={env.id} value={env.id}>
-                    {env.name}
+                    指定：{env.name}
                   </option>
                 ))}
               </select>
               <span className="text-micro text-muted-foreground">
-                决定取数时用哪个环境的模块地址与变量。
+                {environmentId === ''
+                  ? '取数时用你发送请求时选中的那个环境；你切环境，它的值就跟着变。'
+                  : '固定用这个环境。'}
               </span>
             </label>
           </>
@@ -251,19 +295,33 @@ export function DynamicVariableForm({
           <span className="w-20 shrink-0 text-muted-foreground">抽取规则</span>
           <Input
             value={extractPath}
-            onChange={(e) => setExtractPath(e.target.value)}
+            onChange={(e) => patchDraft(ownerProjectId, { extractPath: e.target.value })}
             placeholder="$"
             className="font-mono"
           />
           <span className="text-micro text-muted-foreground">JSONPath；`$` 表示整段响应。</span>
         </label>
 
+        {/* 预览夹在「抽取规则」与「处理脚本」之间：它产出的两样东西就是这两个字段
+            （点节点写抽取规则，生成片段写处理脚本）。 */}
+        <ExtractPreview
+          usesEndpoint={usesEndpoint}
+          sourceEndpointId={sourceEndpointId}
+          sourceEndpointName={sourceEndpointName}
+          sourceInlineJson={sourceInlineJson}
+          environmentId={environmentId}
+          extractPath={extractPath}
+          transformScript={transformScript}
+          onPickPath={(path) => patchDraft(ownerProjectId, { extractPath: path })}
+          onUseScript={(script) => patchDraft(ownerProjectId, { transformScript: script })}
+        />
+
         <div className="flex items-start gap-2 text-xs">
           <span className="w-20 shrink-0 pt-1.5 text-muted-foreground">处理脚本</span>
           <div className="flex flex-1 flex-col gap-1">
             <textarea
               value={transformScript}
-              onChange={(e) => setTransformScript(e.target.value)}
+              onChange={(e) => patchDraft(ownerProjectId, { transformScript: e.target.value })}
               spellCheck={false}
               placeholder={'return pm.data.items.map((x) => x.code).join(",")'}
               className="min-h-20 w-full rounded-md border border-input bg-background px-2 py-1 font-mono text-xs"
@@ -281,7 +339,7 @@ export function DynamicVariableForm({
           <span className="w-20 shrink-0 text-muted-foreground">值的形态</span>
           <select
             value={valueMode}
-            onChange={(e) => setValueMode(e.target.value as ValueMode)}
+            onChange={(e) => patchDraft(ownerProjectId, { valueMode: e.target.value as ValueMode })}
             className="h-8 w-40 rounded-md border border-input bg-background px-2 text-sm"
           >
             <option value="auto">auto</option>
@@ -299,7 +357,7 @@ export function DynamicVariableForm({
             type="number"
             min={0}
             value={ttlSeconds}
-            onChange={(e) => setTtlSeconds(e.target.value)}
+            onChange={(e) => patchDraft(ownerProjectId, { ttlSeconds: e.target.value })}
             className="w-24"
           />
           <span className="text-micro text-muted-foreground">秒。</span>
@@ -309,13 +367,17 @@ export function DynamicVariableForm({
           <input
             type="checkbox"
             checked={staleFallback}
-            onChange={(e) => setStaleFallback(e.target.checked)}
+            onChange={(e) => patchDraft(ownerProjectId, { staleFallback: e.target.checked })}
           />
           <span>取数失败时允许用过期值</span>
         </label>
 
         <label className="flex items-center gap-2 text-xs">
-          <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
+          <input
+            type="checkbox"
+            checked={enabled}
+            onChange={(e) => patchDraft(ownerProjectId, { enabled: e.target.checked })}
+          />
           <span>启用（停用后不参与替换）</span>
         </label>
 
@@ -323,25 +385,13 @@ export function DynamicVariableForm({
           <Button
             size="sm"
             onClick={() => void handleSubmit()}
-            disabled={busy || name.trim() === '' || !hasSource || ownerProjectId === ''}
+            disabled={busy || name.trim() === '' || !sourceIsAcceptable || ownerProjectId === ''}
           >
             保存
           </Button>
           <Button variant="ghost" size="sm" onClick={onCancel}>
             取消
           </Button>
-          {variable && onRename && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                onRename(name);
-                onDone();
-              }}
-            >
-              只改名
-            </Button>
-          )}
         </div>
         {saveError && (
           <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">

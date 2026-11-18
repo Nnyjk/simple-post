@@ -488,11 +488,12 @@ async fn an_override_of_an_inline_definition_lands_on_the_key_the_resolve_reads(
         Some("[{\"code\":\"Z999\"}]".to_string()),
         None,
         true,
+        None,
     )
     .expect("写覆盖值");
 
     let resolution =
-        crate::dynamic::ops::resolve(&state.pool, Some("p1"), &["sns".to_string()], false)
+        crate::dynamic::ops::resolve(&state.pool, Some("p1"), &["sns".to_string()], false, None)
             .await
             .expect("解析");
     assert_eq!(
@@ -531,11 +532,12 @@ async fn an_override_lands_on_the_definitions_own_environment() {
         Some("[{\"code\":\"Z999\"}]".to_string()),
         None,
         true,
+        None,
     )
     .expect("写覆盖值");
 
     let resolution =
-        crate::dynamic::ops::resolve(&state.pool, Some("p1"), &["sns".to_string()], false)
+        crate::dynamic::ops::resolve(&state.pool, Some("p1"), &["sns".to_string()], false, None)
             .await
             .expect("解析");
     assert_eq!(
@@ -592,7 +594,7 @@ async fn a_refresh_really_fetches_the_value() {
         .expect("id")
         .to_string();
 
-    let status = crate::dynamic::ops::refresh(&state.pool, &id)
+    let status = crate::dynamic::ops::refresh(&state.pool, &id, None)
         .await
         .expect("刷新");
     assert_eq!(status.name, "sns");
@@ -718,4 +720,99 @@ async fn a_cross_project_resolve_of_an_ambiguous_name_reports_it() {
     .expect("解析");
     let text = text_of(resolved);
     assert!(!text.contains("ambiguous"), "{text}");
+}
+
+#[tokio::test]
+async fn a_definition_without_an_environment_inherits_the_callers() {
+    // 没点名环境的定义是**继承**：调用方（这里就是这个工具的参数）此刻选的是哪个环境，
+    // 就取哪一格。故同一个定义在两份调用下是两个值——缓存键里必须带着生效的环境。
+    let state = test_state(Permission::Full);
+    db::with_tx(&state.pool, |c| {
+        db::environments::create(
+            c,
+            &Environment {
+                id: "env2".into(),
+                project_id: "p1".into(),
+                name: "prod".into(),
+                created_at: 0,
+                module_base_urls: Default::default(),
+                variables: Default::default(),
+                disabled_variables: vec![],
+            },
+        )
+        .map(|_| ())
+    })
+    .expect("第二个环境");
+
+    let created = dispatch(
+        &state,
+        "dynamic_var_create",
+        json!({ "project_id": "p1", "name": "sns", "source_endpoint_id": "e1" }),
+    )
+    .await
+    .expect("创建");
+    let id = serde_json::from_str::<serde_json::Value>(&text_of(created)).unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // 不传环境 = 调用方没有环境，回落项目默认环境（env1 建得最早）。
+    let default_listed = listed_of(
+        dispatch(&state, "dynamic_var_list", json!({}))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(default_listed[0]["effectiveEnvironmentId"], "env1");
+
+    // 传 env2 = 继承 env2。
+    let inherited = listed_of(
+        dispatch(
+            &state,
+            "dynamic_var_list",
+            json!({ "environment_id": "env2" }),
+        )
+        .await
+        .unwrap(),
+    );
+    assert_eq!(inherited[0]["effectiveEnvironmentId"], "env2");
+
+    // 覆盖值落在 (定义 × env2) 那一格：从 env2 解析拿得到，从 env1 解析拿不到。
+    crate::dynamic::ops::set_override(
+        &state.pool,
+        &id,
+        Some("[{\"code\":\"Z999\"}]".to_string()),
+        None,
+        true,
+        Some("env2"),
+    )
+    .expect("写覆盖值");
+
+    let on_env2 = crate::dynamic::ops::resolve(
+        &state.pool,
+        Some("p1"),
+        &["sns".to_string()],
+        false,
+        Some("env2"),
+    )
+    .await
+    .expect("在继承来的环境上解析");
+    assert_eq!(
+        on_env2.values.get("sns").map(String::as_str),
+        Some("[{\"code\":\"Z999\"}]")
+    );
+
+    let on_env1 = crate::dynamic::ops::resolve(
+        &state.pool,
+        Some("p1"),
+        &["sns".to_string()],
+        false,
+        Some("env1"),
+    )
+    .await
+    .expect("另一个环境上解析");
+    assert_ne!(
+        on_env1.values.get("sns").map(String::as_str),
+        Some("[{\"code\":\"Z999\"}]"),
+        "换个环境就该读另一格：缓存键里必须带着生效的环境"
+    );
 }

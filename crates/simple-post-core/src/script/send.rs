@@ -276,6 +276,7 @@ impl ScriptResponse {
                     .collect(),
                 body: response.body.clone(),
                 body_base64: response.body_base64.clone(),
+                truncated: response.truncated,
                 response_time_ms: response.duration_ms as u64,
             },
             None => Self::default(),

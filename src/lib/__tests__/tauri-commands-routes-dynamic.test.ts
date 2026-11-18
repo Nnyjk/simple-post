@@ -102,7 +102,25 @@ describe('invokeCmd (web shape) — 动态变量', () => {
     assert.equal(body.force, false);
     // 不点名项目就是跨项目取值，故那一维发 null。
     assert.equal(body.projectId, null);
-    assert.equal(body.environmentId, undefined);
+    // 调用方没有环境时这段也是 null：继承取数环境的定义回落到数据源项目的默认环境。
+    assert.equal(body.environmentId, null);
+  });
+
+  it('dynamicVariablesResolve → 带上调用方选中的环境', async () => {
+    // 继承取数环境的定义按「调用方此刻选中的环境」取数，故这段必须随命令一起送上去。
+    await invokeCmd(COMMANDS.dynamicVariablesResolve, {
+      names: ['sns'],
+      projectId: 'p1',
+      environmentId: 'e2',
+    });
+    const body = JSON.parse(last().body ?? 'null');
+    assert.equal(body.environmentId, 'e2');
+  });
+
+  it('dynamicVariablesList → 取数环境进查询串', async () => {
+    // 列表带回的当前值是某个环境下的那一格，故要说清问的是哪个环境。
+    await invokeCmd(COMMANDS.dynamicVariablesList, { projectId: 'p1', environmentId: 'e2' });
+    assert.equal(last().url, '/api/dynamic-variables?environmentId=e2&projectId=p1');
   });
 
   it('dynamicVariablesResolve → POST /api/dynamic-variables/resolve with a project', async () => {
@@ -127,6 +145,17 @@ describe('invokeCmd (web shape) — 动态变量', () => {
     const body = JSON.parse(c.body ?? 'null');
     assert.equal(body.value, '[{"code":"A001"}]');
     assert.equal(body.forever, false);
+    // 覆盖值落在 (定义 × 生效环境) 那一行，故这段也要说清是哪个环境。
+    assert.equal(body.environmentId, null);
+  });
+
+  it('dynamicVariablesSetOverride 把调用方的环境一并送上去', async () => {
+    await invokeCmd(COMMANDS.dynamicVariablesSetOverride, {
+      id: 'd1',
+      value: 'x',
+      environmentId: 'e2',
+    });
+    assert.equal(JSON.parse(last().body ?? 'null').environmentId, 'e2');
   });
 
   it('dynamicVariablesSetOverride 传 null 表示清除覆盖值', async () => {
@@ -136,11 +165,56 @@ describe('invokeCmd (web shape) — 动态变量', () => {
     assert.equal(body.value, null);
   });
 
-  it('dynamicVariablesRefresh → POST /api/dynamic-variables/{id}/refresh with an empty body', async () => {
+  it('dynamicVariablesRefresh → POST /api/dynamic-variables/{id}/refresh with the caller environment', async () => {
+    // 「刷新」重取的正是当前环境下那一格，故调用方没有环境时这段发 null。
     await invokeCmd(COMMANDS.dynamicVariablesRefresh, { id: 'd1' });
     const c = last();
     assert.equal(c.method, 'POST');
     assert.equal(c.url, '/api/dynamic-variables/d1/refresh');
-    assert.deepEqual(JSON.parse(c.body ?? 'null'), {});
+    assert.deepEqual(JSON.parse(c.body ?? 'null'), { environmentId: null });
+  });
+
+  it('dynamicVariablesRefresh 带上调用方的环境', async () => {
+    await invokeCmd(COMMANDS.dynamicVariablesRefresh, { id: 'd1', environmentId: 'e2' });
+    assert.equal(JSON.parse(last().body ?? 'null').environmentId, 'e2');
+  });
+
+  it('dynamicVariablesPreview → POST /api/dynamic-variables/preview with exactly the draft fields', async () => {
+    // 预览发的是「表单里这一刻这份草稿」，不是一条已存的定义：故路径是字面量段 `/preview`，
+    // body 里带的是草稿字段 + 调用方此刻选中的环境。
+    await invokeCmd(COMMANDS.dynamicVariablesPreview, {
+      name: 'sns',
+      sourceEndpointId: 'e1',
+      extractPath: '$.points',
+      transformScript: 'return pm.data.length;',
+      environmentId: 'e2',
+      // 调用方多带的键不能跟着上车：线上契约就是下面那几个。
+      somethingElse: 'nope',
+    });
+    const c = last();
+    assert.equal(c.method, 'POST');
+    assert.equal(c.url, '/api/dynamic-variables/preview');
+    assert.deepEqual(JSON.parse(c.body ?? 'null'), {
+      name: 'sns',
+      sourceEndpointId: 'e1',
+      sourceInlineJson: null,
+      sourceEnvironmentId: null,
+      extractPath: '$.points',
+      transformScript: 'return pm.data.length;',
+      environmentId: 'e2',
+    });
+  });
+
+  it('dynamicVariablesPreview → 继承环境时 environmentId 与 sourceEnvironmentId 都是 null', async () => {
+    // 两格是两件事：草稿没点名取数环境（继承）、调用方此刻也没有环境。
+    await invokeCmd(COMMANDS.dynamicVariablesPreview, {
+      sourceInlineJson: '{"method":"GET","url":"https://example.test/x"}',
+      environmentId: '',
+    });
+    const body = JSON.parse(last().body ?? 'null');
+    assert.equal(body.environmentId, null);
+    assert.equal(body.sourceEnvironmentId, null);
+    assert.equal(body.name, null);
+    assert.equal(body.sourceEndpointId, null);
   });
 });

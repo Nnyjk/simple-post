@@ -269,3 +269,88 @@ async fn an_illegal_name_is_a_validation_error() {
     let body: serde_json::Value = created.json().await.expect("json body");
     assert_eq!(body["code"], "validation");
 }
+
+/// 回固定 JSON 的假上游。预览是真取一次数，故它需要一个真响应的来源。
+async fn upstream() -> String {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind upstream");
+    let port = listener.local_addr().expect("upstream addr").port();
+    tokio::spawn(async move {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        while let Ok((mut sock, _)) = listener.accept().await {
+            let mut buf = vec![0u8; 8 * 1024];
+            let Ok(n) = sock.read(&mut buf).await else {
+                continue;
+            };
+            let _ = n;
+            let body = r#"{"points":[{"code":"A001"},{"code":"B002"}]}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = sock.write_all(response.as_bytes()).await;
+            let _ = sock.flush().await;
+        }
+    });
+    format!("http://127.0.0.1:{port}/points")
+}
+
+#[tokio::test]
+async fn the_literal_preview_route_is_not_swallowed_by_the_id_route() {
+    let (addr, dir) = serve_test_router().await;
+    seed(&dir);
+    let points_url = upstream().await;
+
+    // `/api/dynamic-variables/preview` 必须落到字面量那条路由上。若被 `/{id}` 吃掉，
+    // POST 会撞上「改一条定义」那条（只有 PATCH/DELETE）并回 405。
+    let preview = post_json(
+        addr,
+        "/api/dynamic-variables/preview",
+        serde_json::json!({
+            "name": "sns",
+            "sourceInlineJson": format!(r#"{{"method":"GET","url":"{points_url}"}}"#),
+            "extractPath": "$.points[0].code",
+        }),
+    )
+    .await;
+    assert_eq!(preview.status(), 200);
+    let body: serde_json::Value = preview.json().await.expect("json body");
+    // 取数真发出去了：正文与元数据都在。
+    assert_eq!(body["status"], 200);
+    assert_eq!(body["contentType"], "application/json");
+    assert_eq!(body["binary"], false);
+    assert_eq!(body["truncated"], false);
+    // 抽取规则生效，最终值就是抽取结果（没有处理脚本）。
+    assert_eq!(body["extractPath"], "$.points[0].code");
+    assert_eq!(body["extracted"], "A001");
+    assert_eq!(body["value"], "A001");
+    // 抽取成功时**正文也要给**，否则树没东西可点。
+    assert_eq!(body["bodyJson"]["points"][1]["code"], "B002");
+    // 内联请求没有环境，故这一格缺席（序列化时被跳过），界面据此说「没有环境」。
+    assert!(body.get("environmentId").is_none());
+}
+
+#[tokio::test]
+async fn a_preview_that_cannot_extract_still_returns_the_body() {
+    let (addr, dir) = serve_test_router().await;
+    seed(&dir);
+    let points_url = upstream().await;
+
+    // 路径没命中：预览不整体失败——正文与树照给，错误单独记一条，用户才能照着树重新点。
+    let preview = post_json(
+        addr,
+        "/api/dynamic-variables/preview",
+        serde_json::json!({
+            "name": "sns",
+            "sourceInlineJson": format!(r#"{{"method":"GET","url":"{points_url}"}}"#),
+            "extractPath": "$.nope",
+        }),
+    )
+    .await;
+    assert_eq!(preview.status(), 200);
+    let body: serde_json::Value = preview.json().await.expect("json body");
+    assert_eq!(body["extractError"]["kind"], "no_match");
+    assert!(body.get("extracted").is_none());
+    assert_eq!(body["bodyJson"]["points"][0]["code"], "A001");
+}

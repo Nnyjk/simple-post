@@ -178,6 +178,12 @@ export const createProjectCrud: StateCreator<AppState, [], [], ProjectCrudAction
     // 已删项目的记录。
     //
     // 只在删除成功时清：失败时项目还在，那条记忆还得有用（回滚后要停在原处）。
-    if (deleted) saveRememberedEnvironmentId(id, '');
+    if (deleted) {
+      saveRememberedEnvironmentId(id, '');
+      // 动态变量的草稿同理只在删除**真的成功**后清：上面那次 `set()` 被 `invokeWithRollback`
+      // 用快照整体回滚，而快照里没有草稿——把清草稿塞进那次写入，一次失败的删除就会把用户
+      // 填了一半的表单扔掉。标签本身按项目 id 在 `pruneStaleTabs` 里退役，草稿在这里单独收。
+      get().clearDynamicVariableDraft(id);
+    }
   },
 });

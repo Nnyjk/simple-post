@@ -185,6 +185,8 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
         endpointDrafts,
         dirtyTabIds,
         draftEndpoints,
+        // 关掉的动态变量标签带走它那个项目的草稿——标签没了就没有「切回来接着填」的归处。
+        dynamicDrafts: withoutClosedDynamicDrafts(s, [tabId]),
         // 响应与流视图都挂在标签上，故关标签要把它们带走——同一套规矩的其余成员。
         lastResponses: withoutTabKeys(s.lastResponses, [tabId]),
         lastStreams: withoutTabKeys(s.lastStreams, [tabId]),
@@ -300,6 +302,8 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
         activeTabId: nextActive,
         dirtyTabIds: nextDirty,
         endpointDrafts: nextDrafts,
+        // 项目没了，它的动态变量标签在这一轮被退役，草稿跟着退役。
+        dynamicDrafts: withoutClosedDynamicDrafts(s, removedIds),
         // 被清扫掉的标签（底层实体已经没了）带走的那份响应与流视图。留下的标签继续用自己
         // 那份，故这里只删被移除的那些。
         lastResponses: withoutTabKeys(s.lastResponses, removedIds),
@@ -307,13 +311,19 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
       };
     }),
   closeAllTabs: () =>
-    set(() => ({
+    set((s) => ({
       openTabs: [],
       activeTabId: null,
       dirtyTabIds: new Set(),
       endpointDrafts: {},
       // 与上面同一条理由、上一级：关掉的 draft 标签就是一份再也存不下去的草稿，故「全关」必须把文档一起带走。
       draftEndpoints: {},
+      // 同上：在标签条上的动态变量标签全被关掉，它们的草稿不再有归处。暂存进 `projectTabs`
+      // 的那些不在 `openTabs` 里，仍算开着，草稿留着。
+      dynamicDrafts: withoutClosedDynamicDrafts(
+        s,
+        s.openTabs.map((t) => t.id),
+      ),
       // 全关 ⇒ 所有标签都没了 ⇒ 所有响应与流视图一起走。
       lastResponses: {},
       lastStreams: {},
@@ -348,6 +358,8 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
         activeTabId: nextActive,
         endpointDrafts: nextDrafts,
         draftEndpoints: nextDraftEndpoints,
+        // 被关掉的动态变量标签带走它那个项目的草稿——与上面同一条理由。
+        dynamicDrafts: withoutClosedDynamicDrafts(s, closeSet),
         // 被关掉的标签带走它的响应与流视图——与草稿、文档同一条理由。
         lastResponses: withoutTabKeys(
           s.lastResponses,
@@ -370,6 +382,8 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
       if (current === projectId) return {};
 
       const ownerOf = (t: OpenTab) => tabOwningProject(t, s);
+      // 这里**不动** `dynamicDrafts`：切项目只是把当前项目的标签暂存进 `projectTabs`，标签
+      // 本身还开着，切回来用户要继续填那张表单。只有标签真被关掉（`closeTab` 等）才清。
       // `current !== ''` 正是让设置单例在退回欢迎页时不被暂存的条件：没有项目在前时，它的 owner 会匹配到空字符串。
       const stashed = s.openTabs.filter((t) => current !== '' && ownerOf(t) === current);
       const staying = s.openTabs.filter((t) => !(current !== '' && ownerOf(t) === current));
@@ -489,6 +503,34 @@ function withoutTabKeys<T>(
     }
   }
   return changed ? next : map;
+}
+
+/**
+ * 标签被**关掉**时该一起丢掉的动态变量草稿（按项目 id 取）。
+ *
+ * 落点就是这几处：`closeTab`、`closeAllTabs`、`closeSavedTabs` 与 `pruneStaleTabs`——它们是
+ * 把动态变量标签从标签表里拿掉的**全部**路径，只有在这里删草稿才能保证「标签没了 ⇒ 草稿
+ * 也没了」，而又不会误伤还开着的标签。
+ *
+ * 两处**故意不**碰草稿：
+ *   - `switchProjectTabs` 只是把标签**暂存**（`projectTabs`），切回来它还开着，草稿必须留着；
+ *   - `deleteProject` 的那次 `set()` 在 IPC 失败时会被快照整体回滚，删草稿只能等删除真的
+ *     成功之后（见 `crud-project.ts`），否则一次失败就把用户填了半天的表单扔掉了。
+ */
+function withoutClosedDynamicDrafts(
+  state: AppState,
+  closedTabIds: Iterable<string>,
+): AppState['dynamicDrafts'] {
+  const closed = new Set(closedTabIds);
+  let next = state.dynamicDrafts;
+  for (const tab of state.openTabs) {
+    if (tab.kind !== 'dynamic-variables' || !closed.has(tab.id)) continue;
+    const projectId = dynamicTabProjectId(tab.id);
+    if (projectId === '' || !(projectId in next)) continue;
+    if (next === state.dynamicDrafts) next = { ...next };
+    delete next[projectId];
+  }
+  return next;
 }
 
 /**
