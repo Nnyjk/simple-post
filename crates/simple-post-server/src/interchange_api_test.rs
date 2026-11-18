@@ -801,6 +801,8 @@ fn endpoint_detail(node_id: &str, method: HttpMethod, url: &str) -> EndpointDeta
         pre_request_script: None,
         test_script: None,
         tls: None,
+        protocol: Default::default(),
+        graphql: None,
     }
 }
 

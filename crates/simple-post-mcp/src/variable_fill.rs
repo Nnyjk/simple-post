@@ -70,5 +70,9 @@ mod resolve_tests;
 mod resolve_parity_tests;
 
 #[cfg(test)]
+#[path = "variable_fill/graphql_parity_test.rs"]
+mod graphql_parity_tests;
+
+#[cfg(test)]
 #[path = "variable_fill/auth_test.rs"]
 mod auth_tests;

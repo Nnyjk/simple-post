@@ -7,7 +7,8 @@ use serde_json::json;
 
 use super::history::tool_endpoint_history;
 use super::input::{
-    oauth2_config_schema, responses_patch_schema, responses_schema, tls_settings_patch_schema,
+    graphql_patch_schema, graphql_schema, oauth2_config_schema, protocol_patch_schema,
+    protocol_schema, responses_patch_schema, responses_schema, tls_settings_patch_schema,
     tls_settings_schema, AUTH_TYPE_VALUES, BODY_MODE_VALUES,
 };
 use super::read::{tool_endpoint_get, tool_endpoint_list, tool_endpoint_search};
@@ -194,6 +195,8 @@ to send when testing goes in body_content, never here."
                     "type": "string",
                     "description": "JavaScript run after the response arrives. It asserts (pm.test) and may write environment variables (pm.environment.set)."
                 },
+                "protocol": protocol_schema(),
+                "graphql": graphql_schema(),
                 "tls": tls_settings_schema(),
                 "responses": responses_schema()
             },
@@ -217,7 +220,7 @@ to send when testing goes in body_content, never here."
                 "endpoint_id": { "type": "string" },
                 "patch": {
                     "type": "object",
-                    "description": "Fields to change. Omit a field to leave it as-is. `null` clears the field: `description`, `base_url_override`, `path_params`, `docs`, `notes`, `pre_request_script`, `test_script`, `tls` and `responses` accept it. The other fields (`name`, `sort_order`, `method`, `url`, `params`, `headers`, `body`, `auth`, `tags`) reject null — send an empty value to clear them.",
+                    "description": "Fields to change. Omit a field to leave it as-is. `null` clears the field: `description`, `base_url_override`, `path_params`, `docs`, `notes`, `pre_request_script`, `test_script`, `tls`, `protocol`, `graphql` and `responses` accept it. The other fields (`name`, `sort_order`, `method`, `url`, `params`, `headers`, `body`, `auth`, `tags`) reject null — send an empty value to clear them.",
                     "properties": {
                         "name": { "type": "string" },
                         "description": { "type": ["string", "null"] },
@@ -300,6 +303,8 @@ segments in `url`. They are substituted into the path itself, not appended to th
                             "type": ["string", "null"],
                             "description": "JavaScript run after the response arrives. It asserts (pm.test) and may write environment variables (pm.environment.set). null clears it."
                         },
+                        "protocol": protocol_patch_schema(),
+                        "graphql": graphql_patch_schema(),
                         "tls": tls_settings_patch_schema(),
                         "responses": responses_patch_schema()
                     },

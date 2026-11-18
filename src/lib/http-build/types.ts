@@ -1,9 +1,11 @@
 import type {
   AuthConfig,
   Environment,
+  GraphQlRequest,
   HttpMethod,
   KeyValue,
   RequestBody,
+  RequestProtocol,
   RewriteRule,
 } from '@/types/domain';
 
@@ -53,6 +55,19 @@ export interface BuiltFetch {
  */
 export interface PrepareRequestInput {
   method: HttpMethod;
+  /**
+   * 端点的请求协议。缺席按 `http` 处理。
+   *
+   * `graphql` 让组装器强制 `POST` 并用 {@link PrepareRequestInput.graphql} 造 body；`sse` 与
+   * `http` 在这里同规则（差别只在传输层怎么读响应）；`websocket` 不走 `prepareRequest`
+   * 组装请求，面板只借它做 URL / header 的变量替换。
+   */
+  protocol?: RequestProtocol;
+  /**
+   * 协议为 `graphql` 时的查询与 variables。`null`/缺省表示还没填，组装失败由
+   * `validateRequest` 拦下。
+   */
+  graphql?: GraphQlRequest | null;
   /**
    * URL 的 path 部分，不含任何 base URL，可带 `{{var}}`。自带 scheme（`https://…`）的 path 优先于
    * `baseUrl`——endpoint 的「自定义」模式靠这点成立：用户手输整个地址，选择器里仍是自定义那一档。

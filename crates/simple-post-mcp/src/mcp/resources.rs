@@ -159,6 +159,12 @@ fn guide() -> Value {
             "tags": ["<标签>"],
             "pre_request_script": "<发请求之前跑的 JavaScript>",
             "test_script": "<响应到达之后跑的 JavaScript>",
+            "protocol": "http | graphql | sse | websocket",
+            "graphql": {
+                "query": "<GraphQL 文档>",
+                "variables": "<JSON 对象文本；键在发送前递归排序，空白表示不带变量>",
+                "operationName": "<操作名；空白表示不带这个键>"
+            },
             "tls": {
                 "skipVerify": false,
                 "caCertificatePath": "<自定义 CA 证书的 PEM 文件路径>",
@@ -197,7 +203,8 @@ fn guide() -> Value {
             "endpoint_update changes only the fields its patch names. Use it to change an existing endpoint; endpoint_create with if_exists=reuse never writes anything.",
             "spec_upsert merges the variables it names into the environment and leaves the other variables alone. It never creates a project and never changes a project's permission tier.",
             "An auth scheme without its credential is rejected: kind=bearer needs a bearer token, kind=basic needs a username, kind=apikey needs a key name.",
-            "The OAuth2 config accepts grantType (authorization_code | client_credentials | password | implicit), tokenUrl, clientId, clientSecret, clientAuth (basic | body), scope, authorizationUrl, redirectUri, codeVerifier, authCode, username, password, extraParams, tokenLocation (header | query) and tokenParam. The token is fetched on demand and refreshed when it expires; authorization_code needs authCode pasted after the user authorises in a browser, and implicit has no token endpoint at all."
+            "The OAuth2 config accepts grantType (authorization_code | client_credentials | password | implicit), tokenUrl, clientId, clientSecret, clientAuth (basic | body), scope, authorizationUrl, redirectUri, codeVerifier, authCode, username, password, extraParams, tokenLocation (header | query) and tokenParam. The token is fetched on demand and refreshed when it expires; authorization_code needs authCode pasted after the user authorises in a browser, and implicit has no token endpoint at all.",
+            "protocol is http by default. graphql turns the request into a POST of {\"query\", \"variables\", \"operationName\"} with Content-Type: application/json; query is required and may contain {{var}}, variables is JSON object text (blank omits it, a non-object is rejected), operationName blank omits it, and object keys are sorted recursively before sending so the app and MCP emit the same bytes. sse and websocket are opened in the app as long-lived sessions; api_call_endpoint, api_run_request and api_run_collection refuse them, and an OpenAPI or Postman export skips them with a diagnostic."
         ]
     })
 }

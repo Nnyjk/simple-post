@@ -14,6 +14,7 @@ use super::args::CallEndpointArgs;
 use super::dynamic::resolve_dynamic_values;
 use super::input::{extract_endpoint_settings, format_method, resolve_tls_override};
 use super::send::{resolve_settings, send_resolved};
+use super::unsupported_protocol;
 use super::EMPTY_PROJECT;
 
 pub(super) async fn tool_api_call_endpoint(
@@ -27,6 +28,13 @@ pub(super) async fn tool_api_call_endpoint(
     let endpoint: EndpointDetail = simple_post_core::db::with_conn(&state.pool, |c| {
         simple_post_core::db::endpoint_details::get(c, &endpoint_id)
     })?;
+    // SSE / WebSocket 是长连接会话，MCP 的调用没有「连接活着」这个概念，也无处收帧。
+    // GraphQL 只是 HTTP 之上的组装规则，照常发。
+    if let Some(protocol) = unsupported_protocol(&endpoint) {
+        return Err(AppError::Validation(format!(
+            "SSE / WebSocket 端点需要在应用内打开连接，MCP 只能发送 HTTP 与 GraphQL（该端点协议是 {protocol}）"
+        )));
+    }
     let project_id = simple_post_core::db::with_conn(&state.pool, |c| {
         simple_post_core::db::nodes::root_id_of(c, &endpoint.node_id)
     })?;

@@ -22,7 +22,7 @@ import type {
   ResourceNode,
   StoredRequestSnapshot,
 } from '@/types/domain';
-import type { BatchItem, BatchOutcome } from './types';
+import type { BatchFailureKind, BatchItem, BatchOutcome } from './types';
 
 /** 发一条端点需要的全部外部依赖。 */
 export interface BatchSendContext {
@@ -84,6 +84,19 @@ export async function sendBatchItem(
     return failed(item, 'blocked', '这条接口没有请求配置');
   }
 
+  // 流式协议不在批量运行范围内：SSE 会把连接挂到超时才收下一条空响应，WebSocket 的
+  // `ws://` URL 根本走不了 HTTP 发送。跳过并给出原因，报告里计入「未执行」。
+  const protocol = detail.protocol ?? 'http';
+  if (protocol === 'sse' || protocol === 'websocket') {
+    return failed(
+      item,
+      'skipped',
+      protocol === 'sse'
+        ? 'SSE 端点需要在应用内打开连接，不在批量运行范围内'
+        : 'WebSocket 端点不在批量运行范围内',
+    );
+  }
+
   // 环境：工作区**当前环境**。端点不再自绑环境，故这一批与单次发送读的是同一个环境
   // —— `useEndpointContext` 读的是 `useActiveEnvironment()`，那是同一个 store 状态。
   // 当前环境为空（还没有环境）时就没有环境：没有 base URL、变量也不替换，与单次发送
@@ -104,10 +117,17 @@ export async function sendBatchItem(
   });
 
   // body 解析不了就不发：照发只会换一个服务端解析错误，而这个错误本可以指出用户
-  // 敲错的那个字符。与单次发送同一道门。
-  const issue = validateRequest({ body: parts.effective.body });
+  // 敲错的那个字符。与单次发送同一道门，入参也与单次发送同一份 —— GraphQL 端点要按
+  // query / variables 校验，漏了协议这两段就会把一个没有 payload 的 POST 静默发出去。
+  const issue = validateRequest({
+    body: parts.effective.body,
+    protocol: parts.effective.protocol,
+    graphql: parts.effective.graphql,
+  });
   if (issue) {
-    return failed(item, 'blocked', `请求体不是合法的 JSON：${issue.message}`);
+    // 文案与单次发送钉住的同一条：JSON 解析器原话，或 GraphQL 那句「查询为空 / variables
+    // 必须是 JSON 对象」。
+    return failed(item, 'blocked', issue.message);
   }
 
   // 动态变量的值必须在**替换之前**到手：替换一旦发生，变量池里就没有同名变量的
@@ -161,11 +181,7 @@ export async function sendBatchItem(
 }
 
 /** 一条失败的结论。 */
-function failed(
-  item: BatchItem,
-  failure: 'http' | 'transport' | 'blocked' | 'aborted',
-  error: string,
-): BatchOutcome {
+function failed(item: BatchItem, failure: BatchFailureKind, error: string): BatchOutcome {
   return {
     endpointId: item.endpointId,
     name: item.name,

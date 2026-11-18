@@ -82,6 +82,8 @@ pub(super) fn minimal_endpoint() -> EndpointDetail {
         test_script: None,
         tls: None,
         responses: vec![],
+        protocol: Default::default(),
+        graphql: None,
     }
 }
 

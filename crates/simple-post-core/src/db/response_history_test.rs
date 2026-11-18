@@ -55,6 +55,8 @@ fn detail(node_id: &str) -> EndpointDetail {
         test_script: None,
         tls: None,
         responses: vec![],
+        protocol: Default::default(),
+        graphql: None,
     }
 }
 

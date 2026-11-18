@@ -120,6 +120,8 @@ fn seed(st: &AppState, dev_url: &str, staging_url: &str) {
         test_script: None,
         tls: None,
         responses: vec![],
+        protocol: Default::default(),
+        graphql: None,
     };
     // `created_at` 决定谁是默认环境：dev 建得早，故它是默认环境。
     let env = |id: &str, name: &str, url: &str, created_at: i64| Environment {

@@ -334,6 +334,57 @@ fn is_token_byte(byte: u8) -> bool {
         )
 }
 
+/// 一个端点用哪种传输发出去。`http` 是默认值，其余三种是 issue #12 的协议扩展。
+///
+/// 线上值全小写：`http`、`graphql`、`sse`、`websocket`。存储层把这一列存成文本，
+/// 读回时按文本解析，未知值报错而不是退回默认值。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RequestProtocol {
+    #[default]
+    Http,
+    GraphQl,
+    Sse,
+    WebSocket,
+}
+
+impl RequestProtocol {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            RequestProtocol::Http => "http",
+            RequestProtocol::GraphQl => "graphql",
+            RequestProtocol::Sse => "sse",
+            RequestProtocol::WebSocket => "websocket",
+        }
+    }
+
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw {
+            "http" => Some(RequestProtocol::Http),
+            "graphql" => Some(RequestProtocol::GraphQl),
+            "sse" => Some(RequestProtocol::Sse),
+            "websocket" => Some(RequestProtocol::WebSocket),
+            _ => None,
+        }
+    }
+}
+
+/// GraphQL 端点的请求定义。`protocol == graphql` 时 `resolve_endpoint` 用它组装请求体；
+/// 协议是别的值时这一份不参与组装。
+///
+/// `variables` 存原始文本而不是 `Value`：界面里是一个可编辑的文本框，用户在写的过程中
+/// 它不是合法 JSON，存成 `Value` 会在输入途中就失败。合法性在发送与校验时才判定。
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphQlRequest {
+    #[serde(default)]
+    pub query: String,
+    #[serde(default)]
+    pub variables: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation_name: Option<String>,
+}
+
 /// endpoint 的请求配置与响应定义。按 `node_id` 与 [`ResourceNode`] 关联；树的列不出现在这里，
 /// 好让它们各自只有一个归属。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -387,6 +438,13 @@ pub struct EndpointDetail {
     /// 合成规则见 [`crate::tls::resolve`]。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tls: Option<TlsSettings>,
+    /// 这个端点的传输协议。缺省的 `http` 是绝大多数端点的值，也是老库补列后的读回值。
+    #[serde(default)]
+    pub protocol: RequestProtocol,
+    /// GraphQL 的 query / variables。`None` = 没有写过；`protocol == graphql` 时
+    /// `resolve_endpoint` 按空 query 组装 —— 空 query 由 `api_validate_endpoint` 报出。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub graphql: Option<GraphQlRequest>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -441,6 +499,16 @@ pub struct EndpointDetailPatch {
     #[serde(default, deserialize_with = "super::double_option")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tls: Option<Option<TlsSettings>>,
+    /// 缺席 = 不动，设值 = 换一种传输。没有 `null` 形态：协议总有一个值，缺省是 `http`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol: Option<RequestProtocol>,
+    /// 缺席 = 不动，`null` = 清空，设值 = 整体替换。
+    ///
+    /// 走 `double_option`：`Option<GraphQlRequest>` 会把「键缺席」与「值是 `null`」
+    /// 折叠成同一件事，于是 `{"graphql": null}` 清不掉已存的 query。
+    #[serde(default, deserialize_with = "super::double_option")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub graphql: Option<Option<GraphQlRequest>>,
     /// 这份配置属于哪个节点。客户端 GET 一份配置再 PATCH 回去时会把它一起带回来，故
     /// 补丁类型认得它——但它只被**接受**，不被写入：节点的 id 由路径决定。
     #[serde(default, skip_serializing)]

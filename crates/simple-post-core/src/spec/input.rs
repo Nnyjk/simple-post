@@ -11,7 +11,10 @@
 
 use serde_json::Value;
 
-use crate::domain::{AuthConfig, AuthType, BodyMode, KeyValue, RequestBody, ResponseDefinition};
+use crate::domain::{
+    AuthConfig, AuthType, BodyMode, GraphQlRequest, KeyValue, RequestBody, RequestProtocol,
+    ResponseDefinition,
+};
 use crate::error::AppError;
 
 /// 线上接受的 `body_mode` 取值，与 [`BodyMode`] 的变体一一对应；JSON Schema 与解析器
@@ -21,6 +24,59 @@ pub const BODY_MODE_VALUES: &[&str] =
 
 /// 线上接受的 `auth_type` 取值，对应 [`AuthType`] 的小写变体名。
 pub const AUTH_TYPE_VALUES: &[&str] = &["none", "bearer", "basic", "apikey", "oauth2"];
+
+/// 线上接受的 `protocol` 取值，与 [`RequestProtocol`] 的变体一一对应。
+pub const PROTOCOL_VALUES: &[&str] = &["http", "graphql", "sse", "websocket"];
+
+/// 解析 `protocol`。缺省是 `http`；未知取值报错并列出全部合法取值。
+pub fn parse_protocol(raw: Option<&str>) -> Result<RequestProtocol, AppError> {
+    let raw = raw.unwrap_or("").trim();
+    if raw.is_empty() {
+        return Ok(RequestProtocol::Http);
+    }
+    RequestProtocol::parse(&raw.to_ascii_lowercase()).ok_or_else(|| {
+        AppError::Validation(format!(
+            "unknown protocol {raw:?}; expected one of: {}",
+            PROTOCOL_VALUES.join(", ")
+        ))
+    })
+}
+
+/// agent 手写的 GraphQL 请求定义。字段与 [`GraphQlRequest`] 同名，`query` 必填由
+/// [`coerce_graphql`] 判定而不是这里 —— 缺省的空串与「没写」在这里长得一样。
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphQlRequestInput {
+    #[serde(default)]
+    pub query: String,
+    #[serde(default)]
+    pub variables: String,
+    #[serde(default)]
+    pub operation_name: Option<String>,
+}
+
+/// 把 agent 写的 GraphQL 配置转成域类型。
+///
+/// `query` 全空白就拒绝：一个没有 query 的 GraphQL 请求发出去只会换回一个 GraphQL 层的
+/// 错误，而这里能更早说清是哪一项没填。`variables` 不在这一层判 JSON：它可能是
+/// `{"id": {{id}}}` 这样的模板，写库时尚未替换，合法性要等组装时才知道。
+pub fn coerce_graphql(
+    input: Option<GraphQlRequestInput>,
+) -> Result<Option<GraphQlRequest>, AppError> {
+    let Some(input) = input else {
+        return Ok(None);
+    };
+    if input.query.trim().is_empty() {
+        return Err(AppError::Validation(
+            "graphql.query 不能为空；GraphQL 端点至少要有一个 query 或 mutation".into(),
+        ));
+    }
+    Ok(Some(GraphQlRequest {
+        query: input.query,
+        variables: input.variables,
+        operation_name: input.operation_name,
+    }))
+}
 
 /// 解析 `body_mode`。未知取值报错并列出全部合法取值。
 pub fn parse_body_mode(s: &str) -> Result<BodyMode, AppError> {

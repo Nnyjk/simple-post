@@ -279,6 +279,14 @@ async fn run_one(
     })
     .map_err(RunError::Prepare)?;
 
+    // 会话式传输没法在集合里「跑一下」：连接要一直开着才收得到东西。这一条记为 blocked，
+    // 不拖累同集合里的 HTTP/GraphQL 端点。
+    if let Some(protocol) = super::unsupported_protocol(&detail) {
+        return Err(RunError::Prepare(AppError::Validation(format!(
+            "SSE / WebSocket 端点需要在应用内打开连接，MCP 只能发送 HTTP 与 GraphQL（该端点协议是 {protocol}）"
+        ))));
+    }
+
     // 端点属于哪个模块只在树里，detail 行上没有，故要查一次：不查就读不到「环境 × 模块」
     // 那一格地址，请求没有地址。数据库出错则这一条失败，不静默当成「没有模块」。
     let module_id = simple_post_core::db::with_conn(&state.pool, |c| {

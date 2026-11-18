@@ -141,6 +141,71 @@ pub(in crate::mcp::project_ops) fn tls_settings_patch_schema() -> serde_json::Va
 }
 
 // =========================================================================
+// 传输协议的 JSON Schema
+// =========================================================================
+
+/// `protocol` 的线上取值。四个值一一对应 `RequestProtocol`。
+pub(in crate::mcp::project_ops) const PROTOCOL_VALUES: [&str; 4] =
+    ["http", "graphql", "sse", "websocket"];
+
+/// 端点的传输协议，`endpoint_create` / `endpoint_update` / `spec_upsert` 共用。
+pub(in crate::mcp::project_ops) fn protocol_schema() -> serde_json::Value {
+    json!({
+        "type": "string",
+        "enum": PROTOCOL_VALUES,
+        "description": "Transport protocol. http (default) and graphql are sent by MCP; sse and websocket are long-lived sessions opened in the app."
+    })
+}
+
+/// `endpoint_update` 的 `patch.protocol`：`null` 回到默认的 `http`。
+pub(in crate::mcp::project_ops) fn protocol_patch_schema() -> serde_json::Value {
+    json!({
+        "type": ["string", "null"],
+        "enum": ["http", "graphql", "sse", "websocket", null],
+        "description": "Transport protocol. null returns to the default http. sse and websocket endpoints cannot be called by MCP."
+    })
+}
+
+/// GraphQL 载荷的 JSON Schema。协议是 graphql 时请求固定为 POST JSON。
+pub(in crate::mcp::project_ops) fn graphql_schema() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "description": "GraphQL payload used when protocol is graphql. The request becomes a POST with Content-Type: application/json.",
+        "properties": graphql_properties(),
+        "required": ["query"],
+        "additionalProperties": false
+    })
+}
+
+/// `endpoint_update` 的 `patch.graphql`：`null` 清空这份配置。
+pub(in crate::mcp::project_ops) fn graphql_patch_schema() -> serde_json::Value {
+    json!({
+        "type": ["object", "null"],
+        "description": "GraphQL payload used when protocol is graphql. null clears it.",
+        "properties": graphql_properties(),
+        "required": ["query"],
+        "additionalProperties": false
+    })
+}
+
+fn graphql_properties() -> serde_json::Value {
+    json!({
+        "query": {
+            "type": "string",
+            "description": "GraphQL document. Blank is rejected; variables written as {{var}} are substituted first."
+        },
+        "variables": {
+            "type": "string",
+            "description": "JSON object text, substituted then parsed. Blank omits the key. Object keys are sorted recursively before sending so both assemblers emit the same bytes."
+        },
+        "operationName": {
+            "type": "string",
+            "description": "Operation to run. Blank omits the key."
+        }
+    })
+}
+
+// =========================================================================
 // 响应定义的 JSON Schema
 // =========================================================================
 

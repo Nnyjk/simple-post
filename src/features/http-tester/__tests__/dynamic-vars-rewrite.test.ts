@@ -17,6 +17,8 @@ import { buildDynamicNames } from '../model/dynamicVars';
 import type { EffectiveRequest } from '../model/effectiveRequest';
 
 const effective: EffectiveRequest = {
+  protocol: 'http',
+  graphql: null,
   params: [],
   pathParams: [],
   headers: [],

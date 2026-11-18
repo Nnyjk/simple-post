@@ -495,24 +495,14 @@ pub fn check_url(url: &str, policy: OutboundPolicy) -> UrlVerdict {
 
 // 公开入口——真正的那次 HTTP 调用。
 
-/// 经 `reqwest` 发出真实 HTTP 请求，绕开浏览器 CORS。纯异步 I/O；无共享状态。
-/// 前端调 `lib.rs` 里的 `http_request` Tauri command，由它转发到这里。MCP 守护进程
-/// （`crate::mcp`）经它自己的 `execute_http` 转发层路由请求。
-pub async fn execute(input: &HttpRequestInput) -> HttpResult {
-    execute_with_policy(input, OutboundPolicy::from_env()).await
-}
-
-/// 带显式策略的 [`execute`]。测试直接用它；由环境驱动的 [`execute`] 是生产入口。
-pub async fn execute_with_policy(input: &HttpRequestInput, policy: OutboundPolicy) -> HttpResult {
-    let start = Instant::now();
-
-    // check_url 在建客户端或碰网络之前就拒绝。
-    if let UrlVerdict::Refused(reason) = check_url(&input.url, policy) {
-        return HttpResult::err("network", reason);
-    }
-
-    // 每次调用一个 Client，好让 API 保持请求作用域。
-    //
+/// 建出这一次请求的客户端构造器：重定向策略（逐跳重跑 `check_url`）与 HTTPS 设置。
+///
+/// 不设总超时：`execute` 自己加 `.timeout(...)`（整次请求的预算），SSE 流式路径不要总超时
+/// ——它的 `timeout_ms` 作用于建连与块间空闲（见 `crate::stream`）。
+pub(crate) fn base_client_builder(
+    input: &HttpRequestInput,
+    policy: OutboundPolicy,
+) -> Result<reqwest::ClientBuilder, String> {
     // 重定向策略在**每一跳**上都重跑 `check_url`。只查初始 URL 会让整道守卫变成摆设：
     // 开着 `follow_redirects`（默认）时，一个回答 `302 Location: http://169.254.169.254/…`
     // 的攻击者可控 URL 一跳就能摸到元数据服务，而 `Policy::limited(10)` 会愉快地跟着跳。
@@ -539,20 +529,38 @@ pub async fn execute_with_policy(input: &HttpRequestInput, policy: OutboundPolic
         reqwest::redirect::Policy::none()
     };
 
-    // 客户端构造分两步：先施加 HTTPS 设置（证书、跳过校验），再真正建出客户端。
-    // 两步都可能失败，错误都归到 `network` 这一档——前端只按 `timeout` 与 `network` 分派，
-    // 证书读不到与连不上都是「请求没发出去」。
-    let client = match crate::tls::apply_to_builder(
-        reqwest::Client::builder()
+    // 先施加 HTTPS 设置（证书、跳过校验），再交给调用方加超时并 build。
+    crate::tls::apply_to_builder(reqwest::Client::builder().redirect(redirect), &input.tls)
+        .map_err(|e| e.to_string())
+}
+
+/// 经 `reqwest` 发出真实 HTTP 请求，绕开浏览器 CORS。纯异步 I/O；无共享状态。
+/// 前端调 `lib.rs` 里的 `http_request` Tauri command，由它转发到这里。MCP 守护进程
+/// （`crate::mcp`）经它自己的 `execute_http` 转发层路由请求。
+pub async fn execute(input: &HttpRequestInput) -> HttpResult {
+    execute_with_policy(input, OutboundPolicy::from_env()).await
+}
+
+/// 带显式策略的 [`execute`]。测试直接用它；由环境驱动的 [`execute`] 是生产入口。
+pub async fn execute_with_policy(input: &HttpRequestInput, policy: OutboundPolicy) -> HttpResult {
+    let start = Instant::now();
+
+    // check_url 在建客户端或碰网络之前就拒绝。
+    if let UrlVerdict::Refused(reason) = check_url(&input.url, policy) {
+        return HttpResult::err("network", reason);
+    }
+
+    // 每次调用一个 Client，好让 API 保持请求作用域。重定向与 HTTPS 设置的构造抽在
+    // `base_client_builder` 里，SSE 流式路径用的是同一份，故两条路不会分叉。
+    let client = match base_client_builder(input, policy) {
+        Ok(builder) => match builder
             .timeout(Duration::from_millis(input.timeout_ms))
-            .redirect(redirect),
-        &input.tls,
-    ) {
-        Ok(builder) => match builder.build() {
+            .build()
+        {
             Ok(c) => c,
             Err(e) => return HttpResult::err("network", format!("client build: {e}")),
         },
-        Err(e) => return HttpResult::err("network", e.to_string()),
+        Err(e) => return HttpResult::err("network", e),
     };
 
     let mut req = client.request(parse_method(&input.method), &input.url);

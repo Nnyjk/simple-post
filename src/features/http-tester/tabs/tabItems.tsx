@@ -3,10 +3,20 @@ import type { TabItem } from '@/components/ui/tabs';
 
 /**
  * 请求测试器的页签 id。`path` 是路径参数，`script` 是请求脚本（前置 / 测试两段），
- * `response` 是文档用的响应定义，与发送请求无关。
+ * `response` 是文档用的响应定义，与发送请求无关；`graphql` 与 `body` 占同一个位置 ——
+ * 协议是 GraphQL 时页签条上出现的是它，body 的内容仍留在草稿里。
  */
 export type TesterTabId =
-  'params' | 'path' | 'headers' | 'body' | 'auth' | 'docs' | 'response' | 'script' | 'tls';
+  | 'params'
+  | 'path'
+  | 'headers'
+  | 'body'
+  | 'graphql'
+  | 'auth'
+  | 'docs'
+  | 'response'
+  | 'script'
+  | 'tls';
 
 const TABS: { id: TesterTabId; label: string; disabled?: boolean }[] = [
   { id: 'params', label: 'Params' },
@@ -32,11 +42,23 @@ export interface TabBadgeState {
   script: boolean;
   /** 端点是否带着自己那份 HTTPS 出站设置。 */
   tls: boolean;
+  /** GraphQL 查询非空 —— GraphQL 页签的圆点。 */
+  graphql: boolean;
 }
 
 /** 计数徽标报「有多少项」，圆点徽标报「这一页有东西」。 */
-export function buildTabItems(state: TabBadgeState): TabItem[] {
+export function buildTabItems(state: TabBadgeState, graphqlMode = false): TabItem[] {
   return TABS.map((t) => {
+    // GraphQL 与 Body 互斥地占同一个位置：查询编辑器和 body 编辑器都是「请求体」这一栏。
+    if (t.id === 'body' && graphqlMode) {
+      return {
+        id: 'graphql',
+        label: 'GraphQL',
+        badge: state.graphql ? (
+          <span className="rounded bg-primary/20 px-1 text-nano text-primary">●</span>
+        ) : null,
+      };
+    }
     let badge: ReactNode = null;
     if (t.id === 'params' && state.params) {
       badge = <span className="rounded bg-muted px-1 text-nano">{state.params}</span>;

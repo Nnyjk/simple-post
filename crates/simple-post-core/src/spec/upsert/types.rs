@@ -117,6 +117,12 @@ pub struct EndpointDefinition {
     /// 测试脚本。
     #[serde(default, alias = "testScript")]
     pub test_script: Option<String>,
+    /// 传输协议：`http` / `graphql` / `sse` / `websocket`，缺省 `http`。
+    #[serde(default)]
+    pub protocol: Option<String>,
+    /// GraphQL 的 query / variables / operationName。协议是 `graphql` 时用来拼请求体。
+    #[serde(default)]
+    pub graphql: Option<crate::spec::input::GraphQlRequestInput>,
 }
 
 // =========================================================================

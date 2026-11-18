@@ -33,7 +33,9 @@ pub(super) use write::tool_endpoint_create;
 // `missing_pieces` 另有一处调用方：`crate::spec::ops` —— REST 路由
 // 落同一份规格时也要算「还缺什么」，而那条判据住在 mcp crate 里（它要用
 // `variable_fill::resolve_base_url`），故它得能走出 `project_ops`。
-pub(in crate::mcp::project_ops) use input::oauth2_config_schema;
+pub(in crate::mcp::project_ops) use input::{
+    graphql_schema, oauth2_config_schema, protocol_schema,
+};
 // `spec_upsert` 的 endpoint 段也要描述响应定义，故这份 schema 同样从门面出去一次：
 // 两个工具给 agent 看的形状必须是同一份，各写一遍就会漂移。
 pub(in crate::mcp::project_ops) use input::responses_schema;

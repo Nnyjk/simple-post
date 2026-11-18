@@ -10,8 +10,8 @@ use serde_json::Value;
 use super::resolve_endpoint;
 use super::types::EndpointOverrides;
 use simple_post_core::domain::{
-    AuthConfig, BodyMode, EndpointDetail, Environment, KeyValue, ModuleBaseUrl, RequestBody,
-    RewriteRule,
+    AuthConfig, BodyMode, EndpointDetail, Environment, GraphQlRequest, KeyValue, ModuleBaseUrl,
+    RequestBody, RequestProtocol, RewriteRule,
 };
 
 /// 共享样本。放在仓库根的 `fixtures/` 下，TS 侧读同一份文件。
@@ -54,6 +54,11 @@ struct Input {
     headers: Vec<KeyValue>,
     body: RequestBody,
     auth: AuthConfig,
+    /// 缺省是 `http`：绝大多数用例不发协议，只有 GraphQL 的几条点名它。
+    #[serde(default)]
+    protocol: RequestProtocol,
+    #[serde(default)]
+    graphql: Option<GraphQlRequest>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -102,6 +107,8 @@ fn detail(input: &Input) -> EndpointDetail {
         test_script: None,
         tls: None,
         responses: vec![],
+        protocol: input.protocol,
+        graphql: input.graphql.clone(),
     }
 }
 
@@ -137,7 +144,7 @@ fn every_parity_case_resolves_the_same_way() {
     // 下面那几行 `assert_eq!` 一条都走不到，测试还是绿的。
     assert_eq!(
         fixture.cases.len(),
-        15,
+        19,
         "样本里的 case 条数变了。改样本就要改这个数字，并确认渲染进程那一侧的读取器一起改"
     );
 
@@ -164,6 +171,10 @@ fn every_parity_case_resolves_the_same_way() {
             case.name
         );
         assert_eq!(resolved.body, case.expected.body, "{}: body", case.name);
+        if case.input.protocol == RequestProtocol::GraphQl {
+            // GraphQL 是 HTTP 之上的语义层：样本里即便写 GET，发出去也必须是 POST。
+            assert_eq!(resolved.method, "POST", "{}: method", case.name);
+        }
 
         let mut got = resolved.missing_vars.clone();
         let mut want = case.expected.missing_vars.clone();
@@ -189,10 +200,13 @@ fn the_fixture_matches_the_content_type_rules() {
             .headers
             .iter()
             .any(|(k, _)| k.eq_ignore_ascii_case("content-type"));
-        let expect_content_type = matches!(
-            case.input.body.mode,
-            BodyMode::Json | BodyMode::Form | BodyMode::Raw
-        );
+        // GraphQL 请求体由 query/variables 组装，与它存的 body.mode 无关，故协议本身
+        // 就决定要有 Content-Type。
+        let expect_content_type = case.input.protocol == RequestProtocol::GraphQl
+            || matches!(
+                case.input.body.mode,
+                BodyMode::Json | BodyMode::Form | BodyMode::Raw
+            );
         assert_eq!(
             has_content_type, expect_content_type,
             "{}: body 模式与 Content-Type 对不上",
@@ -212,4 +226,67 @@ fn the_fixture_uses_the_real_wire_shapes() {
     );
     assert_eq!(first["input"]["method"], "POST");
     assert!(first["input"]["body"].get("mode").is_some());
+}
+
+// -------------------------------------------------------------------------
+// GraphQL 的错误路径
+// -------------------------------------------------------------------------
+
+/// 一份最小的 GraphQL 端点，只改 query / variables 两项。
+fn graphql_detail(query: &str, variables: &str) -> EndpointDetail {
+    let mut d = detail(&Input {
+        method: "POST".into(),
+        url_path: "/graphql".into(),
+        base_url: "https://h.test".into(),
+        rewrite: None,
+        params: vec![],
+        path_params: vec![],
+        headers: vec![],
+        body: RequestBody::default(),
+        auth: AuthConfig::default(),
+        protocol: RequestProtocol::GraphQl,
+        graphql: Some(GraphQlRequest {
+            query: query.into(),
+            variables: variables.into(),
+            operation_name: None,
+        }),
+    });
+    d.protocol = RequestProtocol::GraphQl;
+    d
+}
+
+#[test]
+fn graphql_variables_that_are_not_a_json_object_are_a_validation_error() {
+    for raw in ["{oops", "[]", "\"x\"", "42"] {
+        let detail = graphql_detail("{ ping }", raw);
+        let err = resolve_endpoint(&detail, None, None).expect_err(raw);
+        assert!(
+            matches!(err, simple_post_core::error::AppError::Validation(_)),
+            "{raw}: 应当是 Validation，got {err:?}"
+        );
+        let message = err.to_string();
+        assert!(message.contains("variables"), "{raw}: {message}");
+    }
+}
+
+#[test]
+fn graphql_variables_are_template_substituted_before_parsing() {
+    let detail = graphql_detail("{ ping }", r#"{"id":"{{userId}}"}"#);
+    let env = Environment {
+        id: "env1".into(),
+        project_id: "p1".into(),
+        name: "dev".into(),
+        module_base_urls: Default::default(),
+        variables: [("userId".to_string(), "n-1".to_string())]
+            .into_iter()
+            .collect(),
+        disabled_variables: vec![],
+        created_at: 0,
+    };
+    let resolved = resolve_endpoint(&detail, Some(&env), None).unwrap();
+    assert_eq!(
+        resolved.body.as_deref(),
+        Some(r#"{"query":"{ ping }","variables":{"id":"n-1"}}"#)
+    );
+    assert!(resolved.missing_vars.is_empty());
 }

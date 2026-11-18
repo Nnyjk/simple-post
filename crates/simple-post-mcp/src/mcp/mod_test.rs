@@ -155,7 +155,11 @@ fn every_capability_row_names_a_registered_tool() {
 /// **上限要动时怎么写。** 契约长大先把新加的那几段说明压到一行，压到一行还嫌长
 /// 再动上限；上限一动，就在同一次提交里写清是哪一段契约把载荷顶大了、新的测量值
 /// 是多少，否则下一个接手的人只看到一个数字，会以为这个上限是随手拍的。
-const TOOLS_LIST_BUDGET_BYTES: usize = 45_200;
+//
+// 2026-11-17：issue #12 把 `protocol` 与 `graphql` 契约加进 `endpoint_create`、
+// `endpoint_update` 与 `spec_upsert`（含 patch 的三态说明），紧凑载荷涨到 47 658 字节
+// （48 项工具，`report_the_tools_list_size` 实测）；上限随之上调到 48 KiB。
+const TOOLS_LIST_BUDGET_BYTES: usize = 49_152;
 
 #[test]
 fn the_tools_list_payload_stays_under_its_budget() {

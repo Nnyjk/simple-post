@@ -23,7 +23,7 @@ use crate::tool_fn;
 use simple_post_core::error::AppError;
 use simple_post_core::spec::upsert::EndpointSpec;
 
-use super::endpoint::{oauth2_config_schema, responses_schema};
+use super::endpoint::{graphql_schema, oauth2_config_schema, protocol_schema, responses_schema};
 use simple_post_core::spec::input::{AUTH_TYPE_VALUES, BODY_MODE_VALUES};
 
 /// 请求体的 JSON Schema。
@@ -165,6 +165,8 @@ fn endpoint_schema() -> Value {
                 "type": "string",
                 "description": "JavaScript run after the response arrives. It asserts (pm.test) and may write environment variables (pm.environment.set)."
             },
+            "protocol": protocol_schema(),
+            "graphql": graphql_schema(),
             "responses": responses_schema()
         },
         "required": ["name", "method", "url"],

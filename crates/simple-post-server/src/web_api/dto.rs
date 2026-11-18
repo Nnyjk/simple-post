@@ -56,6 +56,60 @@ pub struct HttpSendBody {
     pub test_script: Option<String>,
 }
 
+/// `POST /api/http/stream` 的请求体：与 `HttpSendBody` 同形，外加 `streamId`。
+///
+/// 复用整份 `HttpSendBody` 而不是另抄一组字段：两条路由的请求必须逐字段一致，
+/// 否则渲染层要为同一份配置维护两套发送路径。`endpointId` 与脚本字段收下来后不参与
+/// 执行——SSE 不跑请求脚本（响应没有完整终点），这一点在路由模块顶部也写着。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HttpStreamBody {
+    /// 取消这条流用的 id，由调用方铸造。
+    pub stream_id: String,
+    #[serde(flatten)]
+    pub request: HttpSendBody,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WsConnectBody {
+    /// 前端铸造的会话 id；建连之前就要能关闭它。
+    pub session_id: String,
+    pub url: String,
+    #[serde(default)]
+    pub headers: Vec<(String, String)>,
+    /// 子协议；空数组 = 不协商。
+    #[serde(default)]
+    pub protocols: Vec<String>,
+    /// 全局 TLS 设置；与 `POST /api/http/stream` 同形同义。
+    #[serde(default)]
+    pub tls: Option<simple_post_core::domain::TlsSettings>,
+    /// 端点自己的 TLS 设置，整体取代 `tls`。
+    #[serde(default)]
+    pub tls_override: Option<simple_post_core::domain::TlsSettings>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WsSendBody {
+    /// `text` 或 `binary`。
+    pub kind: String,
+    #[serde(default)]
+    pub data: Option<String>,
+    #[serde(default)]
+    pub base64: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct WsCloseQuery {
+    /// 关闭码；缺席时发一个正常关闭帧。
+    #[serde(default)]
+    pub code: Option<u16>,
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
 #[derive(Debug, Deserialize, Default)]
 pub struct PreferencesPutBody {
     /// 要设置的单键。直接对应 `preferences` 表的一行。

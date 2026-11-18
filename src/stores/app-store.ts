@@ -227,6 +227,8 @@ function draftDetail(d: DraftEndpoint): EndpointDetail {
   return {
     nodeId: d.id,
     method: d.method,
+    protocol: 'http',
+    graphql: null,
     url: d.url,
     baseUrlOverride: d.baseUrlOverride,
     params: [],

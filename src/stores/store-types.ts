@@ -5,9 +5,11 @@
  */
 import type {
   AuthConfig,
+  GraphQlRequest,
   HttpMethod,
   KeyValue,
   RequestBody,
+  RequestProtocol,
   ResponseDefinition,
   TlsSettings,
 } from '@/types/domain';
@@ -162,6 +164,16 @@ export interface ProjectTabSet {
 export interface EndpointDraft {
   url?: string;
   method?: HttpMethod;
+  /**
+   * 请求协议。缺席 = 用户没碰过，保存时不动已存的那一行（已存的缺失按 `http` 读）。
+   * 它与 `graphql` 一起决定发送与响应区：切协议不写库，Save 才落盘。
+   */
+  protocol?: RequestProtocol;
+  /**
+   * GraphQL 查询与 variables。`undefined` = 没碰过，`null` = 明确清空，一份 = 用户写的那份。
+   * 三态与 `tls` 相同；切到别的协议时留着它，切回来还在。
+   */
+  graphql?: GraphQlRequest | null;
   params?: KeyValue[];
   /** URL 路径里的占位符与它们各自的值。它们替换进路径本身，不进查询串。 */
   pathParams?: KeyValue[];

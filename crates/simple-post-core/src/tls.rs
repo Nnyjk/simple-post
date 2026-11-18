@@ -120,12 +120,12 @@ pub fn apply_to_builder(
 // 内部辅助。
 
 /// 取一个非空的路径。空白串视同没填：界面上清空输入框留下的就是空白串。
-fn non_empty(value: &Option<String>) -> Option<&str> {
+pub(crate) fn non_empty(value: &Option<String>) -> Option<&str> {
     value.as_deref().map(str::trim).filter(|s| !s.is_empty())
 }
 
 /// 读一个 PEM 文件。读不到时报出路径，让用户知道是哪个文件出了问题。
-fn read_pem(path: &str, what: &str) -> Result<Vec<u8>, AppError> {
+pub(crate) fn read_pem(path: &str, what: &str) -> Result<Vec<u8>, AppError> {
     std::fs::read(path).map_err(|e| AppError::Validation(format!("{what}文件 {path} 读不到: {e}")))
 }
 
@@ -137,7 +137,7 @@ fn read_pem(path: &str, what: &str) -> Result<Vec<u8>, AppError> {
 ///
 /// 「证书与私钥分两个文件」正是最常见的 mTLS 材料形态，故在读进来之后先把边界补齐。已在原
 /// 缓冲区里带换行的地方不动。
-fn normalise_pem_boundaries(pem: &[u8]) -> Vec<u8> {
+pub(crate) fn normalise_pem_boundaries(pem: &[u8]) -> Vec<u8> {
     const END_MARKER: &[u8] = b"-----END ";
 
     let mut out = Vec::with_capacity(pem.len() + 32);

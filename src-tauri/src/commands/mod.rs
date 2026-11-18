@@ -37,6 +37,8 @@ mod projects;
 mod request_settings;
 mod response_history;
 mod spec;
+// 流式传输：SSE 与 WebSocket 的事件都经 `tauri::ipc::Channel` 推回渲染层。
+mod stream;
 // 桌面壳只实现 `update_check`；`update_deployment` / `update_apply` 只服务 `serve-web`。
 mod update;
 
@@ -59,4 +61,6 @@ pub use permissions::*;
 pub use projects::*;
 pub use request_settings::*;
 pub use response_history::*;
+// `stream` 与 `update` 都只是薄壳，命令名即模块导出名。
+pub use stream::*;
 pub use update::*;

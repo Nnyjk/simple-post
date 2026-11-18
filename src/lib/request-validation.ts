@@ -7,12 +7,14 @@
  * - **校验是一个动作而非状态**：三条做出承诺的路径——**发送**、**保存**、**格式化**——去跑它，
  *   结果被钉住，直到其中之一再次跑过并成功。这与编译器同构：用户在构建时发现问题，
  *   而不是每敲一个字符就发现一次。
- * - **只管格式**：唯一的规则是「json 模式的 body 必须能解析」——**模板里的 `{{name}}`
- *   占位符除外**，那不是「坏了」，只是还没替换（见下面的 `substitutesForValidation`）。
- *   空内容、参数/header 的 key 是否合理、URL 形状都刻意不在这里查：那些该由后端回答，
- *   擅自发明用户没要求的阻塞规则会让校验器与使用者对立。
+ * - **只管格式**：两条规则——`json` 模式的 body 必须能解析；`graphql` 协议下查询非空、
+ *   variables 为空或是 JSON **对象**——**模板里的 `{{name}}` 占位符除外**，那不是「坏了」，
+ *   只是还没替换（见下面的 `substitutesForValidation`）。空内容、参数/header 的 key 是否合理、
+ *   URL 形状都刻意不在这里查：那些该由后端回答，擅自发明用户没要求的阻塞规则会让校验器与
+ *   使用者对立。
  */
-import type { RequestBody } from '@/types/domain';
+import type { GraphQlRequest, RequestBody, RequestProtocol } from '@/types/domain';
+import { graphqlProblems } from './graphql';
 
 /**
  * 什么失败了，以及用户得去哪儿才能修好。
@@ -22,7 +24,7 @@ import type { RequestBody } from '@/types/domain';
  */
 interface ValidationIssue {
   /** 占有问题内容的那个 HTTP 页签。 */
-  tab: 'body';
+  tab: 'body' | 'graphql';
   /** 一行，已经按展示措辞写好（不带字段名前缀）。 */
   message: string;
 }
@@ -30,6 +32,10 @@ interface ValidationIssue {
 /** 校验需要看到的东西 —— *生效后*的请求，含草稿。 */
 export interface RequestValidationInput {
   body: RequestBody;
+  /** 生效后的协议。缺席按 `http` 处理。 */
+  protocol?: RequestProtocol;
+  /** 协议为 `graphql` 时的查询与 variables 原文。 */
+  graphql?: GraphQlRequest | null;
 }
 
 /**
@@ -60,6 +66,11 @@ function substitutesForValidation(content: string): string[] {
  * 它才是让徽标消失的那一次。
  */
 export function validateRequest(input: RequestValidationInput): ValidationIssue | null {
+  // GraphQL 的 body 由查询与 variables 组装，端点自己的 body 设置不参与，故两者的校验互斥。
+  if (input.protocol === 'graphql') {
+    const problem = graphqlProblems(input.graphql)[0];
+    return problem ? { tab: 'graphql', message: problem } : null;
+  }
   const { body } = input;
   if (body.mode !== 'json') return null;
   const content = body.content.trim();

@@ -345,6 +345,131 @@
         "missingVars": [],
         "missingPathParams": []
       }
+    },
+    {
+      "name": "graphql：协议覆盖 method 为 POST，query/variables 替换后按固定键序组装，content-type 由协议决定",
+      "env": {
+        "host": "api.example.test",
+        "userId": "42"
+      },
+      "input": {
+        "method": "GET",
+        "urlPath": "/graphql",
+        "baseUrl": "https://{{host}}",
+        "params": [],
+        "headers": [{ "id": "h1", "key": "Content-Type", "value": "text/plain", "enabled": true }],
+        "body": { "mode": "none", "content": "" },
+        "auth": { "kind": "none" },
+        "protocol": "graphql",
+        "graphql": {
+          "query": "query User($id: ID!) { user(id: $id) { id } }",
+          "variables": "{\"id\": \"{{userId}}\"}",
+          "operationName": "User"
+        }
+      },
+      "expected": {
+        "url": "https://api.example.test/graphql",
+        "headers": [
+          ["Content-Type", "application/json"],
+          ["Accept", "application/json"]
+        ],
+        "body": "{\"query\":\"query User($id: ID!) { user(id: $id) { id } }\",\"variables\":{\"id\":\"42\"},\"operationName\":\"User\"}",
+        "missingVars": [],
+        "missingPathParams": []
+      }
+    },
+    {
+      "name": "graphql：variables 原文为空白时不带 variables 键",
+      "env": {
+        "host": "h.test"
+      },
+      "input": {
+        "method": "POST",
+        "urlPath": "/graphql",
+        "baseUrl": "https://{{host}}",
+        "params": [],
+        "headers": [],
+        "body": { "mode": "none", "content": "" },
+        "auth": { "kind": "none" },
+        "protocol": "graphql",
+        "graphql": {
+          "query": "{ ping }",
+          "variables": "   ",
+          "operationName": "Ping"
+        }
+      },
+      "expected": {
+        "url": "https://h.test/graphql",
+        "headers": [
+          ["Content-Type", "application/json"],
+          ["Accept", "application/json"]
+        ],
+        "body": "{\"query\":\"{ ping }\",\"operationName\":\"Ping\"}",
+        "missingVars": [],
+        "missingPathParams": []
+      }
+    },
+    {
+      "name": "graphql：operationName 只有空白时不带 operationName 键",
+      "env": {
+        "host": "h.test"
+      },
+      "input": {
+        "method": "POST",
+        "urlPath": "/graphql",
+        "baseUrl": "https://{{host}}",
+        "params": [],
+        "headers": [],
+        "body": { "mode": "none", "content": "" },
+        "auth": { "kind": "none" },
+        "protocol": "graphql",
+        "graphql": {
+          "query": "mutation { noop }",
+          "variables": "{\"a\":1}",
+          "operationName": "  "
+        }
+      },
+      "expected": {
+        "url": "https://h.test/graphql",
+        "headers": [
+          ["Content-Type", "application/json"],
+          ["Accept", "application/json"]
+        ],
+        "body": "{\"query\":\"mutation { noop }\",\"variables\":{\"a\":1}}",
+        "missingVars": [],
+        "missingPathParams": []
+      }
+    },
+    {
+      "name": "graphql：variables 的键递归排序，数组元素里的对象同样排序，query 原样",
+      "env": {
+        "host": "h.test",
+        "x": "$id"
+      },
+      "input": {
+        "method": "POST",
+        "urlPath": "/graphql",
+        "baseUrl": "https://{{host}}",
+        "params": [],
+        "headers": [],
+        "body": { "mode": "none", "content": "" },
+        "auth": { "kind": "none" },
+        "protocol": "graphql",
+        "graphql": {
+          "query": "query Q {  user(id: $id) { id } }",
+          "variables": "{\"b\":\"{{x}}\",\"a\":{\"z\":1,\"y\":2},\"c\":[{\"n\":1,\"m\":2}]}"
+        }
+      },
+      "expected": {
+        "url": "https://h.test/graphql",
+        "headers": [
+          ["Content-Type", "application/json"],
+          ["Accept", "application/json"]
+        ],
+        "body": "{\"query\":\"query Q {  user(id: $id) { id } }\",\"variables\":{\"a\":{\"y\":2,\"z\":1},\"b\":\"$id\",\"c\":[{\"m\":2,\"n\":1}]}}",
+        "missingVars": [],
+        "missingPathParams": []
+      }
     }
   ]
 }

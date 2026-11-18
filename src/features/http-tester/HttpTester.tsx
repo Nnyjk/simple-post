@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAppStore, useActiveEndpointResource } from '@/stores/app-store';
 import { type BaseUrlSelection } from '@/features/http-tester/BaseUrlPicker';
-import { type HttpMethod } from '@/types/domain';
+import { type HttpMethod, type RequestProtocol } from '@/types/domain';
 import { type FormatResult } from '@/lib/utils';
 import { validateRequest } from '@/lib/request-validation';
 import { UNTITLED_ENDPOINT_NAME, type EndpointDraft } from '@/stores/store-types';
@@ -17,7 +17,15 @@ import { buildVarEntries } from './model/varEntries';
 import { buildDynamicEntries, buildDynamicVars, enabledDynamicNameSet } from './model/dynamicVars';
 import { buildTabItems, type TesterTabId } from './tabs/tabItems';
 import { buildPathParamError } from './tabs/pathParamError';
+import { pathParamsReady } from './model/path-param-gate';
+import { sendActionFor } from './model/send-action';
 import { TesterShell } from './tabs/TesterShell';
+import { SseStreamPanel } from './SseStreamPanel';
+import { WebSocketPanel } from './WebSocketPanel';
+import { disposeSession, startSse } from './stream/stream-sessions';
+import { useGraphQlSchema } from './graphql/use-graphql-schema';
+import { pickQueryHistory, type QueryHistoryEntry } from './graphql/query-history';
+import type { GraphQlPanelTools } from './GraphQlPanel';
 
 export function HttpTester() {
   // `useActiveEndpointResource` 对草稿接口同样有答案：两行都没有时它从 `DraftEndpoint` 合成。
@@ -195,14 +203,20 @@ export function HttpTester() {
 
   /** 跑校验，钉住或清除徽标，并回报是否通过。失败时顺带切到出问题的那一页。 */
   const runValidation = useCallback((): boolean => {
-    const issue = validateRequest({ body: effective.body });
+    const issue = validateRequest({
+      body: effective.body,
+      protocol: effective.protocol,
+      graphql: effective.graphql,
+    });
     setValidationError(issue?.message ?? null);
     if (issue) {
+      // GraphQL 的两种问题都出在查询编辑器里，故切到那一页而非 Body。
       if (issue.tab === 'body') setTab('body');
+      else setTab('graphql');
       return false;
     }
     return true;
-  }, [effective.body]);
+  }, [effective.body, effective.protocol, effective.graphql]);
 
   // Header 补全从每个已加载 detail 收拢用户自己的 header 名（`Object.values` 会新建对象，
   // 故按该 map 的引用 memo）。
@@ -274,10 +288,26 @@ export function HttpTester() {
   };
 
   const method = parts.method;
+  const protocol = effective.protocol;
 
   /** 改请求方法 —— 与其它编辑器一样写进草稿。 */
   const handleMethodChange = (m: HttpMethod) => {
     if (endpoint) setEndpointDraft(endpoint.id, { method: m });
+  };
+
+  /**
+   * 换协议：写草稿，并关掉这个标签上还在跑的流。SSE 的事件与 WS 的帧属于旧协议，
+   * 留着只会让用户以为新协议也在收东西。
+   *
+   * 方法不动：GraphQL 组装时强制 POST，SSE 允许 GET，故切换不该悄悄改掉用户存的值。
+   */
+  const handleProtocolChange = (next: RequestProtocol) => {
+    if (!endpoint) return;
+    disposeSession(endpoint.id);
+    setEndpointDraft(endpoint.id, { protocol: next });
+    // GraphQL 页签只在协议是 GraphQL 时存在，切走时落回 Body，不从页签条上消失。
+    if (next !== 'graphql' && tab === 'graphql') setTab('body');
+    if (next === 'graphql' && tab === 'body') setTab('graphql');
   };
 
   /** 格式化 的结果直接定徽标。 */
@@ -316,6 +346,62 @@ export function HttpTester() {
   // 请求的最终线上形态，只组装**一次**：发送与 cURL 预览读同一个对象。
   const prepared = useMemo(() => prepare(dynamicVars), [prepare, dynamicVars]);
 
+  // GraphQL 的 schema 补全与查询历史：都按当前接口取，切接口就是另一份。
+  const graphqlSchema = useGraphQlSchema({
+    endpointId: endpoint?.id ?? '',
+    request: prepared,
+    auth: effective.auth,
+    settings: requestSettings,
+  });
+  const historyRows = useAppStore((s) => (endpoint ? s.responseHistory[endpoint.id] : undefined));
+  const queryHistory = useMemo(() => pickQueryHistory(historyRows ?? []), [historyRows]);
+  const handlePickQueryHistory = useCallback(
+    (entry: QueryHistoryEntry) => {
+      // 历史行带的是 query / variables / operationName 三段，直接整份写回草稿。
+      patchDraft({ graphql: entry });
+    },
+    [patchDraft],
+  );
+  const graphqlTools = useMemo<GraphQlPanelTools>(
+    () => ({
+      schema: graphqlSchema.schema,
+      schemaStatus: graphqlSchema.status,
+      schemaError: graphqlSchema.error,
+      onFetchSchema: graphqlSchema.refresh,
+      history: queryHistory,
+      onPickHistory: handlePickQueryHistory,
+    }),
+    [
+      graphqlSchema.schema,
+      graphqlSchema.status,
+      graphqlSchema.error,
+      graphqlSchema.refresh,
+      queryHistory,
+      handlePickQueryHistory,
+    ],
+  );
+
+  /**
+   * SSE 的 Send：建一条流就返回，没有「响应完成」这个时刻可等，故不走
+   * `useRequestActions`（它挂脚本、快照与历史）。事件由 `SseStreamPanel` 从 store 读。
+   */
+  const handleStartStream = () => {
+    if (!endpoint) return;
+    if (!runValidation()) return;
+    // 与 HTTP 发送同一道路径参数闸门：带着 `{id}` 建流只会收到 404。拦下时同样切到
+    // 「路径参数」页，用户一眼看得见缺哪个。
+    if (!pathParamsReady(prepared, handlePathParamGate)) return;
+    // 流一建立就把响应页翻出来：事件正往 store 里进，用户该立刻看得见。
+    setTab('response');
+    void startSse(endpoint.id, {
+      request: prepared,
+      settings: requestSettings,
+      tlsOverride: effective.tls,
+      endpointId: endpoint.id,
+      auth: effective.auth,
+    });
+  };
+
   // 必须无条件运行的 hook：切走接口会让本组件以更少的 hook 重渲染、React 抛
   // "Rendered fewer hooks than expected"（违反 rules-of-hooks）。所有 hook 都要放在提前返回之上。
 
@@ -353,6 +439,7 @@ export function HttpTester() {
     isDraft,
     draft,
     prepared,
+    protocol,
     prepareWithDynamic: prepare,
     dynamicNames,
     auth: effective.auth,
@@ -402,16 +489,22 @@ export function HttpTester() {
     basePathParams: pathPlaceholders(resolved.baseUrl ?? ''),
   });
 
-  const tabItems = buildTabItems({
-    params: enabledParams,
-    path: pathParamCount,
-    headers: enabledHeaders,
-    body: hasBody,
-    auth: hasAuth,
-    response: effective.responses.length,
-    script: hasScript,
-    tls: hasOwnTls,
-  });
+  const tabItems = buildTabItems(
+    {
+      params: enabledParams,
+      path: pathParamCount,
+      headers: enabledHeaders,
+      body: hasBody,
+      auth: hasAuth,
+      response: effective.responses.length,
+      script: hasScript,
+      tls: hasOwnTls,
+      graphql: Boolean(effective.graphql?.query.trim()),
+    },
+    protocol === 'graphql',
+  );
+  // 切走 GraphQL 时页签条上已经没有这一页，内容区不能还挂着一个不存在的页签。
+  const panelTab = protocol === 'graphql' || tab !== 'graphql' ? tab : 'body';
 
   // 草稿天生未保存，故即使还没有任何编辑器触发过，按钮也必须可用。`dirty` 只按
   // `draft !== undefined` 判定会漏掉「新建、输了 URL、发了请求，现在想留下它」这类接口。
@@ -432,15 +525,49 @@ export function HttpTester() {
       }}
       {...{ selection, isCustomUrl, liveUrl, pathParamUrl, urlInputRef }}
       {...{ sendBtnRef, playIconRef, copyCurlBtnRef, requestPending, curlFlash }}
-      {...{ dirty, onMethodChange: handleMethodChange, onUrlChange: urlHint.change }}
-      {...{ onSend: handleSend, onSave: handleSave }}
+      {...{
+        dirty,
+        protocol,
+        graphql: effective.graphql,
+        graphqlTools,
+        onProtocolChange: handleProtocolChange,
+        onMethodChange: handleMethodChange,
+        onUrlChange: urlHint.change,
+      }}
+      {...{
+        onSend: sendActionFor(protocol) === 'stream' ? handleStartStream : handleSend,
+        onSave: handleSave,
+      }}
       {...{ onCopyCurl: handleCopyCurl, onSelectionChange: handleBaseUrlSelectionChange }}
       {...{
         draftSaveError: draftSaveError ?? saveErrorHere,
         dynamicError,
         tabItems,
-        tab,
+        tab: panelTab,
         onTabChange: setTab,
+      }}
+      {...{
+        wsSurface:
+          protocol === 'websocket' ? (
+            <WebSocketPanel
+              tabId={endpoint.id}
+              protocol={protocol}
+              onProtocolChange={handleProtocolChange}
+              url={liveUrl}
+              onUrlChange={urlHint.change}
+              headers={effective.headers}
+              onHeadersChange={(headers) => patchDraft({ headers })}
+              headerSuggestions={headerSuggestions}
+              prepared={prepared}
+              varEntries={varEntries}
+              envName={endpointEnv?.name}
+              onPathParamsMissing={handlePathParamGate}
+              tls={requestSettings.tls}
+              tlsOverride={effective.tls}
+              auth={effective.auth}
+            />
+          ) : undefined,
+        responseSurface: protocol === 'sse' ? <SseStreamPanel /> : undefined,
       }}
       {...{
         headerSuggestions,

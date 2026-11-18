@@ -19,6 +19,8 @@ export function buildRequestInput(
 ) {
   return prepareRequest({
     method,
+    protocol: effective.protocol,
+    graphql: effective.graphql,
     urlPath,
     baseUrl,
     rewrite,

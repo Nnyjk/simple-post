@@ -55,12 +55,12 @@ function envOf(variables: Record<string, string>): Environment {
 }
 
 describe('prepareRequest 与 Rust 的 resolve_endpoint 产出一致', () => {
-  it('样本里恰好有 15 条用例', () => {
+  it('样本里恰好有 19 条用例', () => {
     // 条数写死：样本的键名漂了或样本被改小时，这条断言必须变红。写成「大于 0」
-    // 的话，下面那几行断言一条都走不到，测试还是绿的。
+    // 的话，下面那几行断言一条都走不到，测试还是绿的。三条 GraphQL 用例由后端追加。
     assert.equal(
       FIXTURE.cases.length,
-      15,
+      19,
       '用例的条数变了：键名漂了或样本被改小时，这条断言必须变红',
     );
   });
@@ -99,7 +99,13 @@ describe('样本本身是有效的', () => {
       const hasContentType = testCase.expected.headers.some(
         ([k]) => k.toLowerCase() === 'content-type',
       );
-      const expectContentType = body.mode === 'json' || body.mode === 'form' || body.mode === 'raw';
+      // GraphQL 的请求体由组装器生成且固定是 JSON，故它同样必然带 Content-Type，
+      // 与 body 选的是哪种模式无关。
+      const expectContentType =
+        testCase.input.protocol === 'graphql' ||
+        body.mode === 'json' ||
+        body.mode === 'form' ||
+        body.mode === 'raw';
       assert.equal(
         hasContentType,
         expectContentType,

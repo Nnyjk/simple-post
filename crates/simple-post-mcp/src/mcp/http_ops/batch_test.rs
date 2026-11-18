@@ -176,6 +176,8 @@ fn seed(st: &AppState) -> String {
         test_script: None,
         tls: None,
         responses: vec![],
+        protocol: Default::default(),
+        graphql: None,
     };
     db::with_tx(&st.pool, |c| {
         db::projects::create(c, &project)?;

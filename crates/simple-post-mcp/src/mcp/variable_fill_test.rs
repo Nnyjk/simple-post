@@ -1,7 +1,7 @@
 use super::*;
 use simple_post_core::domain::{
-    ApiKeyAuth, ApiKeyLocation, AuthConfig, AuthType, BasicAuth, BodyMode, HttpMethod, KeyValue,
-    RequestBody,
+    ApiKeyAuth, ApiKeyLocation, AuthConfig, AuthType, BasicAuth, BodyMode, GraphQlRequest,
+    HttpMethod, KeyValue, RequestBody, RequestProtocol,
 };
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
@@ -48,6 +48,8 @@ fn ep(url: &str, auth: AuthConfig, body_mode: BodyMode, body_content: &str) -> E
         test_script: None,
         tls: None,
         responses: vec![],
+        protocol: Default::default(),
+        graphql: None,
     }
 }
 
@@ -209,5 +211,46 @@ fn validate_endpoint_flags_a_path_parameter_that_lives_in_the_base_url() {
     assert!(
         issues.iter().any(|i| i["field"] == "pathParams.version"),
         "the path parameter in the base url must be reported: {issues:?}"
+    );
+}
+
+/// 协议不是 HTTP 时，静态检查要先把「发不出去」说出来；GraphQL 再查自己的两处必填。
+#[test]
+fn validate_reports_protocol_specific_problems() {
+    let mut endpoint = ep("/graphql", AuthConfig::default(), BodyMode::None, "");
+    endpoint.protocol = RequestProtocol::Sse;
+    let issues = validate(&endpoint, "https://h.test/graphql");
+    assert!(
+        issues.iter().any(|i| i["field"] == "protocol"),
+        "an SSE endpoint cannot be sent by MCP: {issues:?}"
+    );
+
+    endpoint.protocol = RequestProtocol::GraphQl;
+    endpoint.graphql = Some(GraphQlRequest {
+        query: "  ".into(),
+        variables: "[]".into(),
+        operation_name: None,
+    });
+    let issues = validate(&endpoint, "https://h.test/graphql");
+    assert!(
+        issues.iter().any(|i| i["field"] == "graphql.query"),
+        "a blank query is a defect: {issues:?}"
+    );
+    assert!(
+        issues.iter().any(|i| i["field"] == "graphql.variables"),
+        "variables that parse to an array are not an object: {issues:?}"
+    );
+
+    endpoint.graphql = Some(GraphQlRequest {
+        query: "{ ping }".into(),
+        variables: "{\"b\":1,\"a\":2}".into(),
+        operation_name: None,
+    });
+    let issues = validate(&endpoint, "https://h.test/graphql");
+    assert!(
+        !issues.iter().any(|i| i["field"] == "protocol"
+            || i["field"] == "graphql.query"
+            || i["field"] == "graphql.variables"),
+        "a complete GraphQL config has no protocol defects: {issues:?}"
     );
 }

@@ -13,6 +13,7 @@ import { appendApikeyToQuery, resolveAuth } from './auth';
 import { buildOrderedHeaders } from './headers';
 import { buildPool, createMissingTracker } from './pool';
 import { wellFormedDeep } from '../well-formed';
+import { buildGraphQlPayload } from '../graphql';
 import type { BuildInput, PrepareRequestInput, PreparedRequest } from './types';
 
 /**
@@ -37,6 +38,9 @@ import type { BuildInput, PrepareRequestInput, PreparedRequest } from './types';
  *
  * body 的规则住在 `src/lib/body`：它与 Rust 的 `simple_post_core::body` 是同一套规则的两份实现
  * （模板化按字段做还是按整段做、空键算不算、产物是文本还是字节），改动两边必须同步。
+ *
+ * `protocol === 'graphql'` 时多一条支路：方法钉成 `POST`、body 换成由查询与 variables 组装出的
+ * payload、Content-Type 钉成 `application/json`；端点自己的 body 设置不参与组装。
  */
 export function prepareRequest(rawInput: PrepareRequestInput): PreparedRequest {
   // prepareRequest 先把用户写下的字符串归一成良构字符串：落单的代理项在 UTF-8 里没有对应
@@ -48,6 +52,25 @@ export function prepareRequest(rawInput: PrepareRequestInput): PreparedRequest {
 
   // 变量池在 `buildPool` 里合成一处，故 URL、参数、header、body 与鉴权看到的是同一份池。
   const pool = buildPool(input.env, input.dynamicVars);
+
+  // GraphQL 是 HTTP 语义层：方法强制 POST，body 由查询与 variables 组装，端点自己那条 body
+  // 设置不参与（切换协议不清空它，切回 HTTP 时原样还在）。query 与 variables 里的 `{{var}}`
+  // 都在组装之前替换——两者都是用户可编辑的字段，与 URL / header 走同一套模板规则；MCP 的
+  // `graphql_payload` 也替换 query，两边少一处就会让同一个端点发出不同的查询文本。
+  const isGraphQl = input.protocol === 'graphql';
+  const graphQlIssues: string[] = [];
+  let graphQlBody: string | null = null;
+  if (isGraphQl) {
+    const query = resolveVarsWithMissing(input.graphql?.query ?? '', pool);
+    const variables = resolveVarsWithMissing(input.graphql?.variables ?? '', pool);
+    missing.add(query.missing);
+    missing.add(variables.missing);
+    const built = buildGraphQlPayload(
+      input.graphql ? { ...input.graphql, query: query.value, variables: variables.value } : null,
+    );
+    if (built.ok) graphQlBody = built.body;
+    else graphQlIssues.push(...built.problems);
+  }
 
   const auth = resolveAuth(input.auth, pool, missing);
 
@@ -90,10 +113,11 @@ export function prepareRequest(rawInput: PrepareRequestInput): PreparedRequest {
 
   // `prepareRequest` 在建 header 之前生成 boundary：Content-Type 里的 boundary 与 body
   // 里的分隔符不是同一个字符串时，请求看起来成功而服务端解析失败
-  const boundary = input.body.mode === 'multipart' ? newMultipartBoundary() : null;
+  const boundary = !isGraphQl && input.body.mode === 'multipart' ? newMultipartBoundary() : null;
 
   // `binary` 模式的 Content-Type 取文件自己的类型，故在建 header 之前先读出来。
-  const binaryCt = input.body.mode === 'binary' ? binaryContentType(input.body.content) : null;
+  const binaryCt =
+    !isGraphQl && input.body.mode === 'binary' ? binaryContentType(input.body.content) : null;
 
   const headers = buildOrderedHeaders(
     input.headers,
@@ -103,6 +127,7 @@ export function prepareRequest(rawInput: PrepareRequestInput): PreparedRequest {
     missing,
     boundary,
     binaryCt,
+    isGraphQl ? 'application/json' : null,
   );
 
   // `resolveBody` 先按原文判断是否包含，再模板化——与 Rust 的 `resolve_endpoint` 同序。先模板化
@@ -110,7 +135,9 @@ export function prepareRequest(rawInput: PrepareRequestInput): PreparedRequest {
   //
   // `form` 与 `multipart` 逐个字段模板化，`json` / `xml` / `raw` 整段模板化，`binary` 不模板化
   // （文件字节不是模板）。
-  const resolved = resolveBody(input.body, pool);
+  const resolved = isGraphQl
+    ? { text: null, base64: null, missing: [] as string[] }
+    : resolveBody(input.body, pool);
   missing.add(resolved.missing);
 
   // multipart 在模板化之后才装配：`content` 存的就是分片数组的 JSON 文本，故它与其它 mode
@@ -119,9 +146,9 @@ export function prepareRequest(rawInput: PrepareRequestInput): PreparedRequest {
   // 内容为空时**不装配**：那样会得到一个只有收尾分隔符的 body，而 Rust 侧在 `resolve_body`
   // 给出空 body 时根本不会走到装配那一步。两侧不一致时，「空 body」在一边发出去是一条空
   // multipart、在另一边发出去是完全没有 body。
-  let body: string | null = null;
+  let body: string | null = graphQlBody;
   let bodyBase64: string | null = null;
-  if (resolved.text !== null || resolved.base64 !== null) {
+  if (!isGraphQl && (resolved.text !== null || resolved.base64 !== null)) {
     if (input.body.mode === 'multipart' && boundary !== null) {
       const assembled = assembleMultipart(parseMultipartParts(resolved.text ?? ''), boundary);
       body = assembled.text;
@@ -133,12 +160,14 @@ export function prepareRequest(rawInput: PrepareRequestInput): PreparedRequest {
   }
 
   return {
-    method: input.method,
+    method: isGraphQl ? 'POST' : input.method,
     url: finalUrl,
     headers,
     body,
     bodyBase64,
-    missingVars: missing.list(),
+    // GraphQL 缺查询 / variables 坏了没有专门的通道：它们与缺变量一起走 `missingVars`，
+    // 发送那一步由 `validateRequest` 挡在前面，故这里不抛异常。
+    missingVars: [...missing.list(), ...graphQlIssues],
     missingPathParams: substituted.missing,
     // 变量池随结果一起走：OAuth2 取 token 时要用的正是这一份（见 `PreparedRequest.vars`）。
     vars: pool,

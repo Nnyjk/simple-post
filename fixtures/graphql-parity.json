@@ -1,0 +1,100 @@
+{
+  "$comment": "GraphQL 组装规则的一致性样本。Rust 的 `variable_fill::resolve::graphql_payload`（MCP 端）与 TS 的 `src/lib/graphql.ts::buildGraphQlPayload`（桌面端）读同一份本文件，产出必须逐条相同。样本钉的是**规则**：query 与 variables 都做 `{{var}}` 替换、variables 原文 trim 空不带键、非空必须是 JSON 对象、operationName 的 trim 只用作空判定、写进 payload 的是 trim 后的串（trim 空则不带键）、payload 的键序与缺失变量的收集。`vars` 里 `enabled` 为 false 的条目不进变量池，故出现在模板里就是缺失变量。",
+  "cases": [
+    {
+      "name": "只有 query：不带 variables 与 operationName 键",
+      "graphql": {
+        "query": "{ ping }"
+      },
+      "vars": [],
+      "expectedPayload": {
+        "query": "{ ping }"
+      },
+      "expectedMissing": []
+    },
+    {
+      "name": "variables 是对象：首尾空白不影响解析与键值",
+      "graphql": {
+        "query": "{ ping }",
+        "variables": "  {\"b\":2,\"a\":1}  "
+      },
+      "vars": [],
+      "expectedPayload": {
+        "query": "{ ping }",
+        "variables": {
+          "b": 2,
+          "a": 1
+        }
+      },
+      "expectedMissing": []
+    },
+    {
+      "name": "variables 纯空白：payload 不含 variables 键",
+      "graphql": {
+        "query": "{ ping }",
+        "variables": "   "
+      },
+      "vars": [],
+      "expectedPayload": {
+        "query": "{ ping }"
+      },
+      "expectedMissing": []
+    },
+    {
+      "name": "query 与 variables 同时含 {{id}}：两处都替换",
+      "graphql": {
+        "query": "query { user(id: {{id}}) { id } }",
+        "variables": "{\"id\": {{id}} }"
+      },
+      "vars": [
+        {
+          "name": "id",
+          "value": "42",
+          "enabled": true
+        },
+        {
+          "name": "unused",
+          "value": "x",
+          "enabled": false
+        }
+      ],
+      "expectedPayload": {
+        "query": "query { user(id: 42) { id } }",
+        "variables": {
+          "id": 42
+        }
+      },
+      "expectedMissing": []
+    },
+    {
+      "name": "{{id}} 没有启用中的定义：保留原文并报告缺失（停用的那条不算）",
+      "graphql": {
+        "query": "{ user(id: {{id}}) { id } }"
+      },
+      "vars": [
+        {
+          "name": "id",
+          "value": "7",
+          "enabled": false
+        }
+      ],
+      "expectedPayload": {
+        "query": "{ user(id: {{id}}) { id } }"
+      },
+      "expectedMissing": ["id"]
+    },
+    {
+      "name": "operationName 首尾空白：带上的是去掉空白后的名字",
+      "graphql": {
+        "query": "{ ping }",
+        "operationName": "  Ping  "
+      },
+      "vars": [],
+      "expectedPayload": {
+        "query": "{ ping }",
+        "operationName": "Ping"
+      },
+      "expectedMissing": []
+    }
+  ]
+}

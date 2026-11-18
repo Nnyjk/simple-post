@@ -14,7 +14,8 @@ use std::collections::HashMap;
 
 use simple_post_core::db::{self, Connection, DbPool};
 use simple_post_core::domain::{
-    EndpointDetail, Environment, NodeScripts, Project, ResourceNode, ResourceNodeType,
+    BodyMode, EndpointDetail, Environment, HttpMethod, KeyValue, NodeScripts, Project, RequestBody,
+    RequestProtocol, ResourceNode, ResourceNodeType,
 };
 use simple_post_core::error::AppError;
 
@@ -250,18 +251,38 @@ fn project_endpoint(
         ));
         return None;
     };
+    // SSE 与 WebSocket 是长连接会话：没有一份「请求与响应」可写进 OpenAPI 或 Postman，
+    // 故跳过并说一声。GraphQL 只是 HTTP 之上的组装规则，照常按 POST 导出。
+    if !matches!(d.protocol, RequestProtocol::Http | RequestProtocol::GraphQl) {
+        diagnostics.push(
+            Diagnostic::info(
+                format!("/nodes/{}", node.id),
+                format!(
+                    "接口「{}」的传输协议是 {}，导出格式里没有会话式请求，已跳过",
+                    node.name,
+                    d.protocol.as_str()
+                ),
+            )
+            .dropping(format!("接口「{}」", node.name)),
+        );
+        return None;
+    }
+    let (method, headers, body) = match d.protocol {
+        RequestProtocol::GraphQl => graphql_projection(d, node, diagnostics),
+        _ => (d.method.clone(), d.headers.clone(), d.body.clone()),
+    };
     Some(IrEndpoint {
         key: node.id.clone(),
         name: node.name.clone(),
         description: node.description.clone(),
-        method: d.method.clone(),
+        method,
         path: d.url.clone(),
         // 端点自己的地址。`None` = 跟随模块那一格。
         base_url_override: d.base_url_override.clone(),
         params: d.params.clone(),
         path_params: d.path_params.clone(),
-        headers: d.headers.clone(),
-        body: d.body.clone(),
+        headers,
+        body,
         auth: d.auth.clone(),
         responses: d.responses.clone(),
         docs: d.docs.clone(),
@@ -273,6 +294,69 @@ fn project_endpoint(
             test_script: d.test_script.clone(),
         },
     })
+}
+
+/// GraphQL 端点导出成它真正会发出的那份请求：`POST`、JSON 正文、`Content-Type`。
+///
+/// 导出是给人读的文档，不是线上载荷：variables 只要解析成对象就原样带进正文，不重排键；
+/// 解析不了就只带 query，并留一条诊断说明变量没有导出——把一段非法 JSON 塞进文档会让
+/// 整份 OpenAPI 在消费方那里读不出来。
+fn graphql_projection(
+    d: &EndpointDetail,
+    node: &ResourceNode,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> (HttpMethod, Vec<KeyValue>, RequestBody) {
+    let config = d.graphql.as_ref();
+    let query = config.map(|c| c.query.as_str()).unwrap_or_default();
+    // 手工拼正文：variables 要保留它写入时的键序与空白（`serde_json::Value` 会排序），
+    // 而这里每一个值都已经校验过能解析，故拼出来仍是一份合法 JSON。
+    let mut fields = vec![format!(
+        "\"query\":{}",
+        serde_json::to_string(query).unwrap_or_else(|_| "\"\"".into())
+    )];
+    if let Some(raw) = config.map(|c| c.variables.trim()).filter(|v| !v.is_empty()) {
+        match serde_json::from_str::<serde_json::Value>(raw) {
+            Ok(value) if value.is_object() => fields.push(format!("\"variables\":{raw}")),
+            _ => diagnostics.push(Diagnostic::info(
+                format!("/nodes/{}/body/variables", node.id),
+                "GraphQL variables 不是合法的 JSON 对象，导出时没有带上",
+            )),
+        }
+    }
+    if let Some(name) = config
+        .and_then(|c| c.operation_name.as_deref())
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+    {
+        fields.push(format!(
+            "\"operationName\":{}",
+            serde_json::to_string(name).unwrap_or_else(|_| "\"\"".into())
+        ));
+    }
+
+    let mut headers = d.headers.clone();
+    // 停用的 header 不会发出去，故它不算「用户写过」：否则导出文档里这个请求没有
+    // Content-Type，与实际发出的那份不一致。
+    let has_content_type = headers
+        .iter()
+        .any(|h| h.enabled && h.key.eq_ignore_ascii_case("content-type"));
+    if !has_content_type {
+        headers.push(KeyValue {
+            id: "graphql-content-type".into(),
+            key: "Content-Type".into(),
+            value: "application/json".into(),
+            enabled: true,
+            description: None,
+        });
+    }
+
+    let content = format!("{{{}}}", fields.join(","));
+    let body = RequestBody {
+        mode: BodyMode::Json,
+        content,
+        schema: d.body.schema.clone(),
+    };
+    (HttpMethod::Post, headers, body)
 }
 
 /// 这个模块在选定环境下的那一格。**不回退**：格子缺项即「该模块没有地址」。

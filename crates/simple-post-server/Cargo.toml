@@ -34,6 +34,8 @@ serde_json = { workspace = true }
 tokio = { workspace = true }
 # Used by `port_registry`'s liveness probe and by the route tests.
 reqwest = { workspace = true }
+# `/api/http/stream` 与 `/api/ws/sessions` 把 mpsc 接收端包成 axum 的 `Sse`。
+futures-util = { workspace = true }
 clap = { workspace = true }
 dirs = { workspace = true }
 tracing = { workspace = true }

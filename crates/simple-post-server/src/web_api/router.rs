@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::{
-    routing::{get, patch, post, put},
+    routing::{delete, get, patch, post, put},
     Json, Router,
 };
 use tower_http::services::ServeDir;
@@ -87,6 +87,15 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
                 .delete(projects_delete),
         )
         .route("/api/http/send", post(http_send))
+        // SSE：同一份请求形状，响应改为 `text/event-stream`。`{id}` 上的 DELETE 只取消，
+        // 从不出站请求，故它和 send 一样不含路径参数里的资源。
+        .route("/api/http/stream", post(http_stream))
+        .route("/api/http/stream/{id}", delete(http_stream_cancel))
+        // ---- WebSocket sessions ----
+        // 建连响应是事件流；`/send` 与关闭是普通请求。三条都不进 `response_history`。
+        .route("/api/ws/sessions", post(ws_connect))
+        .route("/api/ws/sessions/{id}/send", post(ws_send))
+        .route("/api/ws/sessions/{id}", delete(ws_close))
         // ---- oauth2 ----
         //
         // 取 token 是**发请求之前**的一步，所以它是独立动词而不是 `/api/http/send`

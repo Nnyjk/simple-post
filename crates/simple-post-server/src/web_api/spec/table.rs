@@ -24,5 +24,6 @@ pub fn public_route_specs() -> Vec<RouteSpec> {
     specs.extend(routes::spec_oauth2::routes());
     specs.extend(routes::spec_upsert::routes());
     specs.extend(routes::spec_mcp::routes());
+    specs.extend(routes::spec_ws::routes());
     specs
 }

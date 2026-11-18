@@ -13,8 +13,8 @@
 use rusqlite::{params, Connection, Row};
 
 use crate::domain::{
-    AuthConfig, EndpointDetail, EndpointDetailPatch, KeyValue, RequestBody, ResponseDefinition,
-    TlsSettings,
+    AuthConfig, EndpointDetail, EndpointDetailPatch, GraphQlRequest, KeyValue, RequestBody,
+    RequestProtocol, ResponseDefinition, TlsSettings,
 };
 use crate::error::AppError;
 
@@ -23,7 +23,7 @@ use super::json_col_err;
 const COLUMNS: &str =
     "node_id, method, url, base_url_override, params_json, path_params_json, headers_json, \
                        body_json, auth_json, docs, notes, tags_json, pre_request_script, \
-                       test_script, tls_json, responses_json";
+                       test_script, tls_json, responses_json, protocol, graphql_json";
 
 // 读。
 
@@ -71,7 +71,7 @@ pub fn list_by_root(conn: &mut Connection, root_id: &str) -> Result<Vec<Endpoint
     // 列清单在此写出而非复用 COLUMNS：这些列要用 `e` 别名限定，`nodes` 才能 join 进来。
     let sql = "SELECT e.node_id, e.method, e.url, e.base_url_override, e.params_json, e.path_params_json, e.headers_json, \
                   e.body_json, e.auth_json, e.docs, e.notes, e.tags_json, e.pre_request_script, \
-                  e.test_script, e.tls_json, e.responses_json \
+                  e.test_script, e.tls_json, e.responses_json, e.protocol, e.graphql_json \
          FROM endpoint_details e \
          JOIN nodes n ON n.id = e.node_id \
          WHERE n.root_id = ?1 AND n.type = 'endpoint' \
@@ -102,8 +102,9 @@ pub fn create(conn: &mut Connection, d: &EndpointDetail) -> Result<(), AppError>
     conn.execute(
         "INSERT INTO endpoint_details \
          (node_id, method, url, base_url_override, params_json, path_params_json, headers_json, body_json, \
-          auth_json, docs, notes, tags_json, pre_request_script, test_script, tls_json, responses_json) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+          auth_json, docs, notes, tags_json, pre_request_script, test_script, tls_json, responses_json, \
+          protocol, graphql_json) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
         params![
             d.node_id,
             d.method.as_str(),
@@ -128,6 +129,14 @@ pub fn create(conn: &mut Connection, d: &EndpointDetail) -> Result<(), AppError>
                 None => None,
             },
             responses,
+            // 协议列没有 NULL 形态：缺省的 `http` 就是「没有扩展协议」。
+            d.protocol.as_str(),
+            // `graphql` 缺席写 NULL（= 没有配置）；写成 `{}` 会让读回来的是「有配置但全空」，
+            // 而两者在校验与界面上是两回事。
+            match &d.graphql {
+                Some(g) => Some(serde_json::to_string(g)?),
+                None => None,
+            },
         ],
     )?;
     Ok(())
@@ -217,6 +226,18 @@ pub fn update(
             None => rusqlite::types::Value::Null,
         });
     }
+    if let Some(p) = &patch.protocol {
+        sets.push(format!("protocol = ?{}", binds.len() + 1));
+        binds.push(rusqlite::types::Value::Text(p.as_str().to_string()));
+    }
+    if let Some(g) = &patch.graphql {
+        sets.push(format!("graphql_json = ?{}", binds.len() + 1));
+        // `Some(None)` = 清空，故写 NULL；字段缺席时上面这一支根本不进。
+        binds.push(match g {
+            Some(v) => super::json_col(v)?,
+            None => rusqlite::types::Value::Null,
+        });
+    }
 
     if sets.is_empty() {
         return get(conn, node_id);
@@ -293,6 +314,20 @@ fn row_to_detail(row: &Row<'_>) -> Result<EndpointDetail, rusqlite::Error> {
     let responses_json: String = row.get(15)?;
     // NULL = 端点没有自己的 HTTPS 设置（继承全局默认）。
     let tls_json: Option<String> = row.get(14)?;
+    // 补列后的老行落在 `DEFAULT 'http'` 上，故这一列读回来永远有值。
+    let protocol_raw: String = row.get(16)?;
+    // NULL = 没有 GraphQL 配置。
+    let graphql_json: Option<String> = row.get(17)?;
+
+    let protocol = RequestProtocol::parse(&protocol_raw).ok_or_else(|| {
+        rusqlite::Error::FromSqlConversionFailure(
+            16,
+            rusqlite::types::Type::Text,
+            Box::new(super::JsonColError(format!(
+                "protocol: 未知的传输协议 {protocol_raw:?}"
+            ))),
+        )
+    })?;
 
     // 一个存下来的动词若被解析器拒绝，本会是一个 `AppError::Validation` 从一个欠调用方一个
     // `rusqlite::Error` 的行映射器里逃出去；重新包一层，好让失败指明列名。
@@ -331,6 +366,14 @@ fn row_to_detail(row: &Row<'_>) -> Result<EndpointDetail, rusqlite::Error> {
             Some(raw) => Some(
                 serde_json::from_str::<TlsSettings>(raw)
                     .map_err(|e| json_col_err("tls_json", e))?,
+            ),
+            None => None,
+        },
+        protocol,
+        graphql: match &graphql_json {
+            Some(raw) => Some(
+                serde_json::from_str::<GraphQlRequest>(raw)
+                    .map_err(|e| json_col_err("graphql_json", e))?,
             ),
             None => None,
         },

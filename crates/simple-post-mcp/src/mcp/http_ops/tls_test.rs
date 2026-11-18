@@ -80,6 +80,8 @@ fn seed(st: &AppState, endpoint_tls: Option<TlsSettings>) -> String {
         test_script: None,
         tls: endpoint_tls,
         responses: vec![],
+        protocol: Default::default(),
+        graphql: None,
     };
     db::with_tx(&st.pool, |c| {
         db::projects::create(c, &project)?;

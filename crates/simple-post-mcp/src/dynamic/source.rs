@@ -196,6 +196,8 @@ async fn fetch_from_inline(
         test_script: None,
         tls: None,
         responses: vec![],
+        protocol: Default::default(),
+        graphql: None,
     };
 
     let overrides = EndpointOverrides::default();
