@@ -354,3 +354,53 @@ async fn a_preview_that_cannot_extract_still_returns_the_body() {
     assert!(body.get("extracted").is_none());
     assert_eq!(body["bodyJson"]["points"][0]["code"], "A001");
 }
+
+#[tokio::test]
+async fn an_empty_refresh_body_is_treated_as_no_body() {
+    let (addr, dir) = serve_test_router().await;
+    seed(&dir);
+
+    let created = post_json(
+        addr,
+        "/api/dynamic-variables",
+        serde_json::json!({ "projectId": "p1", "name": "sns", "sourceInlineJson": INLINE_SOURCE }),
+    )
+    .await;
+    let created_body: serde_json::Value = created.json().await.expect("json body");
+    let id = created_body["id"].as_str().expect("id").to_string();
+    let url = format!("http://{addr}/api/dynamic-variables/{id}/refresh");
+
+    // 带 `Content-Type: application/json` 的空 body：改动前 extractor 先回 400，刷新根本没执行。
+    let with_header = reqwest::Client::new()
+        .post(&url)
+        .header("Content-Type", "application/json")
+        .body("")
+        .send()
+        .await
+        .expect("request completes");
+    assert_eq!(with_header.status(), 200, "空 body 当没有 body");
+    let body: serde_json::Value = with_header.json().await.expect("json body");
+    // 取数打不到 127.0.0.1:9：刷新照跑，失败记在 error 上，不让整条请求失败。
+    assert_eq!(body["source"], "missing");
+    assert!(body["error"].is_object(), "取数失败要有 error：{}", body);
+
+    // 不带那个 header 的空 body 一直就是没有 body。
+    let without_header = reqwest::Client::new()
+        .post(&url)
+        .send()
+        .await
+        .expect("request completes");
+    assert_eq!(without_header.status(), 200);
+
+    // 非空 body 才解析：坏 JSON 仍是校验错误。
+    let broken = reqwest::Client::new()
+        .post(&url)
+        .header("Content-Type", "application/json")
+        .body("{")
+        .send()
+        .await
+        .expect("request completes");
+    assert_eq!(broken.status(), 400);
+    let broken_body: serde_json::Value = broken.json().await.expect("json body");
+    assert_eq!(broken_body["code"], "validation");
+}

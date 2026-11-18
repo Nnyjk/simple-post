@@ -13,7 +13,7 @@
 
 use std::collections::HashMap;
 
-use rusqlite::{params, Connection, Row};
+use rusqlite::{params, Connection, OptionalExtension, Row};
 
 use crate::domain::{Environment, EnvironmentPatch, ModuleBaseUrl, RewriteRule};
 use crate::error::AppError;
@@ -92,6 +92,9 @@ pub fn get(conn: &mut Connection, id: &str) -> Result<Environment, AppError> {
 
 /// 查 `env_id` 所属的 `project_id`。env id 未知时返回 `NotFound`——调用方（会改动的 MCP 工具）
 /// 需要这个解析结果来施加逐项目权限检查，把未知 id 当作静默的「global」就是一个权限绕过。
+///
+/// **只有「没有这一行」是 `NotFound`**：数据库或连接出问题必须照抛，否则调用方会把它读成
+/// 「这个环境已经失效」，进而把定义里一个合法的 `source_environment_id` 纠正成「继承」。
 pub fn lookup_project_id(conn: &mut Connection, env_id: &str) -> Result<String, AppError> {
     let pid: Option<String> = conn
         .query_row(
@@ -99,7 +102,7 @@ pub fn lookup_project_id(conn: &mut Connection, env_id: &str) -> Result<String, 
             params![env_id],
             |r| r.get(0),
         )
-        .ok();
+        .optional()?;
     pid.ok_or_else(|| AppError::NotFound(format!("environment {env_id}")))
 }
 

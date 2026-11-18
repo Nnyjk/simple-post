@@ -816,3 +816,97 @@ async fn a_definition_without_an_environment_inherits_the_callers() {
         "换个环境就该读另一格：缓存键里必须带着生效的环境"
     );
 }
+
+#[tokio::test]
+async fn a_row_with_a_stale_environment_does_not_fail_the_list() {
+    // 可达路径：`move_to_root` 把一个模块连同它的接口搬到另一个项目，定义的
+    // `source_environment_id` 还指着原项目的环境。这条定义从此取数上下文非法——
+    // 它只该让自己那一行没有值，整张列表仍要能打开。
+    let state = test_state(Permission::Full);
+    let created = dispatch(
+        &state,
+        "dynamic_var_create",
+        json!({ "project_id": "p1", "name": "good", "source_inline_json": INLINE_SOURCE }),
+    )
+    .await
+    .expect("创建好行");
+    let good_id = serde_json::from_str::<serde_json::Value>(&text_of(created)).unwrap()["id"]
+        .as_str()
+        .expect("id")
+        .to_string();
+
+    let created = dispatch(
+        &state,
+        "dynamic_var_create",
+        json!({
+            "project_id": "p1",
+            "name": "bad",
+            "source_endpoint_id": "e1",
+            "source_environment_id": "env1",
+        }),
+    )
+    .await
+    .expect("创建坏行");
+    let bad_id = serde_json::from_str::<serde_json::Value>(&text_of(created)).unwrap()["id"]
+        .as_str()
+        .expect("id")
+        .to_string();
+
+    // 数据源接口跟着模块搬到 p2，点名的 env1 留在 p1：合法组合变非法。
+    db::with_tx(&state.pool, |c| {
+        db::nodes::move_to_root(c, "m1", "p2", None)
+    })
+    .expect("搬模块");
+
+    // 好行写一个覆盖值：它有值可显示，才看得出坏行没把它拖下水。
+    dispatch(
+        &state,
+        "dynamic_var_set_override",
+        json!({ "definition_id": good_id, "value": "手写" }),
+    )
+    .await
+    .expect("写好行的覆盖值");
+
+    let listed = dispatch(&state, "dynamic_var_list", json!({ "project_id": "p1" }))
+        .await
+        .expect("一条坏行不该让整张列表失败");
+    let entries = listed_of(listed);
+    assert_eq!(entries.len(), 2, "{entries:?}");
+
+    let good = entries.iter().find(|e| e["name"] == "good").expect("好行");
+    assert!(good["error"].is_null(), "{good:?}");
+    assert_eq!(good["value"], "手写", "{good:?}");
+    assert_eq!(good["source"], "override", "{good:?}");
+
+    let bad = entries.iter().find(|e| e["name"] == "bad").expect("坏行");
+    assert!(bad["value"].is_null(), "{bad:?}");
+    assert_eq!(bad["source"], "missing", "{bad:?}");
+    assert!(bad["fetchedAt"].is_null(), "{bad:?}");
+    assert!(bad["expiresAt"].is_null(), "{bad:?}");
+    assert_eq!(bad["isOverride"], false, "{bad:?}");
+    let message = bad["error"]["message"].as_str().expect("坏行带错误");
+    assert!(
+        message.contains("不在数据源接口所属的项目里"),
+        "错误文案要与保存侧同句：{message}"
+    );
+    assert_eq!(bad["error"]["kind"], "source_error", "{bad:?}");
+
+    // 详情同样降级：返回这一行，错误在行上。
+    let got = dispatch(
+        &state,
+        "dynamic_var_get",
+        json!({ "definition_id": bad_id }),
+    )
+    .await
+    .expect("详情不该整次失败");
+    let got = serde_json::from_str::<serde_json::Value>(&text_of(got)).unwrap();
+    assert!(got["value"].is_null(), "{got:?}");
+    assert_eq!(got["source"], "missing", "{got:?}");
+    assert!(
+        got["error"]["message"]
+            .as_str()
+            .expect("详情带错误")
+            .contains("不在数据源接口所属的项目里"),
+        "{got:?}"
+    );
+}

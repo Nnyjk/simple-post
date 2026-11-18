@@ -138,7 +138,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
     vec![
         ToolEntry {
             name: "dynamic_var_list",
-            description: "List dynamic variables with their current value and cache state. Pass project_id for one project, omit it for every project. environment_id = the environment you have selected, for inherited fetch environments; omit it to use each source endpoint's project default. Reads the cache only; it never fetches.",
+            description: "List dynamic variables with their current value and cache state. project_id = one project (omit for all). environment_id = your selected environment, for inherited fetch environments; omit it for each source endpoint's project default. Cache-only; never fetches. A row with an invalid fetch context carries error and no value.",
             schema: json!({
                 "type": "object",
                 "properties": {
@@ -151,7 +151,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
         },
         ToolEntry {
             name: "dynamic_var_get",
-            description: "Read one dynamic variable definition with its current value and cache state. environment_id = the environment you have selected; omit it to use the source endpoint's project default.",
+            description: "Read one dynamic variable definition with its value and cache state. environment_id = your selected environment, for definitions that inherit their fetch environment; omit it for the source endpoint's project default. A definition naming its own environment uses that one and reads its cache row.",
             schema: json!({
                 "type": "object",
                 "properties": {

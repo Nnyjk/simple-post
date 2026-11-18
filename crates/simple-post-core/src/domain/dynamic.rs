@@ -94,6 +94,16 @@ pub struct DynamicVariable {
     pub updated_at: i64,
 }
 
+impl DynamicVariable {
+    /// 这条定义有数据源可执行吗：引用了端点，或内联了一份请求。
+    ///
+    /// 两者都为空即「没有数据源」——数据源端点被删（`ON DELETE SET NULL`）之后就是这个
+    /// 状态，解析时按缺失处理，不再读它过去写下的自动值。
+    pub fn has_source(&self) -> bool {
+        self.source_endpoint_id.is_some() || self.source_inline_json.is_some()
+    }
+}
+
 /// 动态变量定义的可改字段。
 ///
 /// 三态语义：缺席 = 不动，`null` = 清除，有值 = 写入。

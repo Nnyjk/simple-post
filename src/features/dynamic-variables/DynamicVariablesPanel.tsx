@@ -17,6 +17,7 @@ import type { DynamicVariableView, ValueMode } from '@/types/domain';
 import { Button } from '@/components/ui/button';
 import { EmptyHint } from '@/components/ui/empty-hint';
 import { DynamicVariableForm } from './DynamicVariableForm';
+import { dynamicValueScope } from '@/stores/dynamic-slice';
 
 export function DynamicVariablesPanel() {
   const projectId = useAppStore((s) => s.activeProjectId);
@@ -160,7 +161,12 @@ function DynamicVariableCard({
   const [draft, setDraft] = useState(variable.value ?? '');
   const setDynamicOverride = useAppStore((s) => s.setDynamicOverride);
   // 取数失败的原因。列表视图本身不带它（那是一次纯读），故取数时记进 store 的那份。
-  const dynamicError = useAppStore((s) => s.dynamicErrors[projectId]?.[variable.name]);
+  // 失败原因也按 (项目 × 取数环境) 分桶：查的是当前环境那一格。
+  const activeEnvironmentId = useAppStore((s) => s.activeEnvironmentId);
+  const dynamicError = useAppStore(
+    (s) =>
+      s.dynamicErrors[dynamicValueScope(projectId, activeEnvironmentId || null)]?.[variable.name],
+  );
   const error = variable.error ?? dynamicError;
 
   /** 打开编辑器时把草稿重置成当前值——否则上一次没保存的编辑会留在框里。 */

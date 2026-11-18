@@ -7,8 +7,8 @@
  *
  * 三条硬约束（后端 `dynamic::preview` 是同一套语义，界面只是照着说）：
  *
- * 1. **不碰持久状态**：不读不写缓存、不写覆盖值、不写响应历史，故重复点预览是幂等的，
- *    手写的覆盖值不会被冲掉。
+ * 1. **不修改本地持久状态**：不写缓存、不写覆盖值、不写环境变量、不写响应历史，手写的
+ *    覆盖值不会被冲掉。注意它**真的发请求**：非幂等的接口点两次，对端就生效两次。
  * 2. **先取数、后抽取**：抽取或处理脚本失败不让预览失败——正文照给，树照样能点。
  *    这正是用户把一条抽不到的路径改对所需要的东西。
  * 3. **环境与真实取数用的是同一个**：草稿点名了取数环境就发它，没点名（继承）就发调用方
@@ -18,7 +18,7 @@
  * 预览结果**不进 store**：它是「这份草稿这一刻」的一次性产物，进全局状态就会在换定义、
  * 换环境之后仍被当成当前值。故它只活在这个组件里，并且每条结果都标清自己对应哪份草稿。
  */
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useAppStore } from '@/stores/app-store';
 import type { DynamicPreviewResult } from '@/types/domain';
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
@@ -26,6 +26,7 @@ import { errorText } from '@/lib/error-text';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { buildScriptSnippet, shouldConfirmOverwrite } from './extract-path';
+import { previewFingerprint } from './preview-input';
 import { PreviewJsonTree } from './PreviewJsonTree';
 
 export interface ExtractPreviewProps {
@@ -62,6 +63,13 @@ interface DraftSnapshot {
   hasScript: boolean;
   /** 结果里实际生效的环境名。`null` = 没有环境。 */
   environment: string | null;
+  /**
+   * 发起时那一份输入的指纹。
+   *
+   * 只看抽取规则与「有没有脚本」不够：用户换掉内联 URL、换一个数据源接口、换取数环境，
+   * 或改掉脚本正文，拿到的都是另一份输入下的结果，却会继续被当成「当前草稿」的结果。
+   */
+  fingerprint: string;
 }
 
 /** 一行摘要把值压短：预览是给人瞄一眼的，不是导出器。 */
@@ -98,12 +106,21 @@ export function ExtractPreview({
   const hasSource = usesEndpoint ? sourceEndpointId !== '' : sourceInlineJson.trim() !== '';
 
   // 表单当前这份草稿的指纹：与快照不同就说明结果已经不对应眼前这份草稿了。
-  const draftChanged =
-    snapshot !== null &&
-    (snapshot.extractPath !== (extractPath.trim() === '' ? '$' : extractPath.trim()) ||
-      snapshot.hasScript !== (transformScript.trim() !== ''));
+  const currentFingerprint = previewFingerprint({
+    sourceEndpointId,
+    sourceInlineJson,
+    environmentId,
+    extractPath,
+    transformScript,
+    activeEnvironmentId: activeEnvironmentId || null,
+  });
+  const draftChanged = snapshot !== null && snapshot.fingerprint !== currentFingerprint;
+  /** 预览请求的世代号：连点两次时，先发的那一次可能后回来，它的结果不能盖掉后发的。 */
+  const previewSeq = useRef(0);
 
   const runPreview = async () => {
+    // 号在发请求之前取：回来时不是最后发出的那一次就整个丢掉（连点、改完再点都会走到这里）。
+    const seq = ++previewSeq.current;
     setBusy(true);
     setError(null);
     setSnippetHint(null);
@@ -121,6 +138,7 @@ export function ExtractPreview({
         transformScript,
         environmentId: activeEnvironmentId || null,
       });
+      if (seq !== previewSeq.current) return;
       const environment =
         environments.find((e) => e.id === (preview.environmentId ?? ''))?.name ??
         preview.environmentId ??
@@ -132,15 +150,18 @@ export function ExtractPreview({
         extractPath: preview.extractPath,
         hasScript: transformScript.trim() !== '',
         environment,
+        // 指纹记的是**发起时**的输入，不是回来时的：回来时草稿可能已经改了。
+        fingerprint: currentFingerprint,
       });
       setResult(preview);
       setPickedPath(null);
     } catch (e) {
+      if (seq !== previewSeq.current) return;
       setResult(null);
       setSnapshot(null);
       setError(errorText(e));
     } finally {
-      setBusy(false);
+      if (seq === previewSeq.current) setBusy(false);
     }
   };
 
@@ -211,7 +232,7 @@ export function ExtractPreview({
           </div>
           {draftChanged && (
             <p className="text-micro text-warning">
-              草稿已经改过了：下面这份响应是上一次预览的，改完点「预览取数」再重取一次。
+              这份结果对应的是旧输入：下面这份响应来自上面这份草稿的上一版，改完点「预览取数」再重取一次。
             </p>
           )}
           {result.truncated && (

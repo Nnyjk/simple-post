@@ -8,7 +8,8 @@
  * 因为宽松一分就会生成一条后端读不懂的路径。
  *
  * 脚本片段是相对 `pm.data`（**抽取后**的值）写的：节点路径若落在当前抽取规则之下，就去掉
- * 那截前缀；否则只能回退到 `pm.response.json()`（原始响应）并提示它不受抽取规则影响。
+ * 那截前缀；否则只能回退到 `pm.response.json()`（原始响应）并说明抽取仍须成功，脚本才有
+ * `pm.data`。
  */
 
 /** 能直接写成 `.key` 的键名。与 `serde_json_path` 的点号简写一致，见文件头。 */
@@ -46,6 +47,10 @@ export function escapeKey(key: string): string {
     else if (char === '\f') out += '\\f';
     // 其余控制字符不能用原字符写进 JSONPath 字符串字面量（RFC 9535 明确禁止）。
     else if (code < 0x20) out += `\\u${code.toString(16).padStart(4, '0')}`;
+    // U+2028 / U+2029 是合法键名，但 JS 引擎把它们当行终止符：不转义时 `buildScriptSnippet`
+    // 拼出的 `//` 注释会在半截处结束，后半截被当成源码。
+    else if (code === 0x2028) out += '\\u2028';
+    else if (code === 0x2029) out += '\\u2029';
     else out += char;
   }
   return out;
@@ -125,7 +130,7 @@ export function buildScriptSnippet(nodePath: string, extractPath: string): Scrip
     usesExtract,
     hint: usesExtract
       ? '以抽取结果（pm.data）为起点；原样返回等于不写脚本。'
-      : '这一格不在抽取结果里，得从原始响应取（pm.response.json()）；这段不依赖抽取规则，模板仍原样返回 pm.data。',
+      : '这一格不在抽取结果里，得从原始响应取（pm.response.json()）；抽取仍须成功，处理脚本才会跑，模板末句仍原样返回 pm.data。',
   };
 }
 

@@ -6,9 +6,10 @@
 //!
 //! ## 不碰持久状态
 //!
-//! 预览是**只读**的一次往返：不读也不写 `dynamic_variable_cache`，不过 single-flight，
-//! 不产生覆盖值，不写项目的环境变量（脚本的写入只活在这一趟里），不写响应历史。
-//! 故同一份草稿重复预览幂等，也不会把用户手写的值冲掉。
+//! 预览不修改**本地持久状态**：不读也不写 `dynamic_variable_cache`，不过 single-flight，
+//! 不产生覆盖值，不写项目的环境变量（脚本的写入只活在这一趟里），不写响应历史。故它不会把
+//! 用户手写的值冲掉。但它**真的会发一次请求**：数据源若是非幂等的 POST，点两次预览就在
+//! 对端生效两次——它不是只读的，也不是幂等的。
 //!
 //! ## 先取数，后抽取
 //!
@@ -16,6 +17,10 @@
 //! `bodyJson` 照样返回，否则用户看不到树，也就没法把 JSONPath 点出来。处理脚本失败同理
 //! ——真实链路里它就是「按缺失处理」，预览把错误记在 `transformError` 上，`value` 仍是
 //! 抽取结果。
+//!
+//! 真实链路还有两条「不取值」的判定，预览照样执行，但保留正文与抽取结果供人排查：
+//! 响应不是 2xx 时 `extractError.kind` 为 `http_status`（消息里带状态码），序列化后的值
+//! 超过全局上限时 `too_large`；这两种情况下 `value` 都为空。
 //!
 //! ## 编排住在这里
 //!
@@ -28,8 +33,8 @@ use serde_json::Value;
 use simple_post_core::db::DbPool;
 use simple_post_core::domain::{DynamicError, DynamicErrorKind, DynamicVariable, ValueMode};
 use simple_post_core::dynamic::{
-    apply_transform, extract_value, source_context, RawSource, ResolveContext, SourceContext,
-    SourceFetcher,
+    apply_transform, extract_value, serialize_value, source_context, RawSource, ResolveContext,
+    SourceContext, SourceFetcher, MAX_VALUE_BYTES,
 };
 use simple_post_core::error::AppError;
 
@@ -100,7 +105,7 @@ fn non_empty(value: Option<String>) -> Option<String> {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PreviewIssue {
-    /// `not_json` / `no_match` / `source_error` / `script_error` / `binary`。
+    /// `not_json` / `no_match` / `binary` / `http_status` / `too_large` / `script_error`。
     pub kind: String,
     pub message: String,
 }
@@ -120,7 +125,8 @@ impl PreviewIssue {
 ///
 /// - JSON：`bodyJson` 有值，树可以点；
 /// - 不是 JSON 的文本：`bodyJson` 为空，`bodyText` 是原文；
-/// - 二进制：`binary` 为真，`bodyText` 是宽松解码的结果（不可逆），`bodyJson` 必然为空。
+/// - 二进制：`binary` 为真，`bodyText` 为空（原始字节只以 base64 随响应返回，传输层不做
+///   宽松解码），`bodyJson` 必然为空。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PreviewResult {
@@ -131,7 +137,7 @@ pub struct PreviewResult {
     pub truncated: bool,
     /// 正文是二进制（图片、压缩包……）。此时不能做 JSONPath。
     pub binary: bool,
-    /// 文本正文。二进制响应时它是宽松解码的结果（非法字节已变成 U+FFFD）。
+    /// 文本正文。二进制响应时为空串。
     pub body_text: String,
     /// **严格**解析出来的 JSON。不是 JSON 就是 `None`——刻意不用 `parse_raw`，那个会把 HTML
     /// 错误页降级成一个字符串节点，让用户以为接口返回了 JSON。
@@ -191,7 +197,7 @@ async fn evaluate(
     source: &SourceContext,
 ) -> PreviewResult {
     let extract_path = effective_path(&definition.extract_path);
-    // `body_base64` 有值说明原始字节不是合法 UTF-8：`body` 只是宽松解码的残影，抽不出东西。
+    // 正文不是文本时传输层给空 body，原始字节只走 `body_base64`：JSONPath 读不了它。
     let binary = raw.body_base64.is_some();
     let body_json = if binary {
         None
@@ -201,9 +207,21 @@ async fn evaluate(
         serde_json::from_str::<Value>(&raw.body).ok()
     };
 
+    // 与真实解析同一条判定：非 2xx 不取值。抽取照做，正文与抽取结果都留给用户看——
+    // 否则他看不出是地址写错了还是凭据过期了。
+    let status_ok = (200..300).contains(&raw.status);
     let mut extracted = None;
     let mut extract_error = None;
-    if binary {
+    if !status_ok {
+        if !binary {
+            extracted = extract_value(&raw.body, &definition.extract_path).ok();
+        }
+        // `http_status` 是预览这一侧的约定字符串，不改名。
+        extract_error = Some(PreviewIssue {
+            kind: "http_status".to_string(),
+            message: format!("数据源返回 {}", raw.status),
+        });
+    } else if binary {
         extract_error = Some(PreviewIssue {
             kind: "binary".to_string(),
             message: "这是二进制正文（图片、压缩包等），不能做 JSONPath".to_string(),
@@ -216,18 +234,40 @@ async fn evaluate(
     }
 
     let extracted_snapshot = extracted.clone();
-    let mut value = extracted.clone();
+    // 非 2xx 时运行时根本不取这个值，故预览也不给它。
+    let mut value = if status_ok { extracted.clone() } else { None };
     let mut transform_error = None;
-    if let Some(input) = extracted {
-        match apply_transform(definition, input, raw, source).await {
-            Ok(transformed) => value = Some(transformed),
-            // 真实链路里脚本失败就是「按缺失处理」。预览不吞掉抽取结果：用户要的是
-            // 「这段 JSONPath 抽到了什么」，脚本坏没坏是另一条信息。
-            Err(error) => {
-                transform_error = Some(PreviewIssue::new(
-                    DynamicErrorKind::ScriptError,
-                    error.message,
-                ))
+    if status_ok {
+        if let Some(input) = extracted {
+            match apply_transform(definition, input, raw, source).await {
+                Ok(transformed) => value = Some(transformed),
+                // 真实链路里脚本失败就是「按缺失处理」。预览不吞掉抽取结果：用户要的是
+                // 「这段 JSONPath 抽到了什么」，脚本坏没坏是另一条信息。
+                Err(error) => {
+                    transform_error = Some(PreviewIssue::new(
+                        DynamicErrorKind::ScriptError,
+                        error.message,
+                    ))
+                }
+            }
+        }
+    }
+
+    // 与真实解析同一条判定：序列化后超过全局上限的值不取值（也不写缓存）。脚本失败时
+    // 展示的只是抽取结果，运行时不会用它，故那时不做这条判定。
+    if transform_error.is_none() {
+        if let Some(final_value) = value.as_ref() {
+            let serialized = serialize_value(final_value, definition.value_mode);
+            if serialized.len() > MAX_VALUE_BYTES {
+                extract_error = Some(PreviewIssue::new(
+                    DynamicErrorKind::TooLarge,
+                    format!(
+                        "取回的值有 {} 字节，超过上限 {} 字节",
+                        serialized.len(),
+                        MAX_VALUE_BYTES
+                    ),
+                ));
+                value = None;
             }
         }
     }

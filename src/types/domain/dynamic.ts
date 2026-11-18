@@ -124,9 +124,19 @@ export interface DynamicResolution {
   errors: DynamicError[];
 }
 
-/** 预览里的一条问题。`kind` 与后端的 `DynamicErrorKind` 线字符串同名。 */
+/**
+ * 预览里的一条问题。
+ *
+ * `kind` 的取值分两段，消费者按两段穷举才算全覆盖：
+ *
+ *   - `DynamicErrorKind`：与取数共用的原因，含 `'too_large'`（抽取结果序列化后超过上限）。
+ *   - `'http_status'`：响应不是 2xx，`message` 里带数字状态码。
+ *   - `'binary'`：正文是二进制，做不了 JSONPath。
+ *
+ * 后两类只在预览这条路上出现，且都不给 `value`——正文与响应树照给。
+ */
 export interface DynamicPreviewIssue {
-  kind: string;
+  kind: DynamicErrorKind | 'http_status' | 'binary';
   message: string;
 }
 
@@ -157,7 +167,13 @@ export interface DynamicPreviewResult {
   environmentId?: string | null;
   extracted?: unknown;
   extractError?: DynamicPreviewIssue | null;
-  /** 最终会进变量池的那个值：脚本成功用脚本的返回值，否则用抽取结果。 */
+  /**
+   * 预览里的「最终值」：脚本成功用脚本的返回值，否则用抽取结果。
+   *
+   * 这是**预览产物**，不是会进变量池的运行时值。抽取成功但处理脚本抛错时，预览保留抽取值
+   * 并把失败放在 `transformError` 里（好让用户看着树把脚本改对）；运行时把这种失败当成
+   * 变量缺失，不拿抽取值顶上。
+   */
   value?: unknown;
   transformError?: DynamicPreviewIssue | null;
 }

@@ -258,6 +258,8 @@ pub const PRELUDE: &str = r##"
     get status() { return respState ? respState.status : undefined; },
     get headers() { return respState ? respState.headers : {}; },
     get responseTime() { return respState ? respState.responseTime : undefined; },
+    // 正文被服务端按上限裁过：此时 `text()` 只是前半截，脚本别把它当完整响应。
+    get truncated() { return respState ? respState.truncated === true : undefined; },
     text: function () { return respState ? respState.body : ''; },
     json: function () {
       if (!respState) return null;

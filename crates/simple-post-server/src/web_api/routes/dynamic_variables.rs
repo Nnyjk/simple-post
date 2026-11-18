@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::{
+    body::Bytes,
     extract::{Path, Query, State},
     http::StatusCode,
     Json,
@@ -145,13 +146,25 @@ pub(crate) async fn dynamic_variables_set_override(
 ///
 /// body 可选：继承取数环境的定义要拿调用方此刻选中的环境，故它带一个可选的
 /// `environmentId`；不提环境的老调用方照旧能打这个路由。
+///
+/// 空 body 一律当「没有 body」，无论带不带 `Content-Type: application/json`：`Bytes` 不会
+/// 在校验阶段把空内容拒掉，判定权留在处理函数里。
 pub(crate) async fn dynamic_variables_refresh(
     State(s): State<Arc<WebState>>,
     Path(id): Path<String>,
-    body: Option<Json<DynamicVariableRefreshBody>>,
+    body: Bytes,
 ) -> Result<Json<Value>, HttpErrorResponse> {
-    let environment_id = body.as_ref().and_then(|b| b.0.environment_id.as_deref());
-    let status = crate::dynamic_api::refresh(&s.pool, &id, environment_id)
+    let environment_id = if body.is_empty() {
+        None
+    } else {
+        let body: DynamicVariableRefreshBody = serde_json::from_slice(&body).map_err(|e| {
+            map_app_error(crate::error::AppError::Validation(format!(
+                "请求体不是合法的 JSON：{e}"
+            )))
+        })?;
+        body.environment_id
+    };
+    let status = crate::dynamic_api::refresh(&s.pool, &id, environment_id.as_deref())
         .await
         .map_err(map_app_error)?;
     Ok(Json(serde_json::to_value(&status).unwrap_or(Value::Null)))
@@ -159,9 +172,11 @@ pub(crate) async fn dynamic_variables_refresh(
 
 /// `POST /api/dynamic-variables/preview` —— 用表单里当前这份草稿真取一次数。
 ///
-/// 这是一条**只读**的往返：不读不写缓存、不写覆盖值、不写响应历史，故重复预览幂等。
-/// 取数失败是唯一会让整条请求失败的路径（没响应就没有正文可看）；抽取与处理脚本的失败
-/// 都落在结果的对应字段里，正文照给。
+/// 它会真的发出一次请求：不修改本地持久状态（缓存 / 覆盖值 / 环境变量 / 响应历史），
+/// 但对端看得见这次调用——预览一个非幂等的 POST 两次，对端就执行两次。别把它说成只读或幂等。
+///
+/// 取数失败是唯一会让整条请求失败的路径（没响应就没有正文可看）；抽取与处理脚本的失败、
+/// 非 2xx 的响应、序列化后超过上限的值，都落在结果的对应字段里，正文照给。
 ///
 /// `environmentId` 是调用方此刻选中的环境，只对继承取数环境的草稿起作用；它与
 /// `sourceEnvironmentId`（草稿点名的那一个环境）是两件事。

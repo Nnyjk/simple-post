@@ -201,6 +201,8 @@ pub fn update(
         endpoint_project.as_deref(),
     ) {
         Ok(environment_id) => environment_id,
+        // 这里接住的只有两种沿用的旧值：环境行已不存在，或环境属于别的项目。数据库错误在
+        // `check_source_environment` 里已照抛，不会冒充这两种。
         Err(AppError::Validation(_)) if patch.source_environment_id.is_none() => None,
         Err(e) => return Err(e),
     };
