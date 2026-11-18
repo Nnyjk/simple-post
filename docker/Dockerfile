@@ -44,10 +44,13 @@ RUN npm ci --include=dev
 
 # Only what `tsc -b` and `vite build` read. tsconfig.json has no project
 # references (`include: ["src", "vite.config.ts"]`), so this is the whole
-# dependency set — no scripts/, no eslint config.
+# dependency set — no eslint config. `scripts/` 也是输入：`src/__tests__`
+# 里的 `rewrite-updater-json.test.ts` 直接 import 那个 .mjs，`tsc -b`
+# 会把它当类型检查对象，缺目录就报 TS2307。
 COPY index.html vite.config.ts tsconfig.json tailwind.config.js postcss.config.js ./
 COPY src ./src
 COPY public ./public
+COPY scripts ./scripts
 
 # `npm run build` is `tsc -b && vite build`, so a type error fails the image
 # build rather than shipping a bundle that 404s at runtime.
