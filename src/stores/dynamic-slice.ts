@@ -215,11 +215,18 @@ export interface DynamicSliceActions {
     patch: Partial<DynamicVariableDraftFields>,
   ) => void;
   /**
-   * 丢掉某个项目的草稿。四个清理点是：保存成功、点「取消」、被编辑的定义删掉、
-   * 这个项目的动态变量标签关掉（`closeTab` / `pruneStaleTabs` / 批量关闭）或项目被删。
+   * 丢掉某个项目的草稿。清理点是：点「取消」、被编辑的定义删掉、这个项目的动态变量标签
+   * 关掉（`closeTab` / `pruneStaleTabs` / 批量关闭）或项目被删。
    * **切标签、切项目都不清**——那正是把草稿搬出组件树的原因。
    */
   clearDynamicVariableDraft: (projectId: string) => void;
+  /**
+   * 保存成功后收尾：只有当前草稿仍是**提交的那一份**时才清。
+   *
+   * 保存请求在路上时用户又敲了一格，那一格属于下一份草稿；无条件清会把新敲的内容一起
+   * 抹掉，连带把标签的脏标记也摘了。
+   */
+  finishDynamicVariableSave: (projectId: string, submitted: DynamicVariableDraft) => void;
   /**
    * 载入定义。
    *
@@ -271,12 +278,37 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
    */
   let listSeq = 0;
   /**
-   * 取值请求的世代号，按桶（项目 × 环境）分开记。
+   * 取值请求的世代号，按「格（项目 × 环境）× 变量名」分开记。
    *
-   * 同一格连点两次「刷新」时，先发的可能后回来；只有该格最后发出的那一次算数。不同格
-   * 之间互不影响，故不能用一个全局号。
+   * 同一格连点两次「刷新」时，先发的可能后回来；只有该格最后发出的那一次算数。粒度必须
+   * 细到名字：成批解析与单条刷新会同时在路上，按整格记号会让后发的单条刷新挡掉整批里
+   * 其它变量的结果，那些变量在变量池里就缺了。
    */
   const valueSeq = new Map<string, number>();
+
+  /** 一格里的一个变量名。`\u0000` 分隔，故格键（自身含 `\u0000`）与名字不会拼出歧义。 */
+  const valueKey = (scope: string, name: string) => `${scope}\u0000${name}`;
+
+  /** 给这一对取一个新号并返回：回来时号还是它，这份结果才落进那儿。 */
+  const issueValueSeq = (scope: string, name: string): number => {
+    const key = valueKey(scope, name);
+    const seq = (valueSeq.get(key) ?? 0) + 1;
+    valueSeq.set(key, seq);
+    return seq;
+  };
+
+  /**
+   * 让这个名字在所有格上**在飞**的发布作废。
+   *
+   * 定义被改了（抽取规则、数据源……），按旧定义取到的值不该再落进桶里——否则保存之后桶里
+   * 还留着旧规则算出来的值，看上去像新规则的结果。
+   */
+  const invalidateName = (name: string) => {
+    const suffix = `\u0000${name}`;
+    for (const [key, seq] of valueSeq) {
+      if (key.endsWith(suffix)) valueSeq.set(key, seq + 1);
+    }
+  };
 
   /**
    * 草稿在不在，就决定这个项目的动态变量标签脏不脏。
@@ -293,6 +325,21 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
     if (present) next.add(tabId);
     else next.delete(tabId);
     return next;
+  };
+
+  /**
+   * 清掉这个项目的草稿，连带摘掉标签的脏标记。没有草稿时返回 null（调用方据此不 set）。
+   *
+   * 草稿没了，这个标签也就不再有未保存内容：「关闭已保存」可以把它一起关掉。
+   */
+  const clearedDrafts = (
+    s: AppState,
+    projectId: string,
+  ): Pick<AppState, 'dynamicDrafts' | 'dirtyTabIds'> | null => {
+    if (!(projectId in s.dynamicDrafts)) return null;
+    const dynamicDrafts = { ...s.dynamicDrafts };
+    delete dynamicDrafts[projectId];
+    return { dynamicDrafts, dirtyTabIds: dirtyForDraft(projectId, false) ?? s.dirtyTabIds };
   };
 
   return {
@@ -343,13 +390,13 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
         };
       }),
 
-    clearDynamicVariableDraft: (projectId) =>
+    clearDynamicVariableDraft: (projectId) => set((s) => clearedDrafts(s, projectId) ?? {}),
+
+    finishDynamicVariableSave: (projectId, submitted) =>
       set((s) => {
-        if (!(projectId in s.dynamicDrafts)) return {};
-        const dynamicDrafts = { ...s.dynamicDrafts };
-        delete dynamicDrafts[projectId];
-        // 草稿没了，这个标签也就不再有未保存内容：「关闭已保存」可以把它一起关掉。
-        return { dynamicDrafts, dirtyTabIds: dirtyForDraft(projectId, false) ?? s.dirtyTabIds };
+        // 当前草稿已经不是提交的那一份：保存期间用户又敲了内容，留着并继续算脏。
+        if (s.dynamicDrafts[projectId] !== submitted) return {};
+        return clearedDrafts(s, projectId) ?? {};
       }),
 
     /**
@@ -428,7 +475,11 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
       const before = get().dynamicVariables.find((v) => v.id === id);
       try {
         await invokeCmd<DynamicVariable>(COMMANDS.dynamicVariablesUpdate, { id, patch });
-        if (before) get().dropDynamicValue(before.projectId ?? '', before.name);
+        if (before) {
+          // 定义变了：按旧定义取到、还在路上的结果不能再落进桶里。
+          invalidateName(before.name);
+          get().dropDynamicValue(before.projectId ?? '', before.name);
+        }
         await get().loadDynamicVariables(scopeOf(get(), id));
         return true;
       } catch (e) {
@@ -463,8 +514,11 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
       const environmentId = callerEnvironmentId(get());
       // 键也是发起时算的：期间用户切了项目或环境，这份结果照样只落在自己的格子里。
       const scope = dynamicValueScope(projectId ?? '', environmentId);
-      const seq = (valueSeq.get(scope) ?? 0) + 1;
-      valueSeq.set(scope, seq);
+      // 每个名字各持一个号：成批解析与单条刷新会同时在路上，谁也别挡谁。
+      const issued = new Map<string, number>();
+      for (const name of names) issued.set(name, issueValueSeq(scope, name));
+      /** 这个名字的结果还没被同名的新请求顶掉。 */
+      const fresh = (name: string) => valueSeq.get(valueKey(scope, name)) === issued.get(name);
       set({ dynamicResolving: true });
       try {
         const resolution = await invokeCmd<{
@@ -481,20 +535,21 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
         });
         // 值写进 store：请求编辑器下一次 `prepareRequest` 会用上它们。
         //
-        // 同一格（项目 × 环境）连点两次时，先发的那次可能后回来：只有最后一次算数，更早的
-        // 结果丢掉，否则会把刚取到的新值盖成旧的。
-        if (valueSeq.get(scope) !== seq) return { values: {}, errors: [] };
+        // 逐个名字判新鲜度：连点两次时先发的那次可能后回来，被顶掉的条目不能盖掉新值；
+        // 但**返回值照给调用方**——它自己那次请求要拿这份结果去替换占位符。
+        const applied = resolution.statuses.filter((status) => fresh(status.name));
+        const freshErrors = resolution.errors.filter((error) => fresh(error.name));
         set((s) => {
           const bucket = { ...(s.dynamicValues[scope] ?? {}) };
-          for (const status of resolution.statuses) {
+          for (const status of applied) {
             bucket[status.name] = status;
           }
           // 失败原因按变量名记下来，面板要能说清「为什么这个变量没有值」。
           const errors = { ...(s.dynamicErrors[scope] ?? {}) };
-          for (const error of resolution.errors) {
+          for (const error of freshErrors) {
             errors[error.name] = error;
           }
-          for (const status of resolution.statuses) {
+          for (const status of applied) {
             if (!status.error) delete errors[status.name];
           }
           return {
@@ -545,18 +600,20 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
     refreshDynamicVariable: async (id) => {
       // 「刷新」重取的正是当前环境下的那一格：环境与格子键都在发请求之前定下来。
       const environmentId = callerEnvironmentId(get());
-      const projectId = get().dynamicVariables.find((v) => v.id === id)?.projectId ?? '';
+      const definition = get().dynamicVariables.find((v) => v.id === id);
+      const projectId = definition?.projectId ?? '';
       const scope = dynamicValueScope(projectId, environmentId);
-      const seq = (valueSeq.get(scope) ?? 0) + 1;
-      valueSeq.set(scope, seq);
+      // 号只压住这一个名字：同一格里的其它变量（成批解析在路上）不受影响。
+      const name = definition?.name ?? '';
+      const seq = issueValueSeq(scope, name);
       set({ dynamicResolving: true });
       try {
         const status = await invokeCmd<DynamicValueStatus>(COMMANDS.dynamicVariablesRefresh, {
           id,
           environmentId,
         });
-        // 同一格连点两次「刷新」时，先发的可能后回来：只有最后一次算数。
-        if (valueSeq.get(scope) !== seq) return;
+        // 同一条定义连点两次「刷新」时，先发的可能后回来：只有最后一次算数。
+        if (valueSeq.get(valueKey(scope, name)) !== seq) return;
         // 这次强制重取的结果（值与失败原因）写进 store，面板立刻能显示。
         set((s) => {
           const bucket = { ...(s.dynamicValues[scope] ?? {}) };

@@ -286,11 +286,14 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
       if (nextActive !== null && !valid.some((t) => t.id === nextActive)) {
         nextActive = valid[valid.length - 1]?.id ?? null;
       }
-      // 这里同时丢掉已不存在标签的脏标记——否则这个集合会随删除操作无限膨胀。
-      const nextDirty = new Set<string>();
-      for (const t of valid) {
-        if (s.dirtyTabIds.has(t.id)) nextDirty.add(t.id);
-      }
+      // 只减不重建：脏标记按 id 记，暂存进 `projectTabs` 的那些标签此刻不在 `openTabs` 里
+      // 却不该被判成干净——重建会把它们（以及动态变量草稿那一条）抹掉，切回来「关闭已保存」
+      // 就把半张表单一起关掉了。
+      const removedIds = s.openTabs
+        .filter((t) => !valid.some((v) => v.id === t.id))
+        .map((t) => t.id);
+      const nextDirty = new Set(s.dirtyTabIds);
+      for (const id of removedIds) nextDirty.delete(id);
       // 这里同时丢掉 endpoint 已消失的草稿。draft endpoint 自己的 id 不在 `nodes` 里，故按标签
       // 种类而不是按查找保留——否则用户仍开着的标签上编辑的内容会凭空消失。
       const nextDrafts: Record<string, EndpointDraft | undefined> = {};
@@ -299,9 +302,6 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
           nextDrafts[t.id] = s.endpointDrafts[t.id];
         }
       }
-      const removedIds = s.openTabs
-        .filter((t) => !valid.some((v) => v.id === t.id))
-        .map((t) => t.id);
       return {
         openTabs: valid,
         activeTabId: nextActive,
@@ -316,23 +316,26 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
       };
     }),
   closeAllTabs: () =>
-    set((s) => ({
-      openTabs: [],
-      activeTabId: null,
-      dirtyTabIds: new Set(),
-      endpointDrafts: {},
-      // 与上面同一条理由、上一级：关掉的 draft 标签就是一份再也存不下去的草稿，故「全关」必须把文档一起带走。
-      draftEndpoints: {},
-      // 同上：在标签条上的动态变量标签全被关掉，它们的草稿不再有归处。暂存进 `projectTabs`
-      // 的那些不在 `openTabs` 里，仍算开着，草稿留着。
-      dynamicDrafts: withoutClosedDynamicDrafts(
-        s,
-        s.openTabs.map((t) => t.id),
-      ),
-      // 全关 ⇒ 所有标签都没了 ⇒ 所有响应与流视图一起走。
-      lastResponses: {},
-      lastStreams: {},
-    })),
+    set((s) => {
+      const closed = new Set(s.openTabs.map((t) => t.id));
+      // 只摘真正被关掉的那些 id：暂存进 `projectTabs` 的标签仍算开着，它们的脏标记要留着。
+      const dirtyTabIds = new Set(s.dirtyTabIds);
+      for (const id of closed) dirtyTabIds.delete(id);
+      return {
+        openTabs: [],
+        activeTabId: null,
+        dirtyTabIds,
+        endpointDrafts: {},
+        // 与上面同一条理由、上一级：关掉的 draft 标签就是一份再也存不下去的草稿，故「全关」必须把文档一起带走。
+        draftEndpoints: {},
+        // 同上：在标签条上的动态变量标签全被关掉，它们的草稿不再有归处。暂存进 `projectTabs`
+        // 的那些不在 `openTabs` 里，仍算开着，草稿留着。
+        dynamicDrafts: withoutClosedDynamicDrafts(s, closed),
+        // 全关 ⇒ 标签条上的标签都没了 ⇒ 它们的响应与流视图一起走。
+        lastResponses: {},
+        lastStreams: {},
+      };
+    }),
   closeSavedTabs: () => {
     const state = get();
     const toClose = state.openTabs.filter((t) => !state.dirtyTabIds.has(t.id));

@@ -5,6 +5,8 @@
  * 连点两次哪一次上屏）全落在这个指纹上。
  */
 export interface PreviewInput {
+  /** 数据源用哪一种形态：决定另两格是否参与取数。 */
+  usesEndpoint: boolean;
   /** 引用的数据源接口 id；内联请求时为空串。 */
   sourceEndpointId: string;
   /** 内联请求正文；引用接口时为空串。 */
@@ -19,6 +21,32 @@ export interface PreviewInput {
   activeEnvironmentId: string | null;
 }
 
+/** 发给 `dynamic_variables_preview` 的那份参数：形态把不相干的两格归零。 */
+export type PreviewPayload = {
+  sourceEndpointId: string | null;
+  sourceInlineJson: string | null;
+  sourceEnvironmentId: string | null;
+  extractPath: string;
+  transformScript: string;
+  environmentId: string | null;
+};
+
+/**
+ * 把草稿归一成预览请求——也就是「这次取数究竟按什么取」。
+ *
+ * 指纹直接序列化它：两种情况填满两格再切形态时，指纹也会变，因为请求本身变了。
+ */
+export function previewPayload(input: PreviewInput): PreviewPayload {
+  return {
+    sourceEndpointId: input.usesEndpoint ? input.sourceEndpointId || null : null,
+    sourceInlineJson: input.usesEndpoint ? null : input.sourceInlineJson || null,
+    sourceEnvironmentId: input.usesEndpoint ? input.environmentId || null : null,
+    extractPath: input.extractPath,
+    transformScript: input.transformScript,
+    environmentId: input.activeEnvironmentId,
+  };
+}
+
 /**
  * 发起时那一份输入的指纹。
  *
@@ -26,12 +54,5 @@ export interface PreviewInput {
  * 脚本正文，拿到的都是另一份输入下的结果，却会被当成「当前草稿」的结果继续展示。
  */
 export function previewFingerprint(input: PreviewInput): string {
-  return JSON.stringify([
-    input.sourceEndpointId,
-    input.sourceInlineJson,
-    input.environmentId,
-    input.extractPath,
-    input.transformScript,
-    input.activeEnvironmentId,
-  ]);
+  return JSON.stringify(previewPayload(input));
 }

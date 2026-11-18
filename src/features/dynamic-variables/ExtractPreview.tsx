@@ -26,7 +26,7 @@ import { errorText } from '@/lib/error-text';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { buildScriptSnippet, shouldConfirmOverwrite } from './extract-path';
-import { previewFingerprint } from './preview-input';
+import { previewFingerprint, previewPayload, type PreviewInput } from './preview-input';
 import { PreviewJsonTree } from './PreviewJsonTree';
 
 export interface ExtractPreviewProps {
@@ -105,16 +105,19 @@ export function ExtractPreview({
 
   const hasSource = usesEndpoint ? sourceEndpointId !== '' : sourceInlineJson.trim() !== '';
 
-  // 表单当前这份草稿的指纹：与快照不同就说明结果已经不对应眼前这份草稿了。
-  const currentFingerprint = previewFingerprint({
+  // 这份草稿此刻会取到什么：指纹与请求参数都由它算，两者不可能走偏。
+  const currentInput: PreviewInput = {
+    usesEndpoint,
     sourceEndpointId,
     sourceInlineJson,
     environmentId,
     extractPath,
     transformScript,
     activeEnvironmentId: activeEnvironmentId || null,
-  });
-  const draftChanged = snapshot !== null && snapshot.fingerprint !== currentFingerprint;
+  };
+  // 与快照不同就说明结果已经不对应眼前这份草稿了。
+  const draftChanged =
+    snapshot !== null && snapshot.fingerprint !== previewFingerprint(currentInput);
   /** 预览请求的世代号：连点两次时，先发的那一次可能后回来，它的结果不能盖掉后发的。 */
   const previewSeq = useRef(0);
 
@@ -125,19 +128,13 @@ export function ExtractPreview({
     setError(null);
     setSnippetHint(null);
     try {
-      // 字段集合与 `handleSubmit` 的保存分支一致：数据源二选一（另一种显式清空）、点名的
-      // 取数环境（内联请求没有这一格）、抽取规则与脚本。
-      //
-      // `environmentId` 是**调用方此刻选中的环境**，不是上面那一格：草稿没点名环境时，
-      // 后端就是拿它去取数的（与 `dynamicVariablesResolve` 送同一个值）。
-      const preview = await invokeCmd<DynamicPreviewResult>(COMMANDS.dynamicVariablesPreview, {
-        sourceEndpointId: usesEndpoint ? sourceEndpointId || null : null,
-        sourceInlineJson: usesEndpoint ? null : sourceInlineJson || null,
-        sourceEnvironmentId: usesEndpoint ? environmentId || null : null,
-        extractPath,
-        transformScript,
-        environmentId: activeEnvironmentId || null,
-      });
+      // 参数就是算指纹的那一份：数据源按形态归零（另一种显式清空），`environmentId` 是
+      // **调用方此刻选中的环境**——草稿没点名环境时后端就拿它去取数，与
+      // `dynamicVariablesResolve` 送的是同一个值。
+      const preview = await invokeCmd<DynamicPreviewResult>(
+        COMMANDS.dynamicVariablesPreview,
+        previewPayload(currentInput),
+      );
       if (seq !== previewSeq.current) return;
       const environment =
         environments.find((e) => e.id === (preview.environmentId ?? ''))?.name ??
@@ -151,7 +148,7 @@ export function ExtractPreview({
         hasScript: transformScript.trim() !== '',
         environment,
         // 指纹记的是**发起时**的输入，不是回来时的：回来时草稿可能已经改了。
-        fingerprint: currentFingerprint,
+        fingerprint: previewFingerprint(currentInput),
       });
       setResult(preview);
       setPickedPath(null);

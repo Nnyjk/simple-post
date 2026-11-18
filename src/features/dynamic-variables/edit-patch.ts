@@ -41,9 +41,10 @@ export function buildEditPatch(
   const description = orNull(draft.description);
   if (description !== orNull(initial.description ?? '')) patch.description = description;
 
-  // 只写空白的处理脚本与不写脚本等价，两端都归一成 null 再比。
-  const transformScript = draft.transformScript.trim() === '' ? null : draft.transformScript;
-  if (transformScript !== (initial.transformScript ?? null)) {
+  // 只写空白的处理脚本与不写脚本等价：两边都过同一个归一，才不会把定义里原本只有空白的
+  // 脚本判成「用户清空了」而发 `null`；真把一段非空脚本清掉时仍然发 `null`。
+  const transformScript = orNull(draft.transformScript);
+  if (transformScript !== orNull(initial.transformScript ?? '')) {
     patch.transformScript = transformScript;
   }
 

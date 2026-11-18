@@ -20,7 +20,7 @@
  */
 import { useMemo, useState } from 'react';
 import { useAppStore } from '@/stores/app-store';
-import { emptyDynamicVariableDraft } from '@/stores/dynamic-slice';
+import { emptyDynamicVariableDraft, type DynamicVariableDraft } from '@/stores/dynamic-slice';
 import type { DynamicVariableView, ValueMode } from '@/types/domain';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -37,7 +37,8 @@ export interface DynamicVariableFormProps {
    */
   projectId?: string;
   onCancel: () => void;
-  onDone: () => void;
+  /** 保存成功。带上**提交的那一份**草稿：调用方据此判断期间有没有新输入。 */
+  onDone: (submitted: DynamicVariableDraft) => void;
 }
 
 /** 没有草稿时的兜底：面板只在草稿存在时挂载表单，故这一份不会出现在正常路径上。 */
@@ -156,6 +157,7 @@ export function DynamicVariableForm({
           sourceInlineJson: usesEndpoint ? null : sourceInlineJson || null,
           sourceEnvironmentId: usesEndpoint ? environmentId || null : null,
           extractPath,
+          // 只写空白的脚本按「没有脚本」提交：与编辑分支的归一保持一致。
           transformScript: transformScript.trim() === '' ? null : transformScript,
           valueMode,
           ttlSeconds: ttlValue,
@@ -164,7 +166,7 @@ export function DynamicVariableForm({
         });
         if (!created) return;
       }
-      onDone();
+      onDone(draft);
     } finally {
       setBusy(false);
     }
