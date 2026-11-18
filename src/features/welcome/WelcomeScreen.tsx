@@ -12,6 +12,7 @@ import { cn, focusRing } from '@/lib/utils';
 import { AppIcon } from '@/components/ui/app-icon';
 import { WindowControls } from '@/components/ui/window-controls';
 import { UpdatePill } from '@/features/update/UpdatePill';
+import { UpdateDot } from '@/features/update/UpdateDot';
 
 const THEME_ICON: Record<Theme, string> = {
   dark: '🌙',
@@ -51,6 +52,8 @@ export function WelcomeScreen() {
   const openProject = useAppStore((s) => s.openProject);
   const openSettingsTab = useAppStore((s) => s.openSettingsTab);
   const openNewItem = useAppStore((s) => s.openNewItem);
+  // 与设置页「可更新」行同一个判据：boolean，选择器返回稳定值。
+  const updateAvailable = useAppStore((s) => s.updateInfo?.available === true);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [docsNoticeOpen, setDocsNoticeOpen] = useState(false);
@@ -198,13 +201,16 @@ export function WelcomeScreen() {
             <button
               type="button"
               onClick={() => openSettingsTab()}
+              title={updateAvailable ? '打开设置（有新版本）' : undefined}
               className={cn(
-                'inline-flex items-center gap-1.5 rounded-md border border-border bg-card/40 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:bg-overlay-hover hover:text-foreground',
+                'relative inline-flex items-center gap-1.5 rounded-md border border-border bg-card/40 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:bg-overlay-hover hover:text-foreground',
                 focusRing,
               )}
             >
               <SettingsIcon className="h-3.5 w-3.5" />
               打开设置
+              {/* 红点跟着「有没有新版」走，而不是跟着顶栏那枚 pill 走：「稍后再说」只收起 pill。 */}
+              {updateAvailable && <UpdateDot />}
             </button>
             {/* 动态变量挂在项目里（变量名项目内唯一），故没有项目时它开不了 ——
                 这里只说明它在哪，不给一个点了没反应的按钮。 */}

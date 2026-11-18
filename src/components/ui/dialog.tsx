@@ -13,6 +13,11 @@ interface DialogProps {
   footer?: ReactNode;
   className?: string;
   /**
+   * 正文区外层的追加类名。用于固定正文最大高度并自行滚动，从而让标题与页脚始终可见
+   * ——发布说明这类长度不受控的内容只该在正文里滚。
+   */
+  bodyClassName?: string;
+  /**
    * 为 true 时点背景不关闭对话框。用于必须让用户显式选一个动作的阻塞式确认框。
    */
   disableBackdropClose?: boolean;
@@ -33,6 +38,7 @@ export function Dialog({
   children,
   footer,
   className,
+  bodyClassName,
   disableBackdropClose,
 }: DialogProps) {
   const titleId = useId();
@@ -68,7 +74,7 @@ export function Dialog({
           <X className="h-3.5 w-3.5" />
         </Button>
       </div>
-      {children && <div className="px-4 py-3">{children}</div>}
+      {children && <div className={cn('px-4 py-3', bodyClassName)}>{children}</div>}
       {footer && (
         <div className="flex items-center justify-end gap-2 border-t border-border px-4 py-3">
           {footer}
