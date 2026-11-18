@@ -10,6 +10,7 @@ import { FloatToolbar, type FloatToolbarAction } from '@/components/ui/float-too
 import { JsonTreeView } from '@/components/ui/json-tree-view';
 import { AlertTriangle, Check, Copy, Wand2, WrapText } from 'lucide-react';
 import { cn, tryFormatJson, type FormatResult } from '@/lib/utils';
+import { parseJsonTree } from '@/lib/json-tree';
 import { listVars } from '@/lib/url';
 import { useIsDark } from '@/lib/theme';
 import { lightCodeTheme } from '@/lib/codemirror-themes';
@@ -74,7 +75,7 @@ export function BodyEditor({
   envName,
 }: Props) {
   const [bodyView, setBodyView] = useState<BodyViewMode>(() =>
-    isJsonPayload(value.content) ? 'tree' : 'raw',
+    parseJsonTree(value.content).ok ? 'tree' : 'raw',
   );
   // 用户是否自己选过视图。选过之后视图不再由内容的解析状态决定，否则用户刚在 Raw 里
   // 把 JSON 改到合法就被拽去树视图，编辑器会从眼皮底下消失。
@@ -82,7 +83,7 @@ export function BodyEditor({
 
   // 内容改动后重新决定视图：解析不出来时只有 Raw 能改，视图落回 Raw。
   useEffect(() => {
-    if (!isJsonPayload(value.content)) {
+    if (!parseJsonTree(value.content).ok) {
       setBodyView('raw');
       return;
     }
@@ -188,18 +189,6 @@ function NoBodyHint() {
 /** 载荷区的两档视图：树只读，Raw 可编辑。 */
 type BodyViewMode = 'tree' | 'raw';
 
-/** 载荷是不是一份可解析的 JSON。空文本不算 —— 那是「还没写」，不是一份载荷。 */
-function isJsonPayload(text: string): boolean {
-  const trimmed = text.trim();
-  if (!trimmed) return false;
-  try {
-    JSON.parse(trimmed);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /**
  * json 载荷区 —— 树 / Raw 两档。
  *
@@ -230,7 +219,7 @@ function JsonBody({
 }) {
   // 自动换行默认关闭：树一旦折行，缩进层级就读不出来了。
   const [wrap, setWrap] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copyState, setCopyState] = useState<'idle' | 'ok' | 'fail'>('idle');
   const flashTimer = useRef<number | null>(null);
 
   // 卸载时清掉未到期的计时器，否则它会在已卸载的组件上 setState。
@@ -241,11 +230,17 @@ function JsonBody({
     [],
   );
 
-  const copyAll = () => {
-    void navigator.clipboard?.writeText(value.content);
-    setCopied(true);
+  /** 先等剪贴板给出结论再点亮按钮：写失败却报成功，用户会以为载荷已经在剪贴板里。 */
+  const copyAll = async () => {
+    try {
+      if (!navigator.clipboard) throw new Error('剪贴板不可用');
+      await navigator.clipboard.writeText(value.content);
+      setCopyState('ok');
+    } catch {
+      setCopyState('fail');
+    }
     if (flashTimer.current !== null) window.clearTimeout(flashTimer.current);
-    flashTimer.current = window.setTimeout(() => setCopied(false), 1500);
+    flashTimer.current = window.setTimeout(() => setCopyState('idle'), 1500);
   };
 
   const handleFormat = () => {
@@ -266,12 +261,13 @@ function JsonBody({
   const actions: FloatToolbarAction[] = [
     {
       id: 'copy',
-      label: copied ? '已复制' : '复制请求体',
-      icon: copied ? (
-        <Check className="h-3.5 w-3.5 text-success" />
-      ) : (
-        <Copy className="h-3.5 w-3.5" />
-      ),
+      label: copyState === 'ok' ? '已复制' : copyState === 'fail' ? '复制失败' : '复制请求体',
+      icon:
+        copyState === 'ok' ? (
+          <Check className="h-3.5 w-3.5 text-success" />
+        ) : (
+          <Copy className={cn('h-3.5 w-3.5', copyState === 'fail' && 'text-destructive')} />
+        ),
       onClick: copyAll,
       testId: 'copy-body-btn',
     },
@@ -297,7 +293,9 @@ function JsonBody({
     });
   }
 
-  const valid = isJsonPayload(value.content);
+  // 树能不能渲染，判据必须与真正建树的那一个解析器同源。只调 `JSON.parse` 的话，
+  // `parseJsonTree` 拒掉的文本（比如结尾多一个字符）会先被判成合法，树于是空白一片。
+  const valid = parseJsonTree(value.content).ok;
 
   return (
     <div className="relative flex min-h-0 flex-col gap-1.5">
@@ -314,15 +312,37 @@ function JsonBody({
           onChange={(id) => onViewChange(id as BodyViewMode)}
         />
       </div>
-      {view === 'tree' ? (
-        valid ? (
+      {/* 校验徽标住在 Raw 的编辑器顶部，树这一档看不到它。这里补一条同源的行内提示，
+          让「发送被拦下」的原因在只读视图里也读得到。 */}
+      {view === 'tree' && validationError && (
+        <div
+          role="status"
+          aria-live="polite"
+          data-testid="body-validation-inline"
+          title={`JSON 格式有误：${validationError}`}
+          className="flex items-start gap-1.5 rounded-md border border-destructive bg-destructive px-2.5 py-1 text-micro text-destructive-foreground"
+        >
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden />
+          <span className="truncate font-mono">JSON 格式有误：{validationError}</span>
+        </div>
+      )}
+      {/*
+        两档**都保持挂载**，靠 `display: none` 切显隐。窗口那一侧一卸载，CodeMirror 的
+        撤销栈连同编辑器状态一起没了 —— 在 Raw 里把 `{"a":1}` 改成 `{"a":2}`，切到树里
+        看一眼再回来，Ctrl+Z 就回不到 `1`。`display: none` 同时把不可见的一侧移出无障碍
+        树与 Tab 序。（这里写 `hidden` 类而不是 `hidden` 属性：`flex` 这类 display 工具类
+        属于作者样式表，按层叠规则会盖掉浏览器样式表里的 `[hidden] { display: none }`。）
+      */}
+      <div className={cn('min-h-0 flex-1 flex-col', view === 'tree' ? 'flex' : 'hidden')}>
+        {valid ? (
           <JsonTreeView text={value.content} wrap={wrap} />
         ) : (
           <EmptyHint className="flex h-32 items-center justify-center text-sm">
             {value.content.trim() ? 'JSON 格式有误，切到 Raw 修改' : '还没有内容，切到 Raw 输入'}
           </EmptyHint>
-        )
-      ) : (
+        )}
+      </div>
+      <div className={cn('min-h-0 flex-1 flex-col', view === 'raw' ? 'flex' : 'hidden')}>
         <BodyContent
           value={value}
           onChange={(body) => {
@@ -334,7 +354,7 @@ function JsonBody({
           envName={envName}
           wrap={wrap}
         />
-      )}
+      </div>
     </div>
   );
 }
