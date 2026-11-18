@@ -115,6 +115,10 @@ mod multipart_wire_tests;
 mod run_request_tests;
 
 #[cfg(test)]
+#[path = "protocol_test.rs"]
+mod protocol_tests;
+
+#[cfg(test)]
 #[path = "overrides_test.rs"]
 mod overrides_tests;
 

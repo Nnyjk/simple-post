@@ -349,6 +349,10 @@ pub enum RequestProtocol {
 }
 
 impl RequestProtocol {
+    /// 线上接受的四个取值，顺序与 `as_str` 的变体顺序一致。JSON Schema、解析器与
+    /// 一致性测试都从这一份取值集合出发，避免同一组字符串在三处各写一遍。
+    pub const VALUES: [&'static str; 4] = ["http", "graphql", "sse", "websocket"];
+
     pub fn as_str(&self) -> &'static str {
         match self {
             RequestProtocol::Http => "http",
@@ -499,9 +503,14 @@ pub struct EndpointDetailPatch {
     #[serde(default, deserialize_with = "super::double_option")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tls: Option<Option<TlsSettings>>,
-    /// 缺席 = 不动，设值 = 换一种传输。没有 `null` 形态：协议总有一个值，缺省是 `http`。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub protocol: Option<RequestProtocol>,
+    /// 缺席 = 不动，`null` = 回到默认的 `http`，设值 = 换一种传输。
+    ///
+    /// 走 `double_option`：REST 与 MCP 对 `null` 必须给同一个结论。此前这里是
+    /// `Option<RequestProtocol>`，`null` 与「键缺席」被折叠成同一件事，于是 REST 的
+    /// `{"protocol": null}` 什么都不做，而 MCP 的同一个补丁却把协议改回 `http`。
+    #[serde(default, deserialize_with = "super::double_option")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub protocol: Option<Option<RequestProtocol>>,
     /// 缺席 = 不动，`null` = 清空，设值 = 整体替换。
     ///
     /// 走 `double_option`：`Option<GraphQlRequest>` 会把「键缺席」与「值是 `null`」

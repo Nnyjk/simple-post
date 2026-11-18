@@ -32,8 +32,13 @@ import { toRequestSnapshot } from '../model/requestInput';
 import { createReconnect } from './ws-reconnect';
 import type { ReconnectController } from './ws-reconnect';
 
-/** 写进响应历史的正文上限；与后端落库的裁剪一致，超过即记 `truncated`。 */
-const HISTORY_BODY_LIMIT_BYTES = 256 * 1024;
+/**
+ * 面板的「已截断」阈值：与后端落库的默认裁剪一致（256 KiB）。
+ *
+ * 它只喂面板徽标，不切正文 —— 历史正文是未截断的原文，裁剪由服务端按
+ * `maxResponseSizeKb` 统一做。
+ */
+const PANEL_BODY_LIMIT_BYTES = 256 * 1024;
 
 /** 放弃一条 SSE 流之后，等它自己收尾的上限；超过就无条件摘掉注册表里那一格。 */
 const DISPOSE_SETTLE_MS = 5000;
@@ -84,14 +89,9 @@ function tuplesToRecord(tuples: Array<[string, string]>): Record<string, string>
   return out;
 }
 
-/** 按 UTF-8 字节截断；尾部被截掉说明历史里存的是前半份正文。 */
-function truncateBody(text: string): { body: string; truncated: boolean } {
-  const bytes = new TextEncoder().encode(text);
-  if (bytes.length <= HISTORY_BODY_LIMIT_BYTES) return { body: text, truncated: false };
-  return {
-    body: new TextDecoder().decode(bytes.slice(0, HISTORY_BODY_LIMIT_BYTES)),
-    truncated: true,
-  };
+/** 原文的 UTF-8 字节数是否越过面板显示上限（只判长度，不切字符串）。 */
+function exceedsPanelBodyLimit(text: string): boolean {
+  return new TextEncoder().encode(text).length > PANEL_BODY_LIMIT_BYTES;
 }
 
 /**
@@ -197,9 +197,13 @@ export async function startSse(
       sessions.delete(tabId);
       if (entry.abandoned) return;
       appendEvents(parser.flush());
-      // 本地裁到 256 KiB 与后端报的截断是两件事，面板要同时看到。
-      const { body, truncated } = truncateBody(entry.text);
-      useAppStore.getState().sseEnd(tabId, { ...end, truncated: end.truncated || truncated });
+      // 面板与历史各有一道裁剪，别叠加：面板只按本地 256 KiB 标「已截断」，历史正文交给
+      // 服务端按 `maxResponseSizeKb` 统一裁（`db::response_history` 超限时置
+      // `bodyTruncated`），故写历史的是未截断的 `entry.text`。`truncated` 仍以服务端事件
+      // 为准，再并上本地那一次 —— 面板的「已截断」不能因为历史走了另一条路而丢。
+      useAppStore
+        .getState()
+        .sseEnd(tabId, { ...end, truncated: end.truncated || exceedsPanelBodyLimit(entry.text) });
       if (!entry.meta || entry.endpointId === undefined) return;
       const response: ApiResponse = {
         status: entry.meta.status,
@@ -207,8 +211,10 @@ export async function startSse(
         durationMs: end.durationMs,
         sizeBytes: end.sizeBytes,
         headers: tuplesToRecord(entry.meta.headers),
-        body,
-        contentType: 'text/event-stream',
+        // 写历史的是未截断的原文：服务端落库时按 `maxResponseSizeKb` 统一裁。
+        body: entry.text,
+        // 线上真实的那份类型（可能带 charset）优先：服务端没报才回落到事件流。
+        contentType: entry.meta.contentType || 'text/event-stream',
         method: entry.request.method,
         url: entry.meta.url || entry.request.url,
         requestHeaders: entry.meta.requestHeaders,

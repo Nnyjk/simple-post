@@ -194,6 +194,74 @@ describe('graphqlProblems 与校验', () => {
     assert.equal(prepared.missingVars.length, 1);
     assert.match(prepared.missingVars[0] ?? '', /不是合法 JSON/);
   });
+
+  it('替换后的 variables 坏了：problems 非空且 body 为 null（发送入口据此拦下）', () => {
+    const prepared = prepareRequest({
+      method: 'POST',
+      urlPath: '/graphql',
+      baseUrl: '',
+      params: [],
+      headers: [],
+      body: { mode: 'none', content: '' },
+      auth: { kind: 'none' },
+      protocol: 'graphql',
+      graphql: { query: '{ me }', variables: '{"id": {{id}}}' },
+      env: envOf({ id: 'abc' }),
+    });
+    // 校验放行占位符，这个是组装期才看得见的问题：不拦就会发出一个没有 body 的 POST。
+    assert.equal(
+      validateRequest({
+        body: { mode: 'none', content: '' },
+        protocol: 'graphql',
+        graphql: { query: '{ me }', variables: '{"id": {{id}}}' },
+      }),
+      null,
+    );
+    assert.equal(prepared.body, null);
+    assert.equal(prepared.problems.length, 1);
+    assert.equal(prepared.problems[0]?.tab, 'graphql');
+    assert.match(prepared.problems[0]?.message ?? '', /不是合法 JSON/);
+  });
+
+  it('替换后的变量是合法值：没有问题，body 带真实数字', () => {
+    const prepared = prepareRequest({
+      method: 'POST',
+      urlPath: '/graphql',
+      baseUrl: '',
+      params: [],
+      headers: [],
+      body: { mode: 'none', content: '' },
+      auth: { kind: 'none' },
+      protocol: 'graphql',
+      graphql: { query: '{ me }', variables: '{"id": {{id}}}' },
+      env: envOf({ id: '42' }),
+    });
+    assert.deepEqual(prepared.problems, []);
+    assert.match(prepared.body ?? '', /42/);
+    assert.equal(prepared.body, '{"query":"{ me }","variables":{"id":42}}');
+  });
+
+  it('variables 整段引用一个对象变量：校验不报错、组装成功', () => {
+    const graphql = { query: '{ me }', variables: '{{vars}}' };
+    assert.equal(
+      validateRequest({ body: { mode: 'none', content: '' }, protocol: 'graphql', graphql }),
+      null,
+    );
+    const prepared = prepareRequest({
+      method: 'POST',
+      urlPath: '/graphql',
+      baseUrl: '',
+      params: [],
+      headers: [],
+      body: { mode: 'none', content: '' },
+      auth: { kind: 'none' },
+      protocol: 'graphql',
+      graphql,
+      env: envOf({ vars: '{"b":2,"a":1}' }),
+    });
+    assert.deepEqual(prepared.problems, []);
+    assert.equal(prepared.body, '{"query":"{ me }","variables":{"a":1,"b":2}}');
+  });
 });
 
 describe('query 的变量替换', () => {

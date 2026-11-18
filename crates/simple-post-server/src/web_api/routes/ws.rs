@@ -9,25 +9,60 @@ use std::convert::Infallible;
 
 use axum::{
     extract::{Path, Query},
-    http::StatusCode,
-    response::sse::{Event, KeepAlive, Sse},
+    http::{HeaderName, HeaderValue, StatusCode},
+    response::{
+        sse::{Event, KeepAlive, Sse},
+        IntoResponse, Response,
+    },
     Json,
 };
-use futures_util::stream::Stream;
-use tokio::sync::mpsc;
+use tokio::sync::mpsc::{self, error::TrySendError};
 
 use simple_post_core::ws::{self, WsEvent, WsSink};
 
 use crate::web_api::dto::{WsCloseQuery, WsConnectBody, WsSendBody};
 use crate::web_api::error::map_app_error;
 
+/// 下行队列的容量。WebSocket 是**双向**的，但会话的读循环与浏览器并不共享一个窗口：
+/// 浏览器慢读时无界队列会把整个下行堆积在内存里，故取有界 + `try_send`。
+const DOWNLINK_CAPACITY: usize = 256;
+
+/// 接收端一消失就关掉 core 里的会话。
+///
+/// 只靠 `sink` 发送失败是不够的：下行空闲时 `sink` 一次都不会被调用，浏览器关掉标签页
+/// 后服务端会话就永远留在注册表里（WS 没有读超时兜底）。`Sse` 流被 drop 时（axum 在
+/// 连接断开时丢弃它），这个 guard 随 `unfold` 的 state 一起 drop，`Drop` 里发一条关闭
+/// 命令把会话收尾。
+struct CloseOnDrop {
+    rx: mpsc::Receiver<WsEvent>,
+    id: String,
+}
+
+impl Drop for CloseOnDrop {
+    fn drop(&mut self) {
+        // 会话可能已经自行收尾（对端关闭、建连失败、重连顶掉），`NotFound` 是正常结局。
+        let _ = ws::close(&self.id, None, "");
+    }
+}
+
+/// 把事件投进下行队列的那一端。
+///
+/// 满（浏览器慢读）与 Closed（接收端没了）都收掉会话：两种状态都救不回来，继续读只会
+/// 在内存里堆事件。返回 `false` 让 core 的读循环停下并发自己的 `closed` 事件。
+fn sink_into(tx: mpsc::Sender<WsEvent>, cancel_id: String) -> WsSink {
+    Box::new(move |event| match tx.try_send(event) {
+        Ok(()) => true,
+        Err(TrySendError::Full(_)) | Err(TrySendError::Closed(_)) => {
+            let _ = ws::close(&cancel_id, None, "");
+            false
+        }
+    })
+}
+
 /// `POST /api/ws/sessions`
 pub(crate) async fn ws_connect(
     Json(body): Json<WsConnectBody>,
-) -> Result<
-    Sse<impl Stream<Item = Result<Event, Infallible>>>,
-    crate::web_api::error::HttpErrorResponse,
-> {
+) -> Result<Response, crate::web_api::error::HttpErrorResponse> {
     if body.session_id.trim().is_empty() {
         return Err(map_app_error(
             simple_post_core::error::AppError::Validation(
@@ -38,29 +73,42 @@ pub(crate) async fn ws_connect(
 
     let tls =
         simple_post_core::tls::resolve(&body.tls.unwrap_or_default(), body.tls_override.as_ref());
-    let (tx, rx) = mpsc::unbounded_channel::<WsEvent>();
+    let (tx, rx) = mpsc::channel::<WsEvent>(DOWNLINK_CAPACITY);
     let id = body.session_id;
     let cancel_id = id.clone();
-    let sink: WsSink = Box::new(move |event| {
-        // 接收端没了（浏览器断开）就结束会话：没人收的帧继续读下去只会堆积。
-        if tx.send(event).is_err() {
-            let _ = ws::close(&cancel_id, None, "");
-            return false;
-        }
-        true
-    });
+    let guard_id = id.clone();
 
     // `connect` 先登记写端再在后台建连，故这里返回之后首帧 `connecting` 与紧接着的
     // `send` 都不会丢。
-    ws::connect(id, body.url, body.headers, body.protocols, Some(tls), sink);
+    ws::connect(
+        id,
+        body.url,
+        body.headers,
+        body.protocols,
+        Some(tls),
+        sink_into(tx, cancel_id),
+    );
 
-    let events = futures_util::stream::unfold(rx, |mut rx| async move {
-        let event = rx.recv().await?;
-        let data = serde_json::to_string(&event).unwrap_or_else(|_| "{}".into());
-        Some((Ok::<_, Infallible>(Event::default().data(data)), rx))
+    let state = CloseOnDrop { rx, id: guard_id };
+    let events = futures_util::stream::unfold(state, |mut state| async move {
+        let event = state.rx.recv().await?;
+        // `WsEvent` 的字段只有 String / u64 / Option：序列化不可能失败。真失败就是代码
+        // 缺陷，静默写成 `{}` 只会让渲染层丢帧且查不到原因。
+        let data =
+            serde_json::to_string(&event).expect("WsEvent 一定可序列化：字段只有 String/u64");
+        Some((Ok::<_, Infallible>(Event::default().data(data)), state))
     });
 
-    Ok(Sse::new(events).keep_alive(KeepAlive::default()))
+    let mut response = Sse::new(events)
+        .keep_alive(KeepAlive::default())
+        .into_response();
+    // nginx 默认 `proxy_buffering on` 会把 SSE 攒成整段再发；`X-Accel-Buffering: no` 是
+    // 唯一的**逐响应**关闭开关（改不了反代配置时也管用）。
+    response.headers_mut().insert(
+        HeaderName::from_static("x-accel-buffering"),
+        HeaderValue::from_static("no"),
+    );
+    Ok(response)
 }
 
 /// `POST /api/ws/sessions/{id}/send`
@@ -90,3 +138,7 @@ pub(crate) async fn ws_close(
 
 // 这三个 handler 都不碰数据库，故不取 `WebState`：会话状态住在 `simple_post_core::ws`
 // 的全局注册表里。
+
+#[cfg(test)]
+#[path = "ws_test.rs"]
+mod ws_tests;

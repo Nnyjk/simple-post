@@ -260,6 +260,8 @@ fn endpoint_of(
         path_params,
         headers,
         body,
+        // 导入的 IR 没有「投影出来的正文」这个概念：example 只由 GraphQL 导出填充。
+        body_example: None,
         auth,
         responses,
         docs: None,

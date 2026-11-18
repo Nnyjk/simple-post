@@ -8,6 +8,7 @@ import type {
   RequestProtocol,
   RewriteRule,
 } from '@/types/domain';
+import type { RequestProblem } from '../request-validation';
 
 /**
  * 影响请求**线上形态**的入参。超时 / 重定向 / 体积上限与调用方的 `AbortSignal` 只在执行期
@@ -159,4 +160,13 @@ export interface PreparedRequest {
    * 含义不明的 404。
    */
   missingPathParams: string[];
+  /**
+   * 组装期才发现的问题（目前只有 GraphQL：`{{var}}` 替换**之后** query 为空 / variables 不是
+   * 合法 JSON 对象）。空数组 = 这份请求可以发。
+   *
+   * 与 `validateRequest` 是两双眼睛：校验看到的是替换前的模板，占位符照例放行；替换后的真实
+   * 文本坏了只有这里知道。两者任一非空，发送 / 建连入口都不发出去——`body` 为 `null` 时
+   * `fetch` 不设 `init.body`，不拦的话会写出一个没有 body 的 POST。
+   */
+  problems: RequestProblem[];
 }

@@ -14,8 +14,10 @@ import { dispatchSseEvent, dispatchWsEvent } from './dispatch';
 import type {
   HttpStreamArgs,
   HttpStreamHandle,
+  SseEndEvent,
   SseHandlers,
   StreamErrorEvent,
+  WsClosedEvent,
   WsConnectArgs,
   WsHandlers,
   WsSessionHandle,
@@ -63,31 +65,70 @@ function asStreamError(error: unknown): StreamErrorEvent {
  * 读一条事件流：每行一个 JSON 事件（也接受 `data: ` 前缀的 SSE 帧）。切在行中间的那段留在
  * 缓冲区，下一段接着拼。
  */
-async function readEventStream(response: Response, onEvent: (raw: unknown) => void): Promise<void> {
+async function readEventStream(
+  response: Response,
+  onEvent: (raw: unknown) => void,
+  isTerminal: (raw: unknown) => boolean,
+): Promise<boolean> {
   if (response.body === null) throw new Error('流式响应没有 body');
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  let sawTerminal = false;
+
+  /** 交付一整行（已去掉行尾的 `\r`）；不是 JSON 的行没有事件语义，丢掉。 */
+  const emitLine = (rawLine: string): void => {
+    if (rawLine === '') return;
+    const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
+    if (line === '') return;
+    const text = line.startsWith('data:') ? line.slice(5).trimStart() : line;
+    let event: unknown;
+    try {
+      event = JSON.parse(text);
+    } catch {
+      // 心跳、代理插入的文本。
+      return;
+    }
+    if (isTerminal(event)) sawTerminal = true;
+    onEvent(event);
+  };
+
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
     let newline = buffer.indexOf('\n');
     while (newline !== -1) {
-      const rawLine = buffer.slice(0, newline);
+      emitLine(buffer.slice(0, newline));
       buffer = buffer.slice(newline + 1);
-      const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
-      if (line !== '') {
-        const text = line.startsWith('data:') ? line.slice(5).trimStart() : line;
-        try {
-          onEvent(JSON.parse(text));
-        } catch {
-          // 不是 JSON 的行（心跳、代理插入的文本）没有事件语义，丢掉。
-        }
-      }
       newline = buffer.indexOf('\n');
     }
   }
+
+  // EOF 时缓冲区里的残留不是垃圾：后端可能把最后一条事件（尤其是 `end`）写在流尾而不补
+  // 换行，直接丢掉，面板就会永远停在 streaming。`decoder.decode()` 无参调用冲掉多字节
+  // 字符的残片后，把剩下那半行当作一次正常的行交付。
+  buffer += decoder.decode();
+  emitLine(buffer);
+  return sawTerminal;
+}
+
+/** 非 200 的响应体形如 `{"code","message"}`：把那句话拼进错误里；拿不到就只报状态与地址。 */
+async function httpFailure(response: Response, url: string): Promise<Error> {
+  const base = `HTTP ${response.status} ${url}`;
+  try {
+    const text = await response.text();
+    const parsed: unknown = JSON.parse(text);
+    if (typeof parsed === 'object' && parsed !== null) {
+      const message = (parsed as { message?: unknown }).message;
+      if (typeof message === 'string' && message.trim() !== '') {
+        return new Error(`${base}：${message.trim()}`);
+      }
+    }
+  } catch {
+    // 不是 JSON（代理页、纯文本）——保持原文。
+  }
+  return new Error(base);
 }
 
 /** 后台建连：失败只交给 `onError`，因为调用方拿到句柄时连接已经开始，没有 await 点可以拦。 */
@@ -97,17 +138,65 @@ async function connect(
   onEvent: (raw: unknown) => void,
   aborted: () => boolean,
   onError: (event: StreamErrorEvent) => void,
+  /** 什么算收尾事件（SSE 的 `end`、WS 的 `closed`，以及两种的 `error`）。 */
+  isTerminal: (raw: unknown) => boolean,
+  /**
+   * 没收到收尾事件时补的那一条。后端把事件流关掉却没发 `end` / `closed`（或本地中止了
+   * 读取）时，面板与响应历史都等这一条才会落地。
+   */
+  terminalFallback: () => unknown,
 ): Promise<void> {
+  let terminalSeen = false;
+  const emit = (raw: unknown): void => {
+    if (isTerminal(raw)) terminalSeen = true;
+    onEvent(raw);
+  };
   try {
     const response = await fetch(url, init);
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status} ${url}`);
-    }
-    await readEventStream(response, onEvent);
+    if (!response.ok) throw await httpFailure(response, url);
+    terminalSeen = await readEventStream(response, emit, isTerminal);
   } catch (error) {
-    if (aborted()) return;
+    if (aborted()) {
+      // 宽限时间内后端没把收尾事件送回来，本地读取被中止：仍然补一条，否则面板停在
+      // 「运行中」、SSE 也不写历史。
+      if (!terminalSeen) emit(terminalFallback());
+      return;
+    }
     onError(asStreamError(error));
+    return;
   }
+  if (!terminalSeen) emit(terminalFallback());
+}
+
+/** SSE 的收尾：`end` 正常结束，`error` 之后后端不再发事件。 */
+function isTerminalSseEvent(raw: unknown): boolean {
+  if (typeof raw !== 'object' || raw === null) return false;
+  const { type } = raw as { type?: unknown };
+  return type === 'end' || type === 'error';
+}
+
+function isTerminalWsEvent(raw: unknown): boolean {
+  if (typeof raw !== 'object' || raw === null) return false;
+  const { type } = raw as { type?: unknown };
+  return type === 'closed' || type === 'error';
+}
+
+/**
+ * 没等到 `end` 时的收尾。`durationMs` / `sizeBytes` 不知道就报 0，`truncated` 说真话：
+ * 这条流没有按契约结束。`reason` 区分「后端关流没发 end」与「本地中止了读取」。
+ */
+function sseEndFallback(controller: AbortController): () => SseEndEvent {
+  return () => ({
+    type: 'end',
+    durationMs: 0,
+    sizeBytes: 0,
+    truncated: true,
+    reason: controller.signal.aborted ? 'stopped' : 'eof',
+  });
+}
+
+function wsClosedFallback(): WsClosedEvent {
+  return { type: 'closed', code: null, reason: '', at: Date.now() };
 }
 
 export function openHttpStream(args: HttpStreamArgs, handlers: SseHandlers): HttpStreamHandle {
@@ -123,6 +212,8 @@ export function openHttpStream(args: HttpStreamArgs, handlers: SseHandlers): Htt
     (raw) => dispatchSseEvent(raw, handlers),
     () => controller.signal.aborted,
     (event) => handlers.onError?.(event),
+    isTerminalSseEvent,
+    sseEndFallback(controller),
   );
 
   return {
@@ -151,6 +242,8 @@ export function openWsSession(args: WsConnectArgs, handlers: WsHandlers): WsSess
     (raw) => dispatchWsEvent(raw, handlers),
     () => controller.signal.aborted,
     (event) => handlers.onError?.(event),
+    isTerminalWsEvent,
+    wsClosedFallback,
   );
 
   return {

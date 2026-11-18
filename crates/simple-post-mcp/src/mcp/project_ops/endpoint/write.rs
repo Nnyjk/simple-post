@@ -357,9 +357,12 @@ pub(super) async fn tool_endpoint_update(
         // 一个键后写进一份「看起来设好了、其实没有」的设置。
         tls: patch_field::<TlsSettingsInput>(&patch_obj, "tls")?.map(|inner| inner.map(Into::into)),
         // 协议：缺席不动；`null` 回到默认 http；字符串必须是四个线上值之一。
-        protocol: patch_field::<String>(&patch_obj, "protocol")?
-            .map(|raw| parse_protocol(raw.as_deref()))
-            .transpose()?,
+        // 域类型现在也是 `double_option`，这里把「键在不在」与「值是不是 null」原样
+        // 传下去，由数据库那层把 `None` 落成默认值。
+        protocol: match patch_field::<String>(&patch_obj, "protocol")? {
+            None => None,
+            Some(raw) => Some(Some(parse_protocol(raw.as_deref())?)),
+        },
         // GraphQL 配置整份替换：缺席不动，`null` 清空，对象 = 用它换掉整份。
         graphql: patch_field::<GraphQlRequestInput>(&patch_obj, "graphql")?
             .map(coerce_graphql)

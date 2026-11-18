@@ -3,7 +3,7 @@ import { useAppStore, useActiveEndpointResource } from '@/stores/app-store';
 import { type BaseUrlSelection } from '@/features/http-tester/BaseUrlPicker';
 import { type HttpMethod, type RequestProtocol } from '@/types/domain';
 import { type FormatResult } from '@/lib/utils';
-import { validateRequest } from '@/lib/request-validation';
+import { validateRequest, type RequestProblem } from '@/lib/request-validation';
 import { UNTITLED_ENDPOINT_NAME, type EndpointDraft } from '@/stores/store-types';
 import { buildHeaderSuggestions } from '@/lib/common-headers';
 import { useHttpTesterMotion } from './useHttpTesterMotion';
@@ -201,6 +201,17 @@ export function HttpTester() {
     if (missing.length > 0) setTab('path');
   }, []);
 
+  /**
+   * 组装期问题的出口：把第一条话钉到既有错误面，并切到出问题的那一页。与 `runValidation`
+   * 分开——它看的是替换**之后**的文本，校验期看不到（占位符在校验时一律放行）。
+   */
+  const handleRequestProblems = useCallback((problem: RequestProblem) => {
+    setValidationError(problem.message);
+    // 与校验同一条规则：GraphQL 的问题住在查询编辑器里。
+    if (problem.tab === 'body') setTab('body');
+    else setTab('graphql');
+  }, []);
+
   /** 跑校验，钉住或清除徽标，并回报是否通过。失败时顺带切到出问题的那一页。 */
   const runValidation = useCallback((): boolean => {
     const issue = validateRequest({
@@ -290,6 +301,22 @@ export function HttpTester() {
   const method = parts.method;
   const protocol = effective.protocol;
 
+  /**
+   * WS 的地址、连接与帧都在「响应」页。进入 WS（切换协议或打开一个 WS 端点）时落到那一页：
+   * 页签若停在 Params 上，URL 栏又被面板取代，界面上就没有连接按钮。只做一次 —— 之后用户
+   * 去 Params / Auth 编辑属于他的选择，不该被拽回来。
+   */
+  const wsLandedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (protocol !== 'websocket' || !endpoint) {
+      wsLandedFor.current = null;
+      return;
+    }
+    if (wsLandedFor.current === endpoint.id) return;
+    wsLandedFor.current = endpoint.id;
+    setTab('response');
+  }, [protocol, endpoint]);
+
   /** 改请求方法 —— 与其它编辑器一样写进草稿。 */
   const handleMethodChange = (m: HttpMethod) => {
     if (endpoint) setEndpointDraft(endpoint.id, { method: m });
@@ -358,6 +385,7 @@ export function HttpTester() {
   const handlePickQueryHistory = useCallback(
     (entry: QueryHistoryEntry) => {
       // 历史行带的是 query / variables / operationName 三段，直接整份写回草稿。
+      // 变量在这份快照里已解析成明文（见 `query-history.ts`）：回填的是那次发出的请求。
       patchDraft({ graphql: entry });
     },
     [patchDraft],
@@ -388,6 +416,12 @@ export function HttpTester() {
   const handleStartStream = () => {
     if (!endpoint) return;
     if (!runValidation()) return;
+    // 组装期问题：替换后的文本坏了，校验期放行过占位符，故这一步不能省。
+    const problem = prepared.problems[0];
+    if (problem) {
+      handleRequestProblems(problem);
+      return;
+    }
     // 与 HTTP 发送同一道路径参数闸门：带着 `{id}` 建流只会收到 404。拦下时同样切到
     // 「路径参数」页，用户一眼看得见缺哪个。
     if (!pathParamsReady(prepared, handlePathParamGate)) return;
@@ -451,6 +485,7 @@ export function HttpTester() {
     tlsOverride: effective.tls,
     runValidation,
     onPathParamGate: handlePathParamGate,
+    onRequestProblems: handleRequestProblems,
     setRequestPending,
     setLastResponse,
     setLastScriptOutcome,

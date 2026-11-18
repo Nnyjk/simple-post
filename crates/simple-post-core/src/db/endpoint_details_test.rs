@@ -607,7 +607,7 @@ fn an_endpoint_without_graphql_config_stores_null_not_an_empty_object() {
 }
 
 /// `graphql` 这一列的三态：缺席 = 不动，`null` = 清空，写值 = 整体替换。
-/// `protocol` 没有 null 形态，缺席即不动。
+/// `protocol` 同样三态：缺席 = 不动，`null` = 回到默认 `http`，写值 = 换协议。
 #[test]
 fn the_graphql_column_distinguishes_absent_from_null() {
     let (pool, _dir) = fresh_pool();
@@ -667,6 +667,21 @@ fn the_graphql_column_distinguishes_absent_from_null() {
     assert_eq!(
         db::with_conn(&pool, |c| get(c, "e1")).unwrap().graphql,
         Some(graphql())
+    );
+
+    // `protocol: null`：回到默认 http，而不是「不动」。REST 与 MCP 必须同一个结论。
+    db::with_tx(&pool, |c| {
+        update(
+            c,
+            "e1",
+            serde_json::from_str(r#"{"protocol":null}"#).unwrap(),
+        )
+    })
+    .unwrap();
+    assert_eq!(
+        db::with_conn(&pool, |c| get(c, "e1")).unwrap().protocol,
+        RequestProtocol::Http,
+        "显式 null 必须把协议落回默认值"
     );
 }
 

@@ -296,8 +296,3 @@ fn tls_path(v: &Value, field: &str) -> Result<Option<String>, AppError> {
         ))),
     }
 }
-
-/// `HttpMethod` 还原成线上字符串。
-pub(super) fn format_method(m: &simple_post_core::domain::HttpMethod) -> String {
-    m.as_str().to_string()
-}

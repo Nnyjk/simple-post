@@ -139,6 +139,17 @@ export async function sendBatchItem(
   }
   const request = prepareEndpointRequest(parts, dynamicVars);
 
+  // 组装期问题：校验看到的是替换前的模板（占位符放行），`variables: {"id": {{id}}}` +
+  // `id=abc` 这种替换后才坏掉的情况只有这里知道。不拦就会发出一条没有 body 的 POST，
+  // 并把它的真实响应记成这一项的结果。
+  const problem = request.problems[0];
+  if (problem) {
+    return {
+      ...failed(item, 'blocked', problem.message),
+      missingVars: request.missingVars,
+    };
+  }
+
   // 路径参数缺值时不发出去：它按 OpenAPI 惯例是必填的，带着 `{id}` 发出去只会换一个
   // 含义不明的 404，而用户看不出是自己漏填了一个值。与单次发送同一道门。
   if (request.missingPathParams.length > 0) {

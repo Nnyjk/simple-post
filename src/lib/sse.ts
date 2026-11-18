@@ -92,7 +92,10 @@ export function createSseParser(): SseParser {
 
     flush(): SseEvent[] {
       if (buffer !== '') {
-        feedLine(buffer);
+        // 末尾那个孤立的 CR 是被截断的 CRLF 的前半（`push` 特意留着它等下一段），不是
+        // 数据：流到这里就结束，说明下一半永远不会来。丢掉它，其余照发。
+        const trailing = buffer.endsWith('\r') ? buffer.slice(0, -1) : buffer;
+        if (trailing !== '') feedLine(trailing);
         buffer = '';
       }
       dispatch();

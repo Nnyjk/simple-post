@@ -49,7 +49,6 @@ pub(super) struct ExecutedRequest {
 /// 完成（它在 `crate::tls::resolve` 里把两档合起来），故 MCP 侧只交出该交的那一份。
 pub(super) async fn execute_resolved(
     state: &AppState,
-    method: &str,
     resolved: ResolvedEndpoint,
     env: Option<&Environment>,
     endpoint_id: Option<String>,
@@ -58,6 +57,7 @@ pub(super) async fn execute_resolved(
 ) -> Result<ExecutedRequest, AppError> {
     let ResolvedEndpoint {
         url,
+        method,
         headers,
         body,
         body_base64,
@@ -139,7 +139,7 @@ pub(super) async fn execute_resolved(
         simple_post_core::script::ScriptedSendInput {
             endpoint_id,
             request: simple_post_core::script::ScriptRequest {
-                method: method.to_string(),
+                method,
                 url: url.clone(),
                 headers: headers.clone(),
                 body,
@@ -180,7 +180,6 @@ pub(super) async fn execute_resolved(
 /// 上下文，一个失败就该让调用方看见）。
 pub(super) async fn send_resolved(
     state: &AppState,
-    method: &str,
     resolved: ResolvedEndpoint,
     env: Option<&Environment>,
     endpoint_id: Option<String>,
@@ -188,16 +187,9 @@ pub(super) async fn send_resolved(
     tls_override: Option<TlsSettings>,
 ) -> Result<CallToolResult, AppError> {
     let missing_path_params = resolved.missing_path_params.clone();
-    let executed = execute_resolved(
-        state,
-        method,
-        resolved,
-        env,
-        endpoint_id,
-        settings,
-        tls_override,
-    )
-    .await?;
+    let method = resolved.method.clone();
+    let executed =
+        execute_resolved(state, resolved, env, endpoint_id, settings, tls_override).await?;
     if executed.blocked {
         return Err(AppError::Validation(format!(
             "path parameter(s) have no value: {}. Set them on the endpoint's path \
@@ -206,7 +198,7 @@ pub(super) async fn send_resolved(
         )));
     }
     Ok(build_result_envelope(
-        method,
+        &method,
         &executed.url,
         &executed.http,
         None,

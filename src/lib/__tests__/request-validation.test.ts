@@ -87,3 +87,68 @@ describe('validateRequest 认得带占位符的模板', () => {
     assert.equal(issue.tab, 'body');
   });
 });
+
+describe('validateRequest 的 GraphQL 分支', () => {
+  const graphql = (query: string, variables: string) => ({ query, variables });
+
+  it('query 只有空白时拦下，问题挂在 graphql 页', () => {
+    const issue = validateRequest({
+      body: body(''),
+      protocol: 'graphql',
+      graphql: graphql('   ', ''),
+    });
+    assert.ok(issue, 'expected an issue');
+    assert.equal(issue.tab, 'graphql');
+    assert.match(issue.message, /查询为空/);
+  });
+
+  it('variables 含占位符时不判形状：替换后是否成立由组装期的 problems 裁决', () => {
+    // 三种占位符形态在模板阶段都不是合法 JSON，但替换后都可能是合法的：
+    // 整段引用一行 variables、值位置、键位置。
+    for (const variables of ['{{vars}}', '{"id": {{id}}}', '{ {{key}}: 1 }']) {
+      assert.equal(
+        validateRequest({
+          body: body(''),
+          protocol: 'graphql',
+          graphql: graphql('{ me }', variables),
+        }),
+        null,
+        variables,
+      );
+    }
+  });
+
+  it('没有占位符时照旧严格校验成 JSON 对象', () => {
+    const issue = validateRequest({
+      body: body(''),
+      protocol: 'graphql',
+      graphql: graphql('{ me }', '[1,2]'),
+    });
+    assert.ok(issue, 'expected an issue');
+    assert.equal(issue.tab, 'graphql');
+    assert.match(issue.message, /必须是 JSON 对象/);
+
+    const broken = validateRequest({
+      body: body(''),
+      protocol: 'graphql',
+      graphql: graphql('{ me }', '{oops'),
+    });
+    assert.ok(broken, 'expected an issue');
+    assert.match(broken.message, /不是合法 JSON/);
+  });
+
+  it('合法对象与空白 variables 都放行', () => {
+    assert.equal(
+      validateRequest({
+        body: body(''),
+        protocol: 'graphql',
+        graphql: graphql('{ me }', '{"id": 1}'),
+      }),
+      null,
+    );
+    assert.equal(
+      validateRequest({ body: body(''), protocol: 'graphql', graphql: graphql('{ me }', '  ') }),
+      null,
+    );
+  });
+});

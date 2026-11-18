@@ -102,7 +102,22 @@ pub(crate) fn table() -> Vec<ToolEntry> {
                     },
                     "timeout_ms": { "type": "integer" },
                     "follow_redirects": { "type": "boolean" },
-                    "max_response_size_kb": { "type": "integer" }
+                    "max_response_size_kb": { "type": "integer" },
+                    "protocol": {
+                        "type": "string",
+                        "enum": ["http", "graphql", "sse", "websocket"],
+                        "description": "Transport protocol, http by default. sse and websocket are long-lived sessions and are rejected here; graphql turns the request into a POST of the GraphQL payload described by `graphql`."
+                    },
+                    "graphql": {
+                        "type": "object",
+                        "properties": {
+                            "query": { "type": "string", "description": "GraphQL document. May contain {{var}}." },
+                            "variables": { "type": "string", "description": "JSON object text after variable substitution. Blank omits variables; a non-object is rejected." },
+                            "operationName": { "type": "string", "description": "Trimmed; blank omits it." }
+                        },
+                        "required": ["query"],
+                        "additionalProperties": false
+                    }
                 },
                 "required": ["method", "url"],
                 "additionalProperties": true,

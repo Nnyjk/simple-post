@@ -169,8 +169,11 @@ export const createStreamSlice: StateCreator<AppState, [], [], StreamSlice> = (s
   sseEvents: (tabId, entries, bytes) =>
     set((s) => {
       const run = s.lastStreams[tabId]?.sse;
-      if (!run || entries.length === 0) return {};
-      const merged = [...run.events, ...entries];
+      if (!run) return {};
+      // 一次调用可能只带字节而不带事件（`stream-sessions.ts` 每收到一段原始文本就报一次
+      // 字节数）：这时只累加 `bytes`，事件列表与计数原地不动。两者合在同一个动作里，
+      // 故早期返回不能把字节一起丢掉 —— 否则面板上的「已接收」永远是 0。
+      const merged = entries.length === 0 ? run.events : [...run.events, ...entries];
       const listed =
         merged.length > SSE_MAX_LISTED_EVENTS ? merged.slice(-SSE_MAX_LISTED_EVENTS) : merged;
       return {

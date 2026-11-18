@@ -44,6 +44,7 @@ function prepared(c: ParityCase): PreparedRequest {
     missingPathParams: [],
     // 变量池：取 OAuth2 的 token 时由后端用它替换配置里的 `{{var}}`。
     vars: {},
+    problems: [],
   };
 }
 

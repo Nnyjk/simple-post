@@ -14,6 +14,7 @@ import { buildOrderedHeaders } from './headers';
 import { buildPool, createMissingTracker } from './pool';
 import { wellFormedDeep } from '../well-formed';
 import { buildGraphQlPayload } from '../graphql';
+import type { RequestProblem } from '../request-validation';
 import type { BuildInput, PrepareRequestInput, PreparedRequest } from './types';
 
 /**
@@ -59,6 +60,7 @@ export function prepareRequest(rawInput: PrepareRequestInput): PreparedRequest {
   // `graphql_payload` 也替换 query，两边少一处就会让同一个端点发出不同的查询文本。
   const isGraphQl = input.protocol === 'graphql';
   const graphQlIssues: string[] = [];
+  const problems: RequestProblem[] = [];
   let graphQlBody: string | null = null;
   if (isGraphQl) {
     const query = resolveVarsWithMissing(input.graphql?.query ?? '', pool);
@@ -69,7 +71,12 @@ export function prepareRequest(rawInput: PrepareRequestInput): PreparedRequest {
       input.graphql ? { ...input.graphql, query: query.value, variables: variables.value } : null,
     );
     if (built.ok) graphQlBody = built.body;
-    else graphQlIssues.push(...built.problems);
+    else {
+      graphQlIssues.push(...built.problems);
+      // 组装期的问题是发送侧的闸门。校验看到的是**替换前**的模板（占位符放行），
+      // `variables: {"id": {{id}}}` + `id=abc` 那种替换后才坏掉的情况只有这里知道。
+      problems.push(...built.problems.map((message) => ({ tab: 'graphql' as const, message })));
+    }
   }
 
   const auth = resolveAuth(input.auth, pool, missing);
@@ -165,10 +172,13 @@ export function prepareRequest(rawInput: PrepareRequestInput): PreparedRequest {
     headers,
     body,
     bodyBase64,
-    // GraphQL 缺查询 / variables 坏了没有专门的通道：它们与缺变量一起走 `missingVars`，
-    // 发送那一步由 `validateRequest` 挡在前面，故这里不抛异常。
+    // GraphQL 缺查询 / variables 坏了没有专门的通道：它们与缺变量一起走 `missingVars`。但
+    // `missingVars` 只是展示用的清单，**不是闸门**——校验期看到的是替换前的模板、占位符一律
+    // 放行，`variables: {"id": {{id}}}` + `id=abc` 这种替换后才坏掉的情况 `validateRequest`
+    // 根本看不见。发送 / 建连入口看的是 `problems`，非空就不发（否则会发出一个没有 body 的 POST）。
     missingVars: [...missing.list(), ...graphQlIssues],
     missingPathParams: substituted.missing,
+    problems,
     // 变量池随结果一起走：OAuth2 取 token 时要用的正是这一份（见 `PreparedRequest.vars`）。
     vars: pool,
   };

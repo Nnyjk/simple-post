@@ -159,6 +159,68 @@ async fn a_run_request_gets_the_same_treatment_as_a_stored_endpoint() {
     );
 }
 
+/// `protocol: "graphql"` 不是装饰：临时请求的 GET 在线上必须变成 POST，正文由
+/// query / variables 组装，且变量先替换。
+#[tokio::test]
+async fn a_graphql_run_request_is_sent_as_a_post_with_the_projected_body() {
+    let (api, seen) = stub().await;
+    let st = mcp_state("graphql");
+    let (_, env_id, module_id) = seed(&st, &api);
+
+    tool_api_run_request(
+        &st,
+        json!({
+            "method": "GET",
+            "url": "/graphql",
+            "env_id": env_id,
+            "module_id": module_id,
+            "protocol": "graphql",
+            "graphql": {
+                "query": "query { user(id: {{token}}) { id } }",
+                "variables": "{\"b\":2,\"a\":1}",
+            },
+        }),
+    )
+    .await
+    .expect("call");
+
+    let wire = seen.lock().unwrap()[0].clone();
+    assert!(
+        wire.contains("POST /graphql HTTP/1.1"),
+        "GraphQL 固定走 POST，调用方写的 GET 不算数：{wire}"
+    );
+    let body = wire.split("\r\n\r\n").nth(1).unwrap_or_default();
+    assert_eq!(
+        body, "{\"query\":\"query { user(id: abc) { id } }\",\"variables\":{\"a\":1,\"b\":2}}",
+        "正文必须与 graphql_payload 的拼法一致（键序按字典序）：{wire}"
+    );
+}
+
+/// SSE / WebSocket 发不出去，必须在解析/发送之前明确拒绝，而不是悄悄当成 HTTP。
+#[tokio::test]
+async fn an_sse_run_request_is_rejected_before_anything_is_sent() {
+    let (api, seen) = stub().await;
+    let st = mcp_state("sse");
+    let (_, env_id, _module_id) = seed(&st, &api);
+
+    let outcome = tool_api_run_request(
+        &st,
+        json!({
+            "method": "GET",
+            "url": "/events",
+            "env_id": env_id,
+            "protocol": "sse",
+        }),
+    )
+    .await;
+
+    assert!(
+        matches!(&outcome, Err(AppError::Validation(m)) if m.contains("该端点协议是 sse")),
+        "sse 必须被拒绝：{outcome:?}"
+    );
+    assert!(seen.lock().unwrap().is_empty(), "被拒的调用不该出网");
+}
+
 #[tokio::test]
 async fn a_stale_environment_id_degrades_instead_of_failing_the_call() {
     // 调用方手里可能留着一个已经被删掉的环境 id。这不该让整次调用失败 ——

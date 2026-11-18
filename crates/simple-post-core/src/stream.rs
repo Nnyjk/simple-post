@@ -334,8 +334,9 @@ pub async fn run_with_cancel(
         size += bytes.len() as u64;
         pending.extend_from_slice(&bytes);
 
-        // 上限切在多字节字符中间时丢掉半个字符，而不是吐一个替换字符。
-        flush_pending(&mut sink, &mut pending, &mut seq, truncated);
+        // 上限切在多字节字符中间时丢掉半个字符，而不是吐一个替换字符：截断的残留直接丢，
+        // 故这里传 false（`flush_pending` 的文档就是这么约定的）。
+        flush_pending(&mut sink, &mut pending, &mut seq, false);
 
         if truncated {
             emit_end(&mut sink, start, size, true, "eof");

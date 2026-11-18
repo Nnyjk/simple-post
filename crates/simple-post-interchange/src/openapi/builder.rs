@@ -169,9 +169,19 @@ impl Builder {
                 Some(name) => json!({ "$ref": format!("#/components/schemas/{name}") }),
                 None => json!({ "type": "object" }),
             };
+            let mut media_object = Map::new();
+            media_object.insert("schema".into(), schema);
+            // 投影出来的正文是**会发出去的实例值**，不是 schema。能解析就写解析后的
+            // JSON，解析不了就写原串——文档里至少能看到它长什么样，而不是只有
+            // 「一个 object」这句空话。
+            if let Some(example) = &ep.body_example {
+                let value = serde_json::from_str::<Value>(example)
+                    .unwrap_or_else(|_| Value::String(example.clone()));
+                media_object.insert("example".into(), value);
+            }
             op.insert(
                 "requestBody".into(),
-                json!({ "content": { media: { "schema": schema } } }),
+                json!({ "content": { media: Value::Object(media_object) } }),
             );
         }
 

@@ -11,12 +11,14 @@ use std::convert::Infallible;
 
 use axum::{
     extract::Path,
-    http::StatusCode,
-    response::sse::{Event, KeepAlive, Sse},
+    http::{HeaderName, HeaderValue, StatusCode},
+    response::{
+        sse::{Event, KeepAlive, Sse},
+        IntoResponse, Response,
+    },
     Json,
 };
-use futures_util::stream::Stream;
-use tokio::sync::mpsc;
+use tokio::sync::mpsc::{self, error::TrySendError};
 
 use simple_post_core::http_executor::HttpRequestInput;
 use simple_post_core::stream::{self, StreamEvent, StreamSink};
@@ -25,13 +27,28 @@ use simple_post_core::tls;
 use crate::web_api::dto::HttpStreamBody;
 use crate::web_api::error::map_app_error;
 
+/// 下行队列的容量。有界是刻意的：SSE 是单向推送，浏览器慢读时没有任何办法把反压传回
+/// 上游的读取节奏，无界队列只会把整段响应体堆在内存里。
+const DOWNLINK_CAPACITY: usize = 256;
+
+/// 把事件投进下行队列的那一端。
+///
+/// 通道满（浏览器慢读 / 根本不读）或接收端已消失时**直接取消**这条流：这两种状态都
+/// 救不回来，继续读下去只会在内存里堆事件。代价是通道真满时 `end` 自己也可能挤不进去
+/// ——刻意接受：先保证内存有界，再谈事件完整。`end` 在正常路径下（容量 256）总能送达。
+fn sink_into(tx: mpsc::Sender<StreamEvent>, cancel_id: String) -> StreamSink {
+    Box::new(move |event| match tx.try_send(event) {
+        Ok(()) => {}
+        Err(TrySendError::Full(_)) | Err(TrySendError::Closed(_)) => {
+            stream::cancel(&cancel_id);
+        }
+    })
+}
+
 /// `POST /api/http/stream`
 pub(crate) async fn http_stream(
     Json(body): Json<HttpStreamBody>,
-) -> Result<
-    Sse<impl Stream<Item = Result<Event, Infallible>>>,
-    crate::web_api::error::HttpErrorResponse,
-> {
+) -> Result<Response, crate::web_api::error::HttpErrorResponse> {
     if body.stream_id.trim().is_empty() {
         return Err(map_app_error(
             simple_post_core::error::AppError::Validation(
@@ -57,25 +74,31 @@ pub(crate) async fn http_stream(
         ),
     };
 
-    let (tx, rx) = mpsc::unbounded_channel::<StreamEvent>();
+    let (tx, rx) = mpsc::channel::<StreamEvent>(DOWNLINK_CAPACITY);
     let id = body.stream_id;
     let cancel_id = id.clone();
-    let sink: StreamSink = Box::new(move |event| {
-        // 接收端没了（浏览器断开）就把任务停掉：继续读一个没人要的流没有意义。
-        if tx.send(event).is_err() {
-            stream::cancel(&cancel_id);
-        }
-    });
-    stream::spawn(id, input, sink);
+    stream::spawn(id, input, sink_into(tx, cancel_id));
 
     let events = futures_util::stream::unfold(rx, |mut rx| async move {
         let event = rx.recv().await?;
-        let data = serde_json::to_string(&event).unwrap_or_else(|_| "{}".into());
+        // `StreamEvent` 的字段只有 String / u64 / Vec：序列化不可能失败。真失败就是代码
+        // 缺陷，静默写成 `{}` 只会让渲染层丢帧且查不到原因。
+        let data =
+            serde_json::to_string(&event).expect("StreamEvent 一定可序列化：字段只有 String/u64");
         Some((Ok::<_, Infallible>(Event::default().data(data)), rx))
     });
 
     // 心跳让反代与浏览器都知道连接还活着；SSE 的注释行不会被渲染层当成事件。
-    Ok(Sse::new(events).keep_alive(KeepAlive::default()))
+    let mut response = Sse::new(events)
+        .keep_alive(KeepAlive::default())
+        .into_response();
+    // nginx 默认 `proxy_buffering on` 会把 SSE 攒成整段再发；`X-Accel-Buffering: no` 是
+    // 唯一的**逐响应**关闭开关（改不了反代配置时也管用）。
+    response.headers_mut().insert(
+        HeaderName::from_static("x-accel-buffering"),
+        HeaderValue::from_static("no"),
+    );
+    Ok(response)
 }
 
 /// `DELETE /api/http/stream/{id}`：取消一条流。
@@ -86,3 +109,7 @@ pub(crate) async fn http_stream_cancel(Path(id): Path<String>) -> StatusCode {
     let _cancelled = stream::cancel(&id);
     StatusCode::NO_CONTENT
 }
+
+#[cfg(test)]
+#[path = "stream_test.rs"]
+mod stream_tests;
