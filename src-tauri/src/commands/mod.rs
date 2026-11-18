@@ -25,6 +25,8 @@ mod environments;
 // 导入 / 导出的四个入口。逻辑在 `crate::interchange_api`（server crate），这里只是
 // Tauri 侧的薄壳——REST 路由调的是同一批函数。
 mod interchange;
+// 日志导出的两个入口。逻辑在 `crate::log_api`（server crate），这里只是 Tauri 侧的薄壳。
+mod logs;
 mod mcp_auto_start;
 mod mcp_capability;
 mod mcp_http_config;
@@ -50,6 +52,7 @@ pub use dto::*;
 pub use dynamic_variables::*;
 pub use environments::*;
 pub use interchange::*;
+pub use logs::*;
 pub use mcp_auto_start::*;
 pub use mcp_capability::*;
 pub use mcp_http_config::*;

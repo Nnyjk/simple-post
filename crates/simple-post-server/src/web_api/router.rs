@@ -275,6 +275,13 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
             "/api/preferences",
             get(preferences_get).put(preferences_put),
         )
+        // ---- logs ----
+        //
+        // 两条都**不在** `auth::is_public_path` 名单里：导出可能带上凭据与内部地址，
+        // 口令模式下必须带 bearer。`/client` 是渲染层 `console.error` / 未捕获异常的
+        // 上报口，逻辑在 `crate::log_api`。
+        .route("/api/logs/export", get(logs_export))
+        .route("/api/logs/client", post(logs_client))
         // ---- updates（只有无头 serve-web 用；桌面端走 tauri updater 插件）----
         //
         // `check` 的失败也是 200：降级信息在响应体的 `error` 字段里，因为渲染层的

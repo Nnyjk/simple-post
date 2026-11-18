@@ -32,7 +32,7 @@ pub use simple_post_mcp::{daemon_http, mcp};
 // `project_api` 与 `environment_api` 也是 —— 项目、节点与环境的创建编排。
 pub use simple_post_server::{
     auth, cli, daemon_supervisor, dto, dynamic_api, environment_api, http_config, interchange_api,
-    port_registry, project_api, update_api, web_api,
+    log_api, port_registry, project_api, update_api, web_api,
 };
 
 // CLI 入口。`serve-web` / `mcp` 与宿主无关，归 server crate；桌面二进制仍转发到它们，
@@ -229,6 +229,10 @@ pub fn run() {
             // 线上发布说明。桌面壳只有这一条 update 命令：安装由 updater 插件负责，
             // `update_deployment` / `update_apply` 的语义（运维声明的本机更新命令）桌面没有。
             crate::commands::update_check,
+            // 日志导出与渲染进程上报。两条都只调 `crate::log_api`，REST 侧同名路由调的是
+            // 同一批函数。
+            crate::commands::log_export,
+            crate::commands::log_client_event,
             // 流式传输：SSE 的 start/cancel 与 WebSocket 的 open/send/close。
             crate::commands::stream_request,
             crate::commands::stream_cancel,
