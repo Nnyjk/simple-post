@@ -181,9 +181,21 @@ async fn resolve_one(
     fetcher: &dyn SourceFetcher,
 ) -> Result<OneOutcome, AppError> {
     let env_key = source.environment_id.clone().unwrap_or_default();
-    let entry = db::with_conn(&ctx.pool, |c| {
-        db::dynamic_variable_cache::get(c, &def.id, &env_key)
-    })?;
+    // 没有数据源时算不出环境（缓存键退化成空键），而覆盖值当初是按它那时生效的环境键写下的
+    // ——故这时横跨定义的所有环境键找仍然生效的那一份，人手写的值不因为数据源被删就消失。
+    // 只找覆盖值：没有数据源支撑的自动值不该被这样翻出来。
+    let entry = if def.has_source() {
+        db::with_conn(&ctx.pool, |c| {
+            db::dynamic_variable_cache::get(c, &def.id, &env_key)
+        })?
+    } else {
+        let scanned_at = crate::domain::now_ms();
+        db::with_conn(&ctx.pool, |c| {
+            db::dynamic_variable_cache::live_overrides_for_definition(c, &def.id, scanned_at)
+        })?
+        .into_iter()
+        .next()
+    };
     // 判活用的时刻不早于读到的那一行：先读行、再取时刻，恰好在这两个动作之间到期的覆盖值
     // 才判得成过期，而不是被当成活值返回。
     let now = crate::domain::now_ms();
@@ -202,7 +214,7 @@ async fn resolve_one(
         Decision::UseCache { value_json } => Ok(cache_outcome(def, entry.as_ref(), &value_json)),
         // 这次结论只说「大概要走取数」：单飞行锁要等，等的那段时间缓存行还会变，故
         // `fetch_one` 拿到锁之后会重算一次。
-        Decision::Fetch { .. } => fetch_one(ctx, def, source, force, seen_override, fetcher).await,
+        Decision::Fetch => fetch_one(ctx, def, source, force, seen_override, fetcher).await,
     }
 }
 
@@ -273,33 +285,19 @@ async fn fetch_one(
         db::dynamic_variable_cache::get(c, &def.id, &env_key)
     })?;
     let now = crate::domain::now_ms();
-    let stale_fallback = match decide(def, entry.as_ref(), now, force) {
+    match decide(def, entry.as_ref(), now, force) {
         Decision::UseOverride { value_json } => {
             return Ok(override_outcome(def, entry.as_ref(), &value_json));
         }
         Decision::UseCache { value_json } => {
             return Ok(cache_outcome(def, entry.as_ref(), &value_json));
         }
-        Decision::Fetch { stale_fallback } => stale_fallback,
-    };
+        Decision::Fetch => {}
+    }
 
     let raw = match fetcher.fetch(def, ctx, source).await {
         Ok(raw) => raw,
-        Err(error) => {
-            // 取数失败：本次解析改用过期缓存值（定义允许时）。
-            if let Some(stale) = stale_fallback {
-                let value = serialize_value(&parse_raw(&stale), def.value_mode);
-                return Ok(OneOutcome {
-                    value: Some(value),
-                    source: DynamicValueSource::Stale,
-                    fetched_at: None,
-                    expires_at: None,
-                    is_override: false,
-                    error: Some(error),
-                });
-            }
-            return Ok(OneOutcome::missing(Some(error)));
-        }
+        Err(error) => return failure_fallback(ctx, def, &env_key, error),
     };
 
     if !(200..300).contains(&raw.status) {
@@ -308,7 +306,7 @@ async fn fetch_one(
             kind: DynamicErrorKind::Status,
             message: format!("数据源返回 {}", raw.status),
         };
-        return Ok(fallback_or_missing(def, stale_fallback, error));
+        return failure_fallback(ctx, def, &env_key, error);
     }
 
     let extracted = match extract_value(&raw.body, &def.extract_path) {
@@ -325,14 +323,14 @@ async fn fetch_one(
                     _ => format!("抽取路径 '{}' 不是合法的 JSONPath", def.extract_path),
                 },
             };
-            return Ok(fallback_or_missing(def, stale_fallback, error));
+            return failure_fallback(ctx, def, &env_key, error);
         }
     };
 
     // 处理脚本：抽取之后跑。JSONPath 负责「取哪一段」，脚本负责「这一段怎么变成值」。
     let extracted = match super::transform::apply(def, extracted, &raw, source).await {
         Ok(value) => value,
-        Err(error) => return Ok(fallback_or_missing(def, stale_fallback, error)),
+        Err(error) => return failure_fallback(ctx, def, &env_key, error),
     };
 
     let raw_json = serde_json::to_string(&extracted).unwrap_or_default();
@@ -347,8 +345,8 @@ async fn fetch_one(
                 MAX_VALUE_BYTES
             ),
         };
-        // 本次解析不把超大的值写进缓存表，但值已经取回来了——回退候选仍然可用。
-        return Ok(fallback_or_missing(def, stale_fallback, error));
+        // 本次解析不把超大的值写进缓存表；能不能用之前那份过期值顶上，按失败这一刻判。
+        return failure_fallback(ctx, def, &env_key, error);
     }
 
     let expires_at = now + def.ttl_seconds * 1000;
@@ -380,6 +378,15 @@ async fn fetch_one(
             Err(e) => return Err(e),
         };
         if !same_fetch_inputs(&current, def) {
+            return Ok(false);
+        }
+        // 地址随模块变：端点的 base URL 挂在（环境 × 模块）那一格上，端点被移到别的模块，
+        // 这次取数用的就是旧地址下的东西。故与取数开始那一刻的模块再比一次。
+        let module_now = match current.source_endpoint_id.as_deref() {
+            Some(endpoint_id) => db::nodes::module_id_of(c, endpoint_id)?,
+            None => None,
+        };
+        if module_now != source.module_id {
             return Ok(false);
         }
         if let Some(existing) = db::dynamic_variable_cache::get(c, &def.id, &env_key)? {
@@ -476,24 +483,34 @@ fn same_fetch_inputs(current: &DynamicVariable, fetched: &DynamicVariable) -> bo
         && current.transform_script == fetched.transform_script
 }
 
-/// 取数失败（或值不可用）时的退化：有回退候选就用它并标「过期值」，否则按缺失处理。
-fn fallback_or_missing(
+/// 取数失败（或值不可用）时的退化：能拿一份过期值顶上就用它并标「过期值」，否则按缺失处理。
+///
+/// 能不能顶上按**失败这一刻**判：重读这一格缓存行再判，而不是沿用取数开始时的结论。一次
+/// 取数可能跨过那一行的过期点——开始还新鲜、失败时已经过期，那正是它该顶上的时刻；反过来，
+/// 开始就过期、中途被写成新鲜值的一行，此刻不该再当回退值。判活的时刻取在读到之后。
+fn failure_fallback(
+    ctx: &ResolveContext,
     def: &DynamicVariable,
-    stale_fallback: Option<String>,
+    env_key: &str,
     error: DynamicError,
-) -> OneOutcome {
-    match stale_fallback {
-        Some(stale) => {
-            let value = serialize_value(&parse_raw(&stale), def.value_mode);
-            OneOutcome {
-                value: Some(value),
-                source: DynamicValueSource::Stale,
-                fetched_at: None,
-                expires_at: None,
-                is_override: false,
-                error: Some(error),
-            }
-        }
-        None => OneOutcome::missing(Some(error)),
-    }
+) -> Result<OneOutcome, AppError> {
+    let entry = db::with_conn(&ctx.pool, |c| {
+        db::dynamic_variable_cache::get(c, &def.id, env_key)
+    })?;
+    let now = crate::domain::now_ms();
+    let Some(stale) = entry
+        .as_ref()
+        .and_then(|entry| super::cache::fallback_value(def, entry, now))
+    else {
+        return Ok(OneOutcome::missing(Some(error)));
+    };
+    let value = serialize_value(&parse_raw(&stale), def.value_mode);
+    Ok(OneOutcome {
+        value: Some(value),
+        source: DynamicValueSource::Stale,
+        fetched_at: None,
+        expires_at: None,
+        is_override: false,
+        error: Some(error),
+    })
 }

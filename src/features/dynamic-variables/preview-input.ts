@@ -84,10 +84,21 @@ export function previewExpectedEnvironment(input: PreviewInput): string | null {
   return input.environmentId || input.activeEnvironmentId;
 }
 
+/**
+ * 失败归谁：指纹 **加上此刻会生效的环境**。
+ *
+ * 比成功结果多认环境这一档，是因为两者的信息量不同：一份成功的响应自带「环境：X」，界面能
+ * 直接说出来，故指纹只判「来源/规则/脚本还是不是这一份」；而失败只有一句原因，跟哪个环境有
+ * 关系看不出来——同一条网络故障换个环境就是另一回事。少了这一档，A 的失败会挂在 B 名下。
+ */
+export function previewFailureKey(fingerprint: string, expectedEnvironment: string | null): string {
+  return `${fingerprint}\u0000${expectedEnvironment ?? ''}`;
+}
+
 /** 预览失败也只属于交出它的那份输入。 */
 export interface PreviewFailure {
-  /** 发起时那份输入的指纹。 */
-  fingerprint: string;
+  /** `previewFailureKey`：发起时那份输入的指纹 + 会生效的环境。 */
+  key: string;
   /** 后端或传输层给的原因。 */
   message: string;
 }
@@ -95,12 +106,10 @@ export interface PreviewFailure {
 /**
  * 这条失败该不该显示在当前草稿下面。
  *
- * 指纹对不上就是「上一份输入的失败」：把它摆在当前草稿名下，用户会以为刚改的这份也失败了。
+ * 键对不上就是「上一份输入（或另一个环境）的失败」：把它摆在当前草稿名下，用户会以为刚改的
+ * 这份也失败了。
  */
-export function previewFailureMessage(
-  failure: PreviewFailure | null,
-  fingerprint: string,
-): string | null {
-  if (failure === null || failure.fingerprint !== fingerprint) return null;
+export function previewFailureMessage(failure: PreviewFailure | null, key: string): string | null {
+  if (failure === null || failure.key !== key) return null;
   return failure.message;
 }

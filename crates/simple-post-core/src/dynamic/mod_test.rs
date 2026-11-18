@@ -232,32 +232,26 @@ fn an_expired_override_goes_back_to_fetching() {
     // 覆盖值过期了 → 重新取数。定义允许用过期值回退时，那个过期的覆盖值就是回退候选。
     let def = definition(60, true);
     let e = entry(true, 1_000, Some(500));
+    assert_eq!(decide(&def, Some(&e), 900, false), Decision::Fetch);
     assert_eq!(
-        decide(&def, Some(&e), 900, false),
-        Decision::Fetch {
-            stale_fallback: Some("\"v\"".to_string())
-        }
+        super::cache::fallback_value(&def, &e, 900).as_deref(),
+        Some("\"v\"")
     );
 
     // 定义不允许用过期值回退时没有候选。
     let strict = definition(60, false);
-    assert_eq!(
-        decide(&strict, Some(&e), 900, false),
-        Decision::Fetch {
-            stale_fallback: None
-        }
-    );
+    assert_eq!(decide(&strict, Some(&e), 900, false), Decision::Fetch);
+    assert_eq!(super::cache::fallback_value(&strict, &e, 900), None);
 }
 
 #[test]
 fn an_expired_cache_entry_is_fetched_again_and_keeps_the_stale_value_as_a_fallback() {
     let def = definition(60, true);
     let e = entry(false, 500, None);
+    assert_eq!(decide(&def, Some(&e), 900, false), Decision::Fetch);
     assert_eq!(
-        decide(&def, Some(&e), 900, false),
-        Decision::Fetch {
-            stale_fallback: Some("\"v\"".to_string())
-        }
+        super::cache::fallback_value(&def, &e, 900).as_deref(),
+        Some("\"v\"")
     );
 }
 
@@ -265,22 +259,15 @@ fn an_expired_cache_entry_is_fetched_again_and_keeps_the_stale_value_as_a_fallba
 fn a_stale_value_is_not_kept_as_a_fallback_when_the_definition_does_not_allow_it() {
     let def = definition(60, false);
     let e = entry(false, 500, None);
-    assert_eq!(
-        decide(&def, Some(&e), 900, false),
-        Decision::Fetch {
-            stale_fallback: None
-        }
-    );
+    assert_eq!(decide(&def, Some(&e), 900, false), Decision::Fetch);
+    assert_eq!(super::cache::fallback_value(&def, &e, 900), None);
 }
 
 #[test]
 fn force_ignores_a_fresh_cache_entry() {
     let def = definition(60, false);
     let e = entry(false, 1_000, None);
-    assert!(matches!(
-        decide(&def, Some(&e), 500, true),
-        Decision::Fetch { .. }
-    ));
+    assert_eq!(decide(&def, Some(&e), 500, true), Decision::Fetch);
 }
 
 #[test]
@@ -289,19 +276,13 @@ fn force_offers_only_an_expired_value_as_the_fallback() {
     // 但它不是过期值，取数失败时按缺失处理，而不是把它标成「过期值」交给界面。
     let def = definition(60, true);
     let fresh = entry(false, 1_000, None);
-    assert_eq!(
-        decide(&def, Some(&fresh), 500, true),
-        Decision::Fetch {
-            stale_fallback: None
-        }
-    );
+    assert_eq!(decide(&def, Some(&fresh), 500, true), Decision::Fetch);
+    assert_eq!(super::cache::fallback_value(&def, &fresh, 500), None);
 
     let expired = entry(false, 400, None);
     assert_eq!(
-        decide(&def, Some(&expired), 500, true),
-        Decision::Fetch {
-            stale_fallback: Some("\"v\"".to_string())
-        }
+        super::cache::fallback_value(&def, &expired, 500).as_deref(),
+        Some("\"v\"")
     );
 }
 
@@ -311,23 +292,14 @@ fn force_also_drops_a_live_override() {
     // 一个什么都不做的按钮比丢掉一份手动值更糟——丢掉是可见的（徽标变回「自动取回」）。
     let def = definition(60, false);
     let e = entry(true, 1_000, Some(9_999));
-    assert_eq!(
-        decide(&def, Some(&e), 500, true),
-        Decision::Fetch {
-            stale_fallback: None
-        }
-    );
+    assert_eq!(decide(&def, Some(&e), 500, true), Decision::Fetch);
+    assert_eq!(super::cache::fallback_value(&def, &e, 500), None);
 }
 
 #[test]
 fn an_absent_cache_entry_is_fetched() {
     let def = definition(60, false);
-    assert_eq!(
-        decide(&def, None, 500, false),
-        Decision::Fetch {
-            stale_fallback: None
-        }
-    );
+    assert_eq!(decide(&def, None, 500, false), Decision::Fetch);
 }
 
 // -------------------------------------------------------------------------
@@ -1332,6 +1304,32 @@ struct GatedFetcher {
     body: String,
 }
 
+/// 停在中途、放行之后报失败的取数器：用来测「失败那一刻」的判定。
+struct GatedFailure {
+    reached: tokio::sync::mpsc::Sender<()>,
+    release: tokio::sync::Mutex<tokio::sync::mpsc::Receiver<()>>,
+}
+
+impl SourceFetcher for GatedFailure {
+    fn fetch<'a>(
+        &'a self,
+        def: &'a DynamicVariable,
+        _ctx: &'a ResolveContext,
+        _source: &'a SourceContext,
+    ) -> Pin<Box<dyn Future<Output = Result<RawSource, DynamicError>> + Send + 'a>> {
+        Box::pin(async move {
+            let _ = self.reached.send(()).await;
+            let mut release = self.release.lock().await;
+            let _ = release.recv().await;
+            Err(DynamicError {
+                name: def.name.clone(),
+                kind: DynamicErrorKind::Network,
+                message: "连不上".into(),
+            })
+        })
+    }
+}
+
 /// 等一个「已经走到取数」的信号，超时就当失败。
 ///
 /// 被测代码若根本没走到取数，无超时的 `recv()` 会让整个测试进程挂在半路——那不是失败，
@@ -1862,4 +1860,308 @@ async fn a_fresh_value_cached_during_the_wait_is_not_returned_as_stale() {
         .expect("缓存行还在");
     assert!(!cached.is_override);
     assert_eq!(cached.value_json.as_deref(), Some("\"[1]\""));
+}
+
+// -------------------------------------------------------------------------
+// 数据源被删之后：覆盖值仍按它当初的环境键生效
+// -------------------------------------------------------------------------
+
+/// 数据源接口被删掉之后定义算不出环境（缓存键退化成空键），覆盖值仍按当初那个键活着。
+///
+/// 覆盖值是人手写的，与数据源无关：数据源没了不该让人手写的值一起消失。
+#[tokio::test]
+async fn an_override_saved_for_an_environment_survives_the_loss_of_the_source() {
+    let (pool, _dir) = pool_with_a_module();
+    let now = crate::domain::now_ms();
+    let mut seeded = definition(60, false);
+    seeded.source_endpoint_id = Some("e1".into());
+    seeded.source_inline_json = None;
+    seeded.source_environment_id = Some("env_a".into());
+    db::with_tx(&pool, |c| {
+        db::dynamic_variables::create(c, &seeded)?;
+        db::dynamic_variable_cache::upsert(
+            c,
+            &DynamicCacheEntry {
+                definition_id: "d1".into(),
+                environment_id: "env_a".into(),
+                value_json: Some("\"手写\"".into()),
+                fetched_at: now - 1_000,
+                expires_at: 0,
+                is_override: true,
+                override_expires_at: None,
+            },
+        )
+    })
+    .expect("seed 定义与覆盖值");
+
+    // 数据源端点被删：外键把 `source_endpoint_id` 置空，定义于是算不出环境。
+    db::with_tx(&pool, |c| db::nodes::delete(c, "e1")).expect("删数据源端点");
+    let def = db::with_conn(&pool, |c| db::dynamic_variables::get(c, "d1")).expect("重读定义");
+    assert!(
+        !def.has_source(),
+        "端点已删，定义不该还有数据源：{:?}",
+        def.source_endpoint_id
+    );
+
+    let fetcher = CountingFetcher::failing();
+    let status = resolve_definition(&context(&pool), &def, false, &fetcher)
+        .await
+        .expect("解析");
+
+    assert_eq!(fetcher.calls(), 0, "覆盖值不需要取数");
+    assert_eq!(status.value.as_deref(), Some("手写"));
+    assert_eq!(status.source, DynamicValueSource::Override);
+    assert!(status.error.is_none(), "{:?}", status.error);
+}
+
+/// 过期的覆盖值不因为数据源没了就复活；没有数据源支撑的自动值也不横跨环境键翻出来。
+#[tokio::test]
+async fn an_expired_override_of_a_lost_source_is_not_resurrected() {
+    let (pool, _dir) = seeded_pool();
+    let now = crate::domain::now_ms();
+    db::with_tx(&pool, |c| {
+        db::dynamic_variable_cache::upsert(
+            c,
+            &DynamicCacheEntry {
+                definition_id: "d1".into(),
+                environment_id: "env1".into(),
+                value_json: Some("\"手写\"".into()),
+                fetched_at: now - 1_000,
+                expires_at: 0,
+                is_override: true,
+                override_expires_at: Some(now - 1),
+            },
+        )?;
+        db::dynamic_variable_cache::upsert(
+            c,
+            &DynamicCacheEntry {
+                definition_id: "d1".into(),
+                environment_id: "env2".into(),
+                value_json: Some("\"自动\"".into()),
+                fetched_at: now - 1_000,
+                expires_at: now + 60_000,
+                is_override: false,
+                override_expires_at: None,
+            },
+        )
+    })
+    .expect("seed 缓存");
+
+    let mut def = definition(60, false);
+    def.source_inline_json = None;
+
+    let fetcher = CountingFetcher::failing();
+    let status = resolve_definition(&context(&pool), &def, false, &fetcher)
+        .await
+        .expect("解析");
+
+    assert_eq!(fetcher.calls(), 1, "没有能用的覆盖值就要去取数");
+    assert!(status.value.is_none(), "旧值不再生效：{:?}", status.value);
+    assert_eq!(status.source, DynamicValueSource::Missing);
+    assert!(status.error.is_some(), "取数失败要记一条错误");
+}
+
+/// 同一份定义在多个环境键上都留着覆盖值：取保存时刻最近的那一份。
+#[tokio::test]
+async fn a_lost_source_serves_the_most_recently_saved_override() {
+    let (pool, _dir) = seeded_pool();
+    let now = crate::domain::now_ms();
+    db::with_tx(&pool, |c| {
+        for (environment_id, value, fetched_at) in [
+            ("env1", "\"旧的\"", now - 5_000),
+            ("env2", "\"新的\"", now - 1_000),
+        ] {
+            db::dynamic_variable_cache::upsert(
+                c,
+                &DynamicCacheEntry {
+                    definition_id: "d1".into(),
+                    environment_id: environment_id.into(),
+                    value_json: Some(value.into()),
+                    fetched_at,
+                    expires_at: 0,
+                    is_override: true,
+                    override_expires_at: None,
+                },
+            )?;
+        }
+        Ok(())
+    })
+    .expect("seed 覆盖值");
+
+    let mut def = definition(60, false);
+    def.source_inline_json = None;
+
+    let status = resolve_definition(&context(&pool), &def, false, &CountingFetcher::failing())
+        .await
+        .expect("解析");
+
+    assert_eq!(status.value.as_deref(), Some("新的"));
+    assert_eq!(status.source, DynamicValueSource::Override);
+}
+
+/// 保存时刻相同时按环境键升序：SQLite 的自然行序不是契约，结果不能靠它。
+#[tokio::test]
+async fn a_lost_source_breaks_a_tie_by_environment_id() {
+    let (pool, _dir) = seeded_pool();
+    let now = crate::domain::now_ms();
+    db::with_tx(&pool, |c| {
+        for (environment_id, value) in [("env_b", "\"乙\""), ("env_a", "\"甲\"")] {
+            db::dynamic_variable_cache::upsert(
+                c,
+                &DynamicCacheEntry {
+                    definition_id: "d1".into(),
+                    environment_id: environment_id.into(),
+                    value_json: Some(value.into()),
+                    fetched_at: now - 1_000,
+                    expires_at: 0,
+                    is_override: true,
+                    override_expires_at: None,
+                },
+            )?;
+        }
+        Ok(())
+    })
+    .expect("seed 覆盖值");
+
+    let mut def = definition(60, false);
+    def.source_inline_json = None;
+
+    let status = resolve_definition(&context(&pool), &def, false, &CountingFetcher::failing())
+        .await
+        .expect("解析");
+
+    assert_eq!(status.value.as_deref(), Some("甲"));
+}
+
+// -------------------------------------------------------------------------
+// 取数期间定义或地址变了：这次的值不写回
+// -------------------------------------------------------------------------
+
+/// 取数期间端点被移到别的模块：base URL 挂在（环境 × 模块）那一格上，地址变了。
+#[tokio::test]
+async fn an_endpoint_moved_during_the_fetch_is_not_cached_under_the_old_module() {
+    let (pool, _dir) = pool_with_a_module();
+    let mut def = definition(60, false);
+    def.source_endpoint_id = Some("e1".into());
+    def.source_inline_json = None;
+    def.source_environment_id = Some("env_a".into());
+    db::with_tx(&pool, |c| db::dynamic_variables::create(c, &def)).expect("seed 定义");
+
+    let (reached_tx, mut reached_rx) = tokio::sync::mpsc::channel(1);
+    let (release_tx, release_rx) = tokio::sync::mpsc::channel(1);
+    let fetcher = Arc::new(GatedFetcher {
+        calls: AtomicUsize::new(0),
+        reached: reached_tx,
+        release: tokio::sync::Mutex::new(release_rx),
+        body: "\"取回\"".to_string(),
+    });
+
+    let task = tokio::spawn({
+        let pool = pool.clone();
+        let def = def.clone();
+        let fetcher = Arc::clone(&fetcher);
+        async move { resolve_definition(&context(&pool), &def, false, fetcher.as_ref()).await }
+    });
+    wait_for_fetch(&mut reached_rx, "取数").await;
+
+    // 请求在飞时端点被移到另一个模块。
+    db::with_tx(&pool, |c| {
+        db::nodes::create(
+            c,
+            &ResourceNode {
+                id: "m2".into(),
+                root_id: "p1".into(),
+                parent_id: None,
+                kind: ResourceNodeType::Module,
+                name: "另一个模块".into(),
+                description: None,
+                sort_order: 1,
+                created_at: 1,
+                updated_at: 1,
+            },
+            None,
+        )?;
+        db::nodes::reparent(c, "e1", Some("m2"))
+    })
+    .expect("移动端点");
+
+    release_tx.send(()).await.expect("放行取数器");
+    let status = task.await.expect("任务").expect("解析");
+
+    assert_eq!(
+        status.value.as_deref(),
+        Some("取回"),
+        "这次请求的值照常返回"
+    );
+    assert!(
+        status.expires_at.is_none(),
+        "地址变了就不写回：{:?}",
+        status.expires_at
+    );
+    let cached = db::with_conn(&pool, |c| db::dynamic_variable_cache::get(c, "d1", "env_a"))
+        .expect("读缓存");
+    assert!(cached.is_none(), "旧模块地址下取回的值不该进缓存");
+}
+
+// -------------------------------------------------------------------------
+// 取数失败时按**失败那一刻**再判能不能用过期值
+// -------------------------------------------------------------------------
+
+/// 取数开始时还新鲜、失败时已经过期的一行，正是它该顶上「过期值」的时刻。
+#[tokio::test]
+async fn a_value_that_expires_during_the_fetch_stands_in_when_the_fetch_fails() {
+    let (pool, _dir) = seeded_pool();
+    let def = definition(60, true);
+    let now = crate::domain::now_ms();
+    db::with_tx(&pool, |c| {
+        db::dynamic_variable_cache::upsert(
+            c,
+            &DynamicCacheEntry {
+                definition_id: "d1".into(),
+                environment_id: String::new(),
+                value_json: Some("[1]".into()),
+                fetched_at: now,
+                expires_at: now + 60_000,
+                is_override: false,
+                override_expires_at: None,
+            },
+        )
+    })
+    .expect("seed 缓存");
+
+    let (reached_tx, mut reached_rx) = tokio::sync::mpsc::channel(1);
+    let (release_tx, release_rx) = tokio::sync::mpsc::channel(1);
+    let fetcher = Arc::new(GatedFailure {
+        reached: reached_tx,
+        release: tokio::sync::Mutex::new(release_rx),
+    });
+
+    let task = tokio::spawn({
+        let pool = pool.clone();
+        let def = def.clone();
+        let fetcher = Arc::clone(&fetcher);
+        async move { resolve_definition(&context(&pool), &def, true, fetcher.as_ref()).await }
+    });
+    wait_for_fetch(&mut reached_rx, "取数").await;
+
+    // 取数期间这一行过期了：把过期时刻推到过去。
+    db::with_tx(&pool, |c| {
+        c.execute(
+            "UPDATE dynamic_variable_cache SET expires_at = 1 WHERE definition_id = 'd1'",
+            [],
+        )
+        .map_err(crate::error::AppError::Sqlite)
+    })
+    .expect("expire");
+
+    release_tx.send(()).await.expect("放行取数器");
+    let status = task.await.expect("任务").expect("解析");
+
+    assert_eq!(
+        status.source,
+        DynamicValueSource::Stale,
+        "失败这一刻它已经过期，可以顶上"
+    );
+    assert_eq!(status.value.as_deref(), Some("[1]"));
+    assert!(status.error.is_some(), "取数失败仍要记一条错误");
 }

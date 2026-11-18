@@ -28,6 +28,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { buildScriptSnippet, shouldConfirmOverwrite } from './extract-path';
 import {
   previewExpectedEnvironment,
+  previewFailureKey,
   previewFailureMessage,
   previewFingerprint,
   previewPayload,
@@ -126,12 +127,22 @@ export function ExtractPreview({
   const currentFingerprint = previewFingerprint(currentInput);
   // 与快照不同就说明结果已经不对应眼前这份草稿了（来源、抽取规则、脚本正文变了）。
   const draftChanged = snapshot !== null && snapshot.fingerprint !== currentFingerprint;
+  // 此刻再点一次会用的环境。界面只算得出一档（点名，否则调用方当前环境的那个）：算不出来时
+  // 后端还可能回落到源项目的默认环境，故它**只用来提示与归属失败**，不参与指纹。
+  const expectedEnvironment = previewExpectedEnvironment(currentInput);
   // 这份响应是在另一个环境下取到的（换了点名环境，或这边切了调用方环境）。指纹不认环境，
   // 故这一档单独说一句：结果旁边就写着「环境：X」，用户不会误以为它是当前环境下取到的。
+  // 算不出会生效的环境（`null`）时不提示「环境变了」——那多半只是回落，说出来就是误报，
+  // 而误报会诱导用户重发一次非幂等请求。
   const environmentMoved =
-    result !== null && (result.environmentId ?? null) !== previewExpectedEnvironment(currentInput);
-  // 失败也一样：指纹对不上就当这份草稿还没有结果，别把上一份输入的失败摆在它名下。
-  const error = previewFailureMessage(failure, currentFingerprint);
+    result !== null &&
+    expectedEnvironment !== null &&
+    (result.environmentId ?? null) !== expectedEnvironment;
+  // 失败多认环境这一档：同一条故障换个环境就是另一回事（成功结果自带环境名，故指纹够用）。
+  const error = previewFailureMessage(
+    failure,
+    previewFailureKey(currentFingerprint, expectedEnvironment),
+  );
   /** 预览请求的世代号：连点两次时，先发的那一次可能后回来，它的结果不能盖掉后发的。 */
   const previewSeq = useRef(0);
 
@@ -171,7 +182,10 @@ export function ExtractPreview({
       setResult(null);
       setSnapshot(null);
       // 失败也带着指纹一起记：这条错误属于刚才那份输入，不属于之后改成的样子。
-      setFailure({ fingerprint: currentFingerprint, message: errorText(e) });
+      setFailure({
+        key: previewFailureKey(currentFingerprint, expectedEnvironment),
+        message: errorText(e),
+      });
     } finally {
       if (seq === previewSeq.current) setBusy(false);
     }

@@ -575,6 +575,24 @@ describe('草稿让标签变脏：「关闭已保存」不许带走表单', () =
     assert.equal(draft?.name, 'fresh', '也不许动用户已经敲的内容');
   });
 
+  it('同一个会话里改过又重开同一张表：只有会话号能认出「不归这次保存管」', () => {
+    // 这条专盯会话号：重开的是**同一条定义**，`editingId` 与保存结果完全一致，只比身份或身份
+    // 之外的内容都分不出「这是另一张表」。
+    actions().beginEditDynamicVariableDraft(view({ id: 'd-a', name: 'a' }));
+    const submitted = draftOf('p1');
+    // 保存还在路上，用户取消后重开——列表这时已经带回了别的客户端刚改的名字。
+    actions().clearDynamicVariableDraft('p1');
+    actions().beginEditDynamicVariableDraft(view({ id: 'd-a', name: 'a-renamed' }));
+
+    actions().finishDynamicVariableSave('p1', submitted!, view({ id: 'd-a', name: 'a' }), {
+      name: 'a',
+    });
+
+    const draft = draftOf('p1');
+    assert.equal(draft?.editingId, 'd-a');
+    assert.equal(draft?.openedWith?.name, 'a-renamed', '新表单的基线不许被上一条的完成回调推走');
+  });
+
   it('基线只推进这次 patch 碰过的字段：别人改的说明不会被下一次保存带回去', async () => {
     const server = view({ id: 'd-sns', name: 'sns', description: null });
     useAppStore.setState({ dynamicVariables: [server] });
@@ -603,12 +621,9 @@ describe('草稿让标签变脏：「关闭已保存」不许带走表单', () =
 
     const draft = draftOf('p1')!;
     assert.equal(draft.openedWith?.description, null, '说明没被这次提交碰到，基线就该留着旧值');
-    assert.equal(
-      'description' in buildEditPatch(draft.openedWith!, draft),
-      false,
-      '下一次保存不许把别人改的说明覆盖回去',
-    );
     assert.equal(draft.openedWith?.name, 'sns2', '碰到了的字段才推进');
+    // 下一次保存只该剩下「请求期间又改的那一格」：名字已经进过基线，说明是别人的。
+    assert.deepEqual(buildEditPatch(draft.openedWith!, draft), { extractPath: '$.rows' });
   });
 
   it('「关闭已保存」也只带走标签条上那些 endpoint 草稿', () => {
