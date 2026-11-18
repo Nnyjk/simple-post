@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Copy,
   Download,
@@ -8,7 +8,6 @@ import {
   XCircle,
   BookmarkPlus,
   Check,
-  Wand2,
 } from 'lucide-react';
 import { useAppStore, useActiveEndpointResource } from '@/stores/app-store';
 import { Tabs } from '@/components/ui/tabs';
@@ -61,16 +60,28 @@ export function ResponseViewer() {
   const [savedFlash, setSavedFlash] = useState(false);
 
   const [view, setView] = useState<'pretty' | 'raw' | 'headers' | 'script'>('pretty');
-  // Pretty 页默认以格式化形态打开 —— 这正是该页的意义。新响应到达时重置开关，使刷新 /
-  // 重试也重新渲染格式化 JSON（用户检查中途仍可翻到「原文」）。
-  const [formatted, setFormatted] = useState<boolean>(true);
 
+  // 响应体这两个开关住在这里，不住在 `PrettyView` 里：pretty 与 raw 是两棵独立的实例，
+  // 状态放实例里一换页签就丢，而这个开关读起来是「这份响应体怎么读」。换行默认关闭 ——
+  // 表格化的 JSON 一旦折行，缩进层级就读不出来了；Raw 的档位默认格式化，新响应到达时复位。
+  const [wrapBody, setWrapBody] = useState(false);
+  const [formatted, setFormatted] = useState(true);
+  const bodyText = response?.body ?? '';
   useEffect(() => {
-    if (response) setFormatted(true);
-  }, [response]);
+    setFormatted(true);
+  }, [bodyText]);
+  const toggleWrap = useCallback(() => setWrapBody((v) => !v), []);
+  const toggleFormatted = useCallback(() => setFormatted((v) => !v), []);
 
   const formatResult = useMemo(() => tryFormatJson(response?.body ?? ''), [response?.body]);
-  const canFormat = formatResult.ok;
+
+  // 四个挂载点（json/text × pretty/raw）共用同一组开关，否则每个实例各持一份、切页签就丢。
+  const bodyViewProps = {
+    wrap: wrapBody,
+    onToggleWrap: toggleWrap,
+    formatted,
+    onToggleFormatted: toggleFormatted,
+  };
 
   // 响应该怎么渲染：JSON / 文本 / 图片 / 二进制。后端已经把「文本还是二进制」判完了
   // （按 Content-Type 先判，再看字节是不是合法 UTF-8），界面只按结果选视图。
@@ -308,21 +319,6 @@ export function ResponseViewer() {
               onChange={(id) => setView(id as typeof view)}
             />
             <div className="ml-auto" />
-            {view === 'pretty' && kind === 'json' && (
-              <Tooltip content={canFormat ? undefined : '响应不是合法 JSON'} side="bottom">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-7"
-                  onClick={() => setFormatted((v) => !v)}
-                  disabled={!canFormat}
-                  data-testid="format-response-btn"
-                >
-                  <Wand2 className="h-3.5 w-3.5" />
-                  {formatted ? '原文' : '格式化'}
-                </Button>
-              </Tooltip>
-            )}
           </div>
 
           {/* 响应体 */}
@@ -331,21 +327,37 @@ export function ResponseViewer() {
               (kind === 'json' ? (
                 <PrettyView
                   body={response.body}
-                  formatted={formatted}
+                  view="pretty"
                   formatResult={formatResult}
+                  {...bodyViewProps}
                 />
               ) : kind === 'text' ? (
-                <pre className="m-0 whitespace-pre-wrap break-all p-4 font-mono text-xs leading-relaxed text-foreground/90">
-                  {response.body}
-                </pre>
+                <PrettyView
+                  body={response.body}
+                  view="pretty"
+                  formatResult={formatResult}
+                  expectJson={false}
+                  {...bodyViewProps}
+                />
               ) : (
                 <BinaryView response={response} />
               ))}
             {view === 'raw' &&
-              (kind === 'json' || kind === 'text' ? (
-                <pre className="m-0 whitespace-pre-wrap break-all p-4 font-mono text-xs leading-relaxed text-foreground/90">
-                  {response.body}
-                </pre>
+              (kind === 'json' ? (
+                <PrettyView
+                  body={response.body}
+                  view="raw"
+                  formatResult={formatResult}
+                  {...bodyViewProps}
+                />
+              ) : kind === 'text' ? (
+                <PrettyView
+                  body={response.body}
+                  view="raw"
+                  formatResult={formatResult}
+                  expectJson={false}
+                  {...bodyViewProps}
+                />
               ) : (
                 <BinaryView response={response} />
               ))}
