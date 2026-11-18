@@ -147,3 +147,32 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+  # latest.json 是应用内更新的入口，它每个平台的 url 必须是 release 的下载地址
+  # （`https://github.com/<owner>/<repo>/releases/download/<tag>/<asset>`）。
+  # 上面三个矩阵作业用 `releaseDraft: true`，tauri-action 会把资产表里的 API 端点
+  # （`https://api.github.com/repos/<owner>/<repo>/releases/assets/<id>`）写进这个 url，
+  # 而那个端点是 API 端点，不是下载端点：它要求请求带 `User-Agent`，
+  # 不带时返回 `403 Forbidden`（`Request forbidden by administrative rules`），
+  # 而 tauri-plugin-updater 用的 reqwest 默认不发 `User-Agent`，
+  # 下载因此拿到 `403` —— 0.1.35 → 0.1.36 的应用内更新正是这样失败的。
+  # 同一个端点带上 `Accept: application/octet-stream` 才 `302` 去文件，不带只返回元数据 JSON。
+  # 故公布 release 之后再跑一遍改写脚本；删掉这个作业，每一次发布出去的最新包都装不上。
+  # 没有 `TAURI_SIGNING_PRIVATE_KEY` 时这次发布不产 latest.json，
+  # 脚本查到资产表里没有该文件就直接跳过（退出码 0），作业保持绿。
+  fix-updater-json:
+    needs: release
+    if: needs.release.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Rewrite latest.json platform urls
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 手动触发时 tag 可能带 refs/tags/ 前缀，脚本自己去掉。
+          TAG: ${{ inputs.tag || github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: node scripts/rewrite-updater-json.mjs --tag "$TAG" --repo "$REPO"
