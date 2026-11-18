@@ -27,7 +27,10 @@ export interface DynamicVariable {
   sourceEndpointName?: string | null;
   /** 内联请求（method / url / headers / body / auth 的 JSON 文本）。 */
   sourceInlineJson?: string | null;
-  /** 取数用的环境。空 = 数据源端点所属项目的第一个可用环境。 */
+  /**
+   * 取数用的环境。空 = **继承**：用调用方（发送请求时你选中的）那个环境；调用方没有可用
+   * 环境时回落到数据源端点所属项目最早建的那个，再没有就是没有环境。
+   */
   sourceEnvironmentId?: string | null;
   /** JSONPath 表达式。`$` 表示整段响应。 */
   extractPath: string;
@@ -98,7 +101,10 @@ export interface DynamicVariableView extends DynamicVariable {
   /** 数据源端点所属的项目。内联请求没有项目。 */
   sourceProjectId?: string | null;
   sourceProjectName?: string | null;
-  /** 实际取数用的环境：定义点名的那个，或数据源项目里的第一个可用环境。 */
+  /**
+   * 实际取数用的环境。定义点名了就那个；没点名就是**调用方此刻选中的环境**（界面里就是
+   * 发送请求时你选中的那个），调用方没有可用环境时回落到数据源项目最早建的那个环境。
+   */
   effectiveEnvironmentId?: string | null;
   effectiveEnvironmentName?: string | null;
 }
@@ -116,4 +122,42 @@ export interface DynamicResolution {
   values: Record<string, string>;
   statuses: DynamicValueStatus[];
   errors: DynamicError[];
+}
+
+/** 预览里的一条问题。`kind` 与后端的 `DynamicErrorKind` 线字符串同名。 */
+export interface DynamicPreviewIssue {
+  kind: string;
+  message: string;
+}
+
+/**
+ * 一次「用草稿取数」的预览结果。
+ *
+ * 正文有三种形态，界面必须说清是哪一种：JSON（`bodyJson` 有值，树可以点）、非 JSON 的
+ * 文本（`bodyJson` 缺席，`bodyText` 是原文）、二进制（`binary` 为真，此时不能做 JSONPath）。
+ *
+ * 抽取与处理脚本的失败**不整体失败**：`extractError` / `transformError` 各记一条，正文与
+ * 抽取结果照给 —— 用户要照着树重新点一条路径。
+ */
+export interface DynamicPreviewResult {
+  status: number;
+  contentType: string;
+  durationMs: number;
+  /** 正文被全局上限裁过。树是不完整的，界面要明说。 */
+  truncated: boolean;
+  /** 正文是二进制（图片、压缩包……）。此时不能做 JSONPath，也不给树。 */
+  binary: boolean;
+  /** 文本正文。二进制响应时它是宽松解码的结果（非法字节已变成 U+FFFD）。 */
+  bodyText: string;
+  /** 严格解析出来的 JSON。不是 JSON 就缺席。 */
+  bodyJson?: unknown;
+  /** 实际生效的抽取规则（空串已被换成 `$`）。 */
+  extractPath: string;
+  /** 实际生效的取数环境。缺席 = 没有环境。 */
+  environmentId?: string | null;
+  extracted?: unknown;
+  extractError?: DynamicPreviewIssue | null;
+  /** 最终会进变量池的那个值：脚本成功用脚本的返回值，否则用抽取结果。 */
+  value?: unknown;
+  transformError?: DynamicPreviewIssue | null;
 }

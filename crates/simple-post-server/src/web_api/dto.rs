@@ -214,7 +214,8 @@ pub struct DynamicVariableCreateBody {
     /// 内联请求（method / url / headers / body / auth 的 JSON 文本）。
     #[serde(default)]
     pub source_inline_json: Option<String>,
-    /// 取数用的环境。缺席 = 数据源端点所属项目的第一个可用环境。
+    /// 取数用的环境。缺席 = 继承调用方此刻选中的环境（不属于数据源端点所属项目时，
+    /// 回落到那个项目的默认环境）。
     #[serde(default)]
     pub source_environment_id: Option<String>,
     /// JSONPath 表达式。`$` 表示整段响应。
@@ -251,6 +252,10 @@ pub struct DynamicVariableResolveBody {
     /// 真 = 跳过缓存，强制重新取数。
     #[serde(default)]
     pub force: Option<bool>,
+    /// 调用方此刻选中的环境。只对继承取数环境的定义起作用；缺席 = 调用方没有环境
+    /// （回落到数据源端点所属项目的默认环境）。
+    #[serde(default)]
+    pub environment_id: Option<String>,
 }
 
 /// `POST /api/dynamic-variables/{id}/override` 的 body。
@@ -266,6 +271,52 @@ pub struct DynamicVariableOverrideBody {
     /// 真 = 一直有效，直到手动清除。
     #[serde(default)]
     pub forever: Option<bool>,
+    /// 调用方此刻选中的环境：覆盖值落在（定义 × 实际生效的环境）那一格。含义同
+    /// `DynamicVariableResolveBody::environment_id`。
+    #[serde(default)]
+    pub environment_id: Option<String>,
+}
+
+/// `POST /api/dynamic-variables/{id}/refresh` 的 body。
+///
+/// 整个 body 可选：老调用方不带 body 也能打这个路由，那时按「调用方没有环境」处理。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DynamicVariableRefreshBody {
+    /// 调用方此刻选中的环境。含义同 `DynamicVariableResolveBody::environment_id`。
+    #[serde(default)]
+    pub environment_id: Option<String>,
+}
+
+/// `POST /api/dynamic-variables/preview` 的 body —— 表单里当前这份草稿。
+///
+/// 每一格都可缺席：用户可能在填一个还没有名字的新定义，故预览不校验它们，只把它们原样
+/// 摊成一条「临时定义」去取数。`environment_id` 与 `source_environment_id` 是两件事：
+/// 后者是草稿点名的取数环境，前者是**调用方此刻选中的环境**（草稿继承取数环境时才用得上）。
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DynamicVariablePreviewBody {
+    /// 变量名。只用来给错误消息一个主语。
+    #[serde(default)]
+    pub name: Option<String>,
+    /// 数据源端点（`nodes.id`）。与 `source_inline_json` 同时给时以端点为先。
+    #[serde(default)]
+    pub source_endpoint_id: Option<String>,
+    /// 内联请求的 JSON 文本。
+    #[serde(default)]
+    pub source_inline_json: Option<String>,
+    /// 草稿点名的取数环境。缺席 = 继承调用方此刻选中的环境。
+    #[serde(default)]
+    pub source_environment_id: Option<String>,
+    /// JSONPath。空串与缺席都表示整段响应（`$`）。
+    #[serde(default)]
+    pub extract_path: Option<String>,
+    /// 处理脚本。预览会真的跑它一次。
+    #[serde(default)]
+    pub transform_script: Option<String>,
+    /// 调用方此刻选中的环境。含义同 `DynamicVariableResolveBody::environment_id`。
+    #[serde(default)]
+    pub environment_id: Option<String>,
 }
 
 // ----- 资源树 -----------------------------------------------------------

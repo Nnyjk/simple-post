@@ -225,6 +225,12 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
             "/api/dynamic-variables/resolve",
             post(dynamic_variables_resolve),
         )
+        // 同一族的另一个字面量段：`preview` 也要排在 `/{id}` 之前，否则「用草稿取一次数」
+        // 会被当成 PATCH 一条定义。
+        .route(
+            "/api/dynamic-variables/preview",
+            post(dynamic_variables_preview),
+        )
         .route(
             "/api/dynamic-variables/{id}",
             patch(dynamic_variables_update).delete(dynamic_variables_delete),

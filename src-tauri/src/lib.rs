@@ -194,6 +194,7 @@ pub fn run() {
             crate::commands::dynamic_variables_resolve,
             crate::commands::dynamic_variables_set_override,
             crate::commands::dynamic_variables_refresh,
+            crate::commands::dynamic_variables_preview,
             crate::commands::request_settings_get,
             crate::commands::request_settings_update,
             // 响应历史：按 endpoint 的 FIFO，上限在 db 写入侧截断。

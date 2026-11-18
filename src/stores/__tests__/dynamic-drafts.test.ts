@@ -1,0 +1,296 @@
+/**
+ * 动态变量草稿的存放位置与清理时机 —— `src/stores/dynamic-slice.ts` 的
+ * `beginCreateDynamicVariableDraft` / `beginEditDynamicVariableDraft` /
+ * `patchDynamicVariableDraft` / `clearDynamicVariableDraft`，以及「标签真被关掉」的那几处钩子
+ * （`closeTab` / `pruneStaleTabs` / `closeAllTabs` / `closeSavedTabs`，以及删项目成功之后）。
+ *
+ * 保护的核心是「切到别的标签再切回来，编辑中的表单不能丢」：动态变量面板是项目内的一页，
+ * `WorkspaceShell` 只挂载活动标签，切走就卸载。面板卸载在测试里的等价物是「没人再动它」——
+ * 只要 store 里那份还在、引用还没换，重新挂载就能原样读回。故这里一条断言就是「组件状态
+ * 不存在时草稿仍在」。
+ *
+ * 跑在**真实组合 store** 上：清理是切片之间的契约（ui-tabs 关标签 → 动态变量草稿），stub 掉
+ * 任何一侧都会把最容易坏的那段接线 stub 掉。
+ *
+ * 运行：npx tsx --test src/stores/__tests__/dynamic-drafts.test.ts
+ */
+import { describe, it, beforeEach, afterEach } from 'node:test';
+import assert from 'node:assert/strict';
+
+import { installBrowserShim, clearIpcMock, installIpcMock } from './_browser-shim';
+
+import { useAppStore } from '../app-store';
+import { dynamicTabId } from '../store-types';
+import type { DynamicVariableView, Project } from '@/types/domain';
+
+function project(id: string): Project {
+  return { id, name: id, color: '#000000', createdAt: 0, updatedAt: 0 };
+}
+
+/** 一条定义。表单从它垫出编辑草稿，故字段取默认值即可。 */
+function view(over: Partial<DynamicVariableView> = {}): DynamicVariableView {
+  return {
+    id: 'd-sns',
+    projectId: 'p1',
+    name: 'sns',
+    sourceInlineJson: '{"method":"GET","url":"https://example.test/points"}',
+    extractPath: '$.data',
+    valueMode: 'auto',
+    ttlSeconds: 60,
+    staleFallback: false,
+    enabled: true,
+    sortOrder: 0,
+    createdAt: 0,
+    updatedAt: 0,
+    source: 'auto',
+    isOverride: false,
+    ...over,
+  };
+}
+
+const draftOf = (projectId: string) => useAppStore.getState().dynamicDrafts[projectId];
+
+/** 当前 store 上的动作。每次现取：重置状态不影响动作。 */
+const actions = () => useAppStore.getState();
+
+let origError: typeof console.error;
+
+beforeEach(() => {
+  installBrowserShim();
+  origError = console.error.bind(console);
+  console.error = () => {};
+
+  installIpcMock((cmd) => {
+    // 列表命令一次性带回「定义 + 当前值 + 缓存状态」，这里只关心「有没有」。
+    if (cmd === 'dynamic_variables_list') return [];
+    return null;
+  });
+
+  useAppStore.setState({
+    projects: [project('p1'), project('p2')],
+    nodes: [],
+    endpointDetails: {},
+    nodesLoaded: true,
+    activeProjectId: 'p1',
+    activeEnvironmentId: '',
+    openTabs: [],
+    activeTabId: null,
+    dirtyTabIds: new Set<string>(),
+    endpointDrafts: {},
+    draftEndpoints: {},
+    projectTabs: {},
+    lastResponses: {},
+    lastStreams: {},
+    dynamicVariables: [],
+    dynamicDrafts: {},
+    dynamicValues: {},
+    dynamicErrors: {},
+    dynamicResolving: false,
+    dynamicError: null,
+  });
+});
+
+afterEach(() => {
+  console.error = origError;
+  clearIpcMock();
+});
+
+describe('草稿留在 store 里：切标签不丢', () => {
+  it('切到别的标签再切回来，草稿（含内容）原样还在', () => {
+    const { beginCreateDynamicVariableDraft, patchDynamicVariableDraft } = actions();
+    beginCreateDynamicVariableDraft('p1');
+    patchDynamicVariableDraft('p1', {
+      name: 'sns',
+      extractPath: '$.data.list',
+      sourceInlineJson: '{"method":"GET","url":"https://example.test/points"}',
+    });
+    const before = draftOf('p1');
+
+    // 切走：面板被卸载，组件的 useState 随之蒸发；store 里这份不受影响。
+    useAppStore.setState({ activeTabId: 'some-other-tab' });
+    // 切回来：面板重挂载，读到的还是同一个草稿对象。
+    useAppStore.setState({ activeTabId: dynamicTabId('p1') });
+
+    const after = draftOf('p1');
+    assert.equal(after, before, '切标签不许换掉草稿对象（选择器靠引用比较）');
+    assert.equal(after?.name, 'sns');
+    assert.equal(after?.extractPath, '$.data.list');
+    assert.equal(after?.creating, true);
+  });
+
+  it('两个项目的草稿互不串，改一份不动另一份的引用', () => {
+    const { beginCreateDynamicVariableDraft, patchDynamicVariableDraft } = actions();
+    beginCreateDynamicVariableDraft('p1');
+    patchDynamicVariableDraft('p1', { name: 'sns' });
+    beginCreateDynamicVariableDraft('p2');
+    patchDynamicVariableDraft('p2', { name: 'points' });
+
+    const p2Before = draftOf('p2');
+    patchDynamicVariableDraft('p1', { name: 'sns_v2' });
+
+    assert.equal(draftOf('p1')?.name, 'sns_v2');
+    assert.equal(draftOf('p2')?.name, 'points', '改 p1 的草稿不许写进 p2');
+    assert.equal(draftOf('p2'), p2Before, '改 p1 的草稿不许换掉 p2 的对象');
+  });
+
+  it('项目还没有草稿时打一格 patch：草稿记下来，但不会凭空开出一张新建表', () => {
+    actions().patchDynamicVariableDraft('p2', { name: 'typed' });
+
+    const draft = draftOf('p2');
+    assert.equal(draft?.name, 'typed');
+    assert.equal(draft?.creating, false, '没人开表单，patch 不许把它变成「正在新建」');
+    assert.equal(draft?.editingId, null, '也不属于任何一条定义');
+    assert.equal(draftOf('p1'), undefined);
+  });
+
+  it('编辑草稿按定义垫出全部字段；再次打开同一条不重置用户改过的内容', () => {
+    const definition = view();
+    useAppStore.setState({ dynamicVariables: [definition] });
+
+    actions().beginEditDynamicVariableDraft(definition);
+    const seeded = draftOf('p1');
+    assert.equal(seeded?.editingId, 'd-sns');
+    assert.equal(seeded?.creating, false);
+    assert.equal(seeded?.name, 'sns');
+    assert.equal(seeded?.description, '');
+    assert.equal(seeded?.sourceKind, 'inline');
+    assert.equal(seeded?.sourceEndpointId, '');
+    assert.equal(seeded?.sourceProjectId, '');
+    assert.equal(seeded?.sourceEndpointName, '');
+    assert.equal(seeded?.environmentId, '');
+    assert.equal(seeded?.extractPath, '$.data');
+    assert.equal(seeded?.transformScript, '');
+    assert.equal(seeded?.valueMode, 'auto');
+    assert.equal(seeded?.ttlSeconds, '60', '缓存时长按输入框的原文存，才能留住「空」');
+    assert.equal(seeded?.staleFallback, false);
+    assert.equal(seeded?.enabled, true);
+
+    actions().patchDynamicVariableDraft('p1', { name: 'sns_v2' });
+    actions().beginEditDynamicVariableDraft(definition);
+    assert.equal(
+      draftOf('p1')?.name,
+      'sns_v2',
+      '正在编辑的就是这一条：不许把改了一半的名字重置回去',
+    );
+  });
+
+  it('数据源接口被删过的定义落在「引用接口」形态，好让用户挑一个接口救回来', () => {
+    const broken = view({ sourceInlineJson: null, sourceEndpointId: null });
+    actions().beginEditDynamicVariableDraft(broken);
+    assert.equal(draftOf('p1')?.sourceKind, 'endpoint');
+  });
+});
+
+describe('清理时机', () => {
+  it('保存成功与点「取消」都只清自己那个项目的草稿', () => {
+    const { beginCreateDynamicVariableDraft, clearDynamicVariableDraft } = actions();
+    beginCreateDynamicVariableDraft('p1');
+    beginCreateDynamicVariableDraft('p2');
+
+    // 表单的两条出口（保存成功的 onDone 与「取消」）都是这一个动作。
+    clearDynamicVariableDraft('p1');
+
+    assert.equal(draftOf('p1'), undefined);
+    assert.ok(draftOf('p2'), '另一个项目的草稿不该被一起清掉');
+  });
+
+  it('被编辑的那条定义被删掉时，草稿跟着走', async () => {
+    const definition = view();
+    useAppStore.setState({ dynamicVariables: [definition] });
+    actions().beginEditDynamicVariableDraft(definition);
+
+    await actions().deleteDynamicVariable('d-sns');
+
+    assert.equal(draftOf('p1'), undefined, '定义没了，表单已经存不回去');
+  });
+
+  it('删的是别的定义时，正在新建的表单留着', async () => {
+    const definition = view();
+    useAppStore.setState({ dynamicVariables: [definition] });
+    actions().beginCreateDynamicVariableDraft('p1');
+    actions().patchDynamicVariableDraft('p1', { name: 'typing' });
+
+    await actions().deleteDynamicVariable('d-sns');
+
+    assert.equal(draftOf('p1')?.name, 'typing');
+  });
+
+  it('关掉别的标签不清；关掉这个项目的动态变量标签才清', () => {
+    const dynamicTab = dynamicTabId('p1');
+    useAppStore.setState({
+      openTabs: [
+        { id: dynamicTab, kind: 'dynamic-variables' },
+        { id: 't-other', kind: 'settings' },
+      ],
+      activeTabId: dynamicTab,
+    });
+    actions().beginCreateDynamicVariableDraft('p1');
+
+    actions().closeTab('t-other');
+    assert.ok(draftOf('p1'), '关别的标签不许带走动态变量草稿');
+
+    actions().closeTab(dynamicTab);
+    assert.equal(draftOf('p1'), undefined, '标签没了，草稿就没有「切回来接着填」的归处');
+  });
+
+  it('「关闭全部」带走标签条上那份草稿，暂存在别的项目里的不受影响', () => {
+    useAppStore.setState({
+      openTabs: [{ id: dynamicTabId('p1'), kind: 'dynamic-variables' }],
+      activeTabId: dynamicTabId('p1'),
+    });
+    actions().beginCreateDynamicVariableDraft('p1');
+    // p2 的标签已切走（暂存在 projectTabs 里），它还算开着。
+    actions().beginCreateDynamicVariableDraft('p2');
+
+    actions().closeAllTabs();
+
+    assert.equal(draftOf('p1'), undefined);
+    assert.ok(draftOf('p2'), '暂存的标签还开着，草稿得留着');
+  });
+
+  it('切项目只暂存标签，草稿留着（切回来继续填）', () => {
+    const dynamicTab = dynamicTabId('p1');
+    useAppStore.setState({
+      openTabs: [{ id: dynamicTab, kind: 'dynamic-variables' }],
+      activeTabId: dynamicTab,
+    });
+    actions().beginCreateDynamicVariableDraft('p1');
+    actions().patchDynamicVariableDraft('p1', { name: 'sns' });
+
+    actions().switchProjectTabs('p2');
+
+    assert.equal(draftOf('p1')?.name, 'sns', '标签只是暂存，不是关掉');
+  });
+
+  it('项目被清扫掉时（pruneStaleTabs 退役它的标签）草稿跟着退役', () => {
+    useAppStore.setState({
+      openTabs: [{ id: dynamicTabId('p1'), kind: 'dynamic-variables' }],
+      activeTabId: dynamicTabId('p1'),
+    });
+    actions().beginCreateDynamicVariableDraft('p1');
+
+    useAppStore.setState({ projects: [project('p2')] });
+    actions().pruneStaleTabs();
+
+    assert.equal(draftOf('p1'), undefined);
+  });
+
+  it('删项目成功之后草稿立刻走，IPC 失败时留着（回滚不该扔掉表单）', async () => {
+    actions().beginCreateDynamicVariableDraft('p1');
+    actions().patchDynamicVariableDraft('p1', { name: 'sns' });
+
+    installIpcMock((cmd) => {
+      if (cmd === 'projects_delete') throw new Error('boom');
+      return [];
+    });
+    await actions().deleteProject('p1');
+    assert.equal(draftOf('p1')?.name, 'sns', '删除失败，项目还在，草稿也得在');
+
+    installIpcMock((cmd) => {
+      if (cmd === 'projects_delete') return null;
+      return [];
+    });
+    await actions().deleteProject('p1');
+    assert.equal(draftOf('p1'), undefined);
+  });
+});

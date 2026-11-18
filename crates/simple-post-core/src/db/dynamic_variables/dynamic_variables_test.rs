@@ -537,3 +537,156 @@ fn moving_a_definition_into_a_project_without_that_name_is_allowed() {
     assert_eq!(got.project_id.as_deref(), Some("p2"));
     assert_eq!(got.name, "sns");
 }
+
+// ----- 表单的编辑路径 -----------------------------------------------------
+//
+// 三条回归用例对应三份真实发生过的「保存不下来」：数据源接口被删掉的定义、环境指向了
+// 别的项目（接口被挪走之后留下的陈值）、以及正常路径。它们用的 patch 都是表单**会发**
+// 的那一份。
+
+/// 在 p1 里建一个环境。
+fn seed_environment(pool: &db::DbPool, id: &str, project_id: &str, name: &str) {
+    db::with_tx(pool, |c| {
+        db::environments::create(
+            c,
+            &crate::domain::Environment {
+                id: id.into(),
+                project_id: project_id.into(),
+                name: name.into(),
+                created_at: 0,
+                module_base_urls: Default::default(),
+                variables: Default::default(),
+                disabled_variables: vec![],
+            },
+        )
+        .map(|_| ())
+    })
+    .expect("seed environment");
+}
+
+/// 数据源接口被删掉的定义（两个来源都为空，外键把它置成 NULL）仍能保存别的字段。
+///
+/// 表单在编辑态会把「来源」那一组字段一并回传：`sourceEndpointId: null`、
+/// `sourceInlineJson: null`——因为界面上已经没有可选的接口了。这两个值恰好就是这条定义
+/// 现在的状态，故这份 patch 什么也没改；把「已经成立的『没有来源』」当成一次非法写入，
+/// 等于让一条记录因为一个自己修不好的历史状态而永远存不下去。
+#[test]
+fn a_definition_whose_source_was_deleted_can_still_be_saved() {
+    let (pool, _dir) = fresh_pool();
+    let mut def = definition("d1", "points");
+    def.source_endpoint_id = Some("e2".into());
+    def.source_inline_json = None;
+    db::with_tx(&pool, |c| create(c, &def)).expect("create");
+    db::with_tx(&pool, |c| nodes::delete(c, "e2")).expect("delete endpoint");
+
+    let saved = db::with_tx(&pool, |c| {
+        update(
+            c,
+            "d1",
+            DynamicVariablePatch {
+                name: Some("points_v2".into()),
+                source_endpoint_id: Some(None),
+                source_inline_json: Some(None),
+                ..Default::default()
+            },
+        )
+    })
+    .expect("数据源被删掉的定义应当仍能改名");
+
+    assert_eq!(saved.name, "points_v2");
+    assert!(saved.source_endpoint_id.is_none());
+    assert!(saved.source_inline_json.is_none());
+}
+
+/// 环境指向别的项目（接口被挪走之后留下的陈值）时，保存时把它纠正成「继承」，
+/// 而不是挡住整次保存：这个 id 不是任何人此刻的意图。
+#[test]
+fn a_stale_environment_is_dropped_when_the_patch_does_not_name_one() {
+    let (pool, _dir) = fresh_pool();
+    seed_another_project(&pool);
+    seed_environment(&pool, "env-p1", "p1", "dev");
+    seed_environment(&pool, "env-p2", "p2", "prod");
+    let mut def = definition("d1", "points");
+    def.source_endpoint_id = Some("e2".into());
+    def.source_inline_json = None;
+    def.source_environment_id = Some("env-p1".into());
+    db::with_tx(&pool, |c| create(c, &def)).expect("create");
+
+    // 接口被挪到 p2，环境那一格没人跟着改——这就是「陈值」的形成方式。
+    db::with_tx(&pool, |c| {
+        c.execute(
+            "UPDATE dynamic_variables SET source_environment_id = ?1 WHERE id = ?2",
+            rusqlite::params!["env-p2", "d1"],
+        )?;
+        Ok(())
+    })
+    .expect("作废旧环境");
+
+    let saved = db::with_tx(&pool, |c| {
+        update(
+            c,
+            "d1",
+            DynamicVariablePatch {
+                name: Some("points_v2".into()),
+                ..Default::default()
+            },
+        )
+    })
+    .expect("陈旧的取数环境不该挡住保存");
+
+    assert_eq!(saved.name, "points_v2");
+    assert_eq!(
+        saved.source_environment_id, None,
+        "没人点名的陈旧环境应当被纠正成继承"
+    );
+}
+
+/// 用户亲手点了一个不属于数据源接口所属项目的环境：那是此刻的意图，照旧拒绝。
+#[test]
+fn an_explicitly_named_environment_from_another_project_is_refused() {
+    let (pool, _dir) = fresh_pool();
+    seed_another_project(&pool);
+    seed_environment(&pool, "env-p1", "p1", "dev");
+    seed_environment(&pool, "env-p2", "p2", "prod");
+    let mut def = definition("d1", "points");
+    def.source_endpoint_id = Some("e2".into());
+    def.source_inline_json = None;
+    db::with_tx(&pool, |c| create(c, &def)).expect("create");
+
+    let err = db::with_tx(&pool, |c| {
+        update(
+            c,
+            "d1",
+            DynamicVariablePatch {
+                source_environment_id: Some(Some("env-p2".into())),
+                ..Default::default()
+            },
+        )
+    })
+    .expect_err("点名了别的项目的环境应当被拒");
+    assert!(matches!(err, crate::error::AppError::Validation(_)));
+}
+
+/// 正常路径：点名自己项目里的环境，写进去。
+#[test]
+fn naming_an_environment_of_the_sources_project_is_saved() {
+    let (pool, _dir) = fresh_pool();
+    seed_environment(&pool, "env-p1", "p1", "dev");
+    let mut def = definition("d1", "points");
+    def.source_endpoint_id = Some("e2".into());
+    def.source_inline_json = None;
+    db::with_tx(&pool, |c| create(c, &def)).expect("create");
+
+    let saved = db::with_tx(&pool, |c| {
+        update(
+            c,
+            "d1",
+            DynamicVariablePatch {
+                source_environment_id: Some(Some("env-p1".into())),
+                ..Default::default()
+            },
+        )
+    })
+    .expect("同一个项目里的环境应当能存下去");
+    assert_eq!(saved.source_environment_id.as_deref(), Some("env-p1"));
+}

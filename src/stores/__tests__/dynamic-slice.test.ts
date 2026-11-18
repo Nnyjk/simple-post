@@ -237,7 +237,13 @@ describe('dynamic slice', () => {
     await bag.resolveDynamicVariables(['sns'], 'p1');
 
     assert.equal(seen.length, 1);
-    assert.deepEqual(seen[0], { names: ['sns'], projectId: 'p1', force: false });
+    // 取数环境随命令一起送上去：继承取数环境的定义按调用方选中的环境取值。
+    assert.deepEqual(seen[0], {
+      names: ['sns'],
+      projectId: 'p1',
+      environmentId: 'env1',
+      force: false,
+    });
   });
 
   it('解析不带项目就是跨项目取值', async () => {
@@ -254,7 +260,54 @@ describe('dynamic slice', () => {
     await bag.resolveDynamicVariables(['sns']);
 
     assert.equal(seen.length, 1);
-    assert.deepEqual(seen[0], { names: ['sns'], projectId: null, force: false });
+    assert.deepEqual(seen[0], {
+      names: ['sns'],
+      projectId: null,
+      environmentId: 'env1',
+      force: false,
+    });
+  });
+
+  it('切了环境，解析带上的是新环境', async () => {
+    // 「继承当前环境」的定义按调用方此刻选中的那个环境取数：切环境后同一份命令必须换一段
+    // 环境 id 送上去，否则用户看到的还是上一个环境的值。
+    const bag = makeHarness();
+    const seen: any[] = [];
+    installIpcMock((cmd, args) => {
+      if (cmd === 'dynamic_variables_resolve') {
+        seen.push(args);
+        return resolution(['sns'], { sns: '[1]' });
+      }
+      return null;
+    });
+
+    await bag.resolveDynamicVariables(['sns'], 'p1');
+    bag.activeEnvironmentId = 'env2';
+    await bag.resolveDynamicVariables(['sns'], 'p1');
+
+    assert.deepEqual(
+      seen.map((a) => a.environmentId),
+      ['env1', 'env2'],
+    );
+  });
+
+  it('刷新与写覆盖值也带上调用方的环境', async () => {
+    // 缓存键是 (定义 × 生效环境)，故这两条命令落在哪一格都取决于这段环境 id。
+    const bag = makeHarness();
+    const seen: any[] = [];
+    installIpcMock((cmd, args) => {
+      seen.push([cmd, args]);
+      if (cmd === 'dynamic_variables_list') return [view('sns')];
+      return null;
+    });
+
+    await bag.refreshDynamicVariable('d-sns');
+    await bag.setDynamicOverride('d-sns', 'v');
+
+    const refresh = seen.find(([cmd]) => cmd === 'dynamic_variables_refresh');
+    const override = seen.find(([cmd]) => cmd === 'dynamic_variables_set_override');
+    assert.equal(refresh?.[1].environmentId, 'env1');
+    assert.equal(override?.[1].environmentId, 'env1');
   });
 
   it('保存失败时 updateDynamicVariable 返回 false', async () => {
@@ -283,7 +336,7 @@ describe('dynamic slice', () => {
     await bag.loadDynamicVariables('p1');
 
     assert.equal(seen.length, 1);
-    assert.deepEqual(seen[0], { projectId: 'p1' });
+    assert.deepEqual(seen[0], { projectId: 'p1', environmentId: 'env1' });
     assert.equal(bag.dynamicVariables.length, 1);
     assert.equal(bag.dynamicVariables[0].name, 'sns');
   });
@@ -301,7 +354,7 @@ describe('dynamic slice', () => {
 
     await bag.loadDynamicVariables();
 
-    assert.deepEqual(seen[0], { projectId: null });
+    assert.deepEqual(seen[0], { projectId: null, environmentId: 'env1' });
   });
 
   it('新建定义带上归属项目', async () => {

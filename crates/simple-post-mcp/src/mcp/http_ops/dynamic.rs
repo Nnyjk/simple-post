@@ -93,6 +93,9 @@ pub(super) async fn resolve_dynamic_values(
     }
     let ctx = simple_post_core::dynamic::ResolveContext {
         pool: state.pool.clone(),
+        // 这次发送用哪个环境，继承取数环境的定义就用哪个环境取数——同一个 `{{name}}`
+        // 于是随用户切环境换值，缓存键也跟着换（见 `dynamic::source_context`）。
+        environment_id: env.map(|e| e.id.clone()),
     };
     let resolution = simple_post_core::dynamic::resolve_names(
         &ctx,

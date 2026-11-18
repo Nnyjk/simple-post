@@ -7,7 +7,8 @@ use crate::error::AppError;
 
 use super::read::{get, get_by_name_in_project};
 use super::validation::{
-    check_source_bindings, is_unique_violation, is_valid_name, unique_violation_columns,
+    check_source_bindings, check_source_endpoint, check_source_environment, is_unique_violation,
+    is_valid_name, unique_violation_columns,
 };
 
 /// 新建一条定义。变量名非法、与同项目里的另一条定义重名、或归属项目不存在时返回
@@ -150,9 +151,14 @@ pub fn update(
         }
     }
 
-    // 数据源仍须二选一，但**只在 patch 真的动了来源字段时**才校验。
-    // 「两个来源字段都为空」是「数据源接口被删了」（外键把它置成 NULL），那是一种真实状态，
-    // 故这种定义仍应允许改别的字段——否则改个名就会收到一句盖住真因的报错。
+    // 数据源仍须二选一，但**只在 patch 真的动了来源字段时**才校验，且「两个都为空」
+    // 只在这次 patch **把最后一个来源清掉**时才算错：
+    //
+    // - 「两个来源字段都为空」是「数据源接口被删了」（外键把它置成 NULL），那是一种真实
+    //   状态。表单在编辑态会把这一组字段原样回传，于是这份 patch 表达的正是「维持现状」；
+    //   把已经成立的状态当成非法写入，会让一条记录因为一段自己修不好的历史而再也存不下
+    //   去——改个名都会收到一句盖住真因的报错。故当前状态本来就没有来源时，放行。
+    // - 「两个都有值」无论当前状态如何都是错的：那会让取数该去问谁变得含糊。
     let touches_source = patch.source_endpoint_id.is_some() || patch.source_inline_json.is_some();
 
     // patch 的三态：缺席 = 不动，`null` = 清除，有值 = 写入。
@@ -164,21 +170,67 @@ pub fn update(
         None => current.source_inline_json.clone(),
         Some(value) => value.clone(),
     };
-    if touches_source && next_endpoint_id.is_none() == next_inline_json.is_none() {
-        return Err(AppError::Validation(
-            "动态变量必须有一个数据源：引用一个接口，或给一份内联请求".to_string(),
-        ));
+    if touches_source {
+        let had_source =
+            current.source_endpoint_id.is_some() || current.source_inline_json.is_some();
+        let both_empty = next_endpoint_id.is_none() && next_inline_json.is_none();
+        if (next_endpoint_id.is_some() && next_inline_json.is_some()) || (both_empty && had_source)
+        {
+            return Err(AppError::Validation(
+                "动态变量必须有一个数据源：引用一个接口，或给一份内联请求".to_string(),
+            ));
+        }
     }
 
     let next_environment_id = match &patch.source_environment_id {
         None => current.source_environment_id.clone(),
         Some(value) => value.clone(),
     };
-    let environment_id = check_source_bindings(
+    // 环境跟着数据源走，但**不因为它是旧的就把整次保存挡住**：
+    //
+    // - patch 点名了环境 → 那是用户此刻的意图，错就报错（同一个接口配一个不属于它的
+    //   项目的环境，取数会取到别处的内容，正是这道校验要挡的）。
+    // - patch 没点名 → 这个 id 是**沿用**下来的旧值。它可能已经对不上这个数据源了
+    //   （环境被删、或接口被搬到了别的项目）。没有任何人点名要它，故纠正成「继承」
+    //   （NULL）而不是拒绝——环境只是数据源的一层细化，定义本身仍然可用；拒绝则会让
+    //   一条记录因为一段自己都看不见的旧数据而再也存不下去。
+    let endpoint_project = check_source_endpoint(conn, next_endpoint_id.as_deref())?;
+    let environment_id = match check_source_environment(
         conn,
-        next_endpoint_id.as_deref(),
         next_environment_id.as_deref(),
-    )?;
+        endpoint_project.as_deref(),
+    ) {
+        Ok(environment_id) => environment_id,
+        Err(AppError::Validation(_)) if patch.source_environment_id.is_none() => None,
+        Err(e) => return Err(e),
+    };
+
+    // 缓存里那份值是按改之前的定义算出来的：抽取规则、处理脚本、数据源任一真的变了，
+    // 它就答不上「现在的定义取到什么」。故这次保存要删掉该定义 `is_override = 0` 的行；
+    // 覆盖值是用户钉住的，不由定义推导，`update` 留着它。
+    //
+    // `source_environment_id` 与 `value_mode` 不在判据里：缓存键已含取数环境
+    // （`db::dynamic_variable_cache`），而表里存的是抽取出来的原始值，序列化形态由
+    // `value_mode` 在读时现算。
+    //
+    // `ttl_seconds` 也不在判据里：值的推导过程没变，变的只是寿命。旧行按写下的
+    // `expires_at` 到期后照常重取，删行则把一份仍然成立的值白扔掉。
+    let invalidates_cache = patch
+        .source_endpoint_id
+        .as_ref()
+        .is_some_and(|next| *next != current.source_endpoint_id)
+        || patch
+            .source_inline_json
+            .as_ref()
+            .is_some_and(|next| *next != current.source_inline_json)
+        || patch
+            .extract_path
+            .as_ref()
+            .is_some_and(|next| *next != current.extract_path)
+        || patch
+            .transform_script
+            .as_ref()
+            .is_some_and(|next| *next != current.transform_script);
 
     let mut sets: Vec<String> = Vec::new();
     let mut binds: Vec<rusqlite::types::Value> = Vec::new();
@@ -300,6 +352,14 @@ pub fn update(
     if rows == 0 {
         return Err(AppError::NotFound(format!("dynamic_variable {id}")));
     }
+    // 与上面的 `UPDATE` 同一条连接：调用方（`with_tx`）已开事务，故两者一起生效或一起
+    // 回滚，不存在「定义已改、旧值还挂着」的中间态。
+    if invalidates_cache {
+        conn.execute(
+            "DELETE FROM dynamic_variable_cache WHERE definition_id = ?1 AND is_override = 0",
+            params![id],
+        )?;
+    }
     get(conn, id)
 }
 
@@ -324,3 +384,9 @@ fn check_project_exists(conn: &mut Connection, project_id: &str) -> Result<(), A
     }
     Ok(())
 }
+
+// 测试。
+
+#[cfg(test)]
+#[path = "write_test.rs"]
+mod tests;

@@ -73,7 +73,8 @@ pub struct DynamicVariable {
     /// 内联请求（method / url / headers / body / auth 的 JSON 文本）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_inline_json: Option<String>,
-    /// 取数用的环境。`None` = 数据源端点所属项目的第一个可用环境。
+    /// 取数用的环境。`None` = 继承调用方此刻选中的环境（不属于数据源端点所属项目时，
+    /// 回落到那个项目的默认环境）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_environment_id: Option<String>,
     /// JSONPath 表达式。`$` 表示整段响应。

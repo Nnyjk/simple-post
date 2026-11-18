@@ -19,7 +19,8 @@ use serde_json::Value;
 use crate::domain::DynamicVariablePatch;
 
 use super::super::dto::{
-    DynamicVariableCreateBody, DynamicVariableOverrideBody, DynamicVariableResolveBody,
+    DynamicVariableCreateBody, DynamicVariableOverrideBody, DynamicVariablePreviewBody,
+    DynamicVariableRefreshBody, DynamicVariableResolveBody,
 };
 use super::super::{map_app_error, HttpErrorResponse, WebState};
 
@@ -28,13 +29,21 @@ use super::super::{map_app_error, HttpErrorResponse, WebState};
 /// **不取数**：读的是缓存行。取数会发出站请求，而这是一次纯读。
 ///
 /// `projectId` 缺席时列出全部项目；给了就只列那个项目里的。
+///
+/// `environmentId` 是调用方此刻选中的环境：只对继承取数环境的定义起作用，缓存行按实际
+/// 生效的环境取。缺席 = 调用方没有环境。
 pub(crate) async fn dynamic_variables_list(
     State(s): State<Arc<WebState>>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<Value>, HttpErrorResponse> {
     let project_id = params.get("projectId").filter(|id| !id.is_empty());
-    let rows =
-        crate::dynamic_api::list(&s.pool, project_id.map(String::as_str)).map_err(map_app_error)?;
+    let environment_id = params.get("environmentId").filter(|id| !id.is_empty());
+    let rows = crate::dynamic_api::list(
+        &s.pool,
+        project_id.map(String::as_str),
+        environment_id.map(String::as_str),
+    )
+    .map_err(map_app_error)?;
     Ok(Json(serde_json::to_value(&rows).unwrap_or(Value::Null)))
 }
 
@@ -90,6 +99,8 @@ pub(crate) async fn dynamic_variables_delete(
 /// 这一步会真的发出站请求（去数据源取数），故它与「读」是两种不同的代价。
 ///
 /// `projectId` 缺席时跨项目找：同名定义出现在多个项目里时，按歧义处理，不猜。
+///
+/// `environmentId` 是调用方此刻选中的环境，只对继承取数环境的定义起作用。
 pub(crate) async fn dynamic_variables_resolve(
     State(s): State<Arc<WebState>>,
     Json(body): Json<DynamicVariableResolveBody>,
@@ -99,6 +110,7 @@ pub(crate) async fn dynamic_variables_resolve(
         body.project_id.as_deref(),
         &body.names,
         body.force.unwrap_or(false),
+        body.environment_id.as_deref(),
     )
     .await
     .map_err(map_app_error)?;
@@ -108,6 +120,8 @@ pub(crate) async fn dynamic_variables_resolve(
 }
 
 /// `POST /api/dynamic-variables/{id}/override` —— 写覆盖值。`value = null` 清除它。
+///
+/// `environmentId` 是调用方此刻选中的环境：覆盖值落在（定义 × 实际生效的环境）那一格。
 pub(crate) async fn dynamic_variables_set_override(
     State(s): State<Arc<WebState>>,
     Path(id): Path<String>,
@@ -119,21 +133,54 @@ pub(crate) async fn dynamic_variables_set_override(
         body.value,
         body.expires_at,
         body.forever.unwrap_or(false),
+        body.environment_id.as_deref(),
     )
     .map_err(map_app_error)?;
-    let view = crate::dynamic_api::get(&s.pool, &id).map_err(map_app_error)?;
+    let view = crate::dynamic_api::get(&s.pool, &id, body.environment_id.as_deref())
+        .map_err(map_app_error)?;
     Ok(Json(serde_json::to_value(&view).unwrap_or(Value::Null)))
 }
 
 /// `POST /api/dynamic-variables/{id}/refresh` —— 强制重新取一次数。
+///
+/// body 可选：继承取数环境的定义要拿调用方此刻选中的环境，故它带一个可选的
+/// `environmentId`；不提环境的老调用方照旧能打这个路由。
 pub(crate) async fn dynamic_variables_refresh(
     State(s): State<Arc<WebState>>,
     Path(id): Path<String>,
+    body: Option<Json<DynamicVariableRefreshBody>>,
 ) -> Result<Json<Value>, HttpErrorResponse> {
-    let status = crate::dynamic_api::refresh(&s.pool, &id)
+    let environment_id = body.as_ref().and_then(|b| b.0.environment_id.as_deref());
+    let status = crate::dynamic_api::refresh(&s.pool, &id, environment_id)
         .await
         .map_err(map_app_error)?;
     Ok(Json(serde_json::to_value(&status).unwrap_or(Value::Null)))
+}
+
+/// `POST /api/dynamic-variables/preview` —— 用表单里当前这份草稿真取一次数。
+///
+/// 这是一条**只读**的往返：不读不写缓存、不写覆盖值、不写响应历史，故重复预览幂等。
+/// 取数失败是唯一会让整条请求失败的路径（没响应就没有正文可看）；抽取与处理脚本的失败
+/// 都落在结果的对应字段里，正文照给。
+///
+/// `environmentId` 是调用方此刻选中的环境，只对继承取数环境的草稿起作用；它与
+/// `sourceEnvironmentId`（草稿点名的那一个环境）是两件事。
+pub(crate) async fn dynamic_variables_preview(
+    State(s): State<Arc<WebState>>,
+    Json(body): Json<DynamicVariablePreviewBody>,
+) -> Result<Json<Value>, HttpErrorResponse> {
+    let draft = crate::dynamic_api::PreviewDraft {
+        name: body.name,
+        source_endpoint_id: body.source_endpoint_id,
+        source_inline_json: body.source_inline_json,
+        source_environment_id: body.source_environment_id,
+        extract_path: body.extract_path,
+        transform_script: body.transform_script,
+    };
+    let result = crate::dynamic_api::preview(&s.pool, draft, body.environment_id.as_deref())
+        .await
+        .map_err(map_app_error)?;
+    Ok(Json(serde_json::to_value(&result).unwrap_or(Value::Null)))
 }
 
 #[cfg(test)]

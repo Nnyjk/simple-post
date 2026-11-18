@@ -20,6 +20,9 @@ import { DynamicVariableForm } from './DynamicVariableForm';
 
 export function DynamicVariablesPanel() {
   const projectId = useAppStore((s) => s.activeProjectId);
+  // 列表带回的当前值是「在某个环境下」的值，而继承取数环境的定义按用户选中的环境取值：
+  // 切了环境，这个列表就得重载，否则卡片上的值还是上一个环境的。
+  const activeEnvironmentId = useAppStore((s) => s.activeEnvironmentId);
   const loaded = useAppStore((s) => s.dynamicVariables);
   const resolving = useAppStore((s) => s.dynamicResolving);
   const error = useAppStore((s) => s.dynamicError);
@@ -28,10 +31,15 @@ export function DynamicVariablesPanel() {
   const setDynamicOverride = useAppStore((s) => s.setDynamicOverride);
   const refreshDynamicVariable = useAppStore((s) => s.refreshDynamicVariable);
   const deleteDynamicVariable = useAppStore((s) => s.deleteDynamicVariable);
-  const updateDynamicVariable = useAppStore((s) => s.updateDynamicVariable);
+  // 面板的两态（在新建 / 在编辑哪一条）与表单内容都在 store 的草稿里：切到别的标签时这个
+  // 面板会被 `WorkspaceShell` 卸载，组件 state 留不住它们。草稿按项目分桶。
+  const draft = useAppStore((s) => s.dynamicDrafts[projectId]);
+  const beginCreate = useAppStore((s) => s.beginCreateDynamicVariableDraft);
+  const beginEdit = useAppStore((s) => s.beginEditDynamicVariableDraft);
+  const clearDraft = useAppStore((s) => s.clearDynamicVariableDraft);
 
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
+  const creating = draft?.creating ?? false;
+  const editingId = draft?.editingId ?? null;
 
   // 只列当前项目的定义：别的项目的同名变量不归这条标签管。
   const variables = useMemo(
@@ -41,7 +49,7 @@ export function DynamicVariablesPanel() {
 
   useEffect(() => {
     void loadDynamicVariables(projectId);
-  }, [loadDynamicVariables, projectId]);
+  }, [loadDynamicVariables, projectId, activeEnvironmentId]);
 
   const handleResolveAll = useCallback(async () => {
     const names = variables.map((v) => v.name);
@@ -65,13 +73,6 @@ export function DynamicVariablesPanel() {
     [setDynamicOverride],
   );
 
-  const handleRename = useCallback(
-    async (variable: DynamicVariableView, name: string) => {
-      await updateDynamicVariable(variable.id, { name });
-    },
-    [updateDynamicVariable],
-  );
-
   return (
     <div className="h-full min-h-0 overflow-y-auto px-4 pb-8">
       <div className="mx-auto flex max-w-3xl flex-col gap-4 pt-4">
@@ -84,7 +85,7 @@ export function DynamicVariablesPanel() {
             <Button variant="outline" size="sm" onClick={() => void handleResolveAll()}>
               全部刷新
             </Button>
-            <Button size="sm" onClick={() => setCreating(true)}>
+            <Button size="sm" onClick={() => beginCreate(projectId)}>
               新建定义
             </Button>
           </div>
@@ -110,20 +111,19 @@ export function DynamicVariablesPanel() {
             projectId={projectId}
             resolving={resolving}
             editing={editingId === variable.id}
-            onEdit={() => setEditingId(variable.id)}
-            onCancelEdit={() => setEditingId(null)}
+            onEdit={() => beginEdit(variable)}
+            onCancelEdit={() => clearDraft(projectId)}
             onRefresh={() => void handleRefresh(variable)}
             onClearOverride={() => void handleClearOverride(variable)}
             onDelete={() => void deleteDynamicVariable(variable.id)}
-            onRename={(name) => void handleRename(variable, name)}
           />
         ))}
 
         {creating && (
           <DynamicVariableForm
             projectId={projectId}
-            onCancel={() => setCreating(false)}
-            onDone={() => setCreating(false)}
+            onCancel={() => clearDraft(projectId)}
+            onDone={() => clearDraft(projectId)}
           />
         )}
       </div>
@@ -143,8 +143,6 @@ interface DynamicVariableCardProps {
   onRefresh: () => void;
   onClearOverride: () => void;
   onDelete: () => void;
-  /** 一键改名：表单里的「只改名」按钮用它。 */
-  onRename: (name: string) => void;
 }
 
 function DynamicVariableCard({
@@ -157,7 +155,6 @@ function DynamicVariableCard({
   onRefresh,
   onClearOverride,
   onDelete,
-  onRename,
 }: DynamicVariableCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [draft, setDraft] = useState(variable.value ?? '');
@@ -223,7 +220,10 @@ function DynamicVariableCard({
         {variable.effectiveEnvironmentName && (
           <>
             <dt className="text-muted-foreground">取数环境</dt>
-            <dd>{variable.effectiveEnvironmentName}</dd>
+            <dd>
+              {variable.effectiveEnvironmentName}
+              {variable.sourceEnvironmentId ? '' : '（继承当前环境）'}
+            </dd>
           </>
         )}
         <dt className="text-muted-foreground">抽取规则</dt>
@@ -286,7 +286,6 @@ function DynamicVariableCard({
           projectId={projectId}
           onCancel={onCancelEdit}
           onDone={onCancelEdit}
-          onRename={onRename}
         />
       )}
     </article>

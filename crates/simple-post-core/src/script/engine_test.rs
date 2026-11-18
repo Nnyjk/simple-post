@@ -355,6 +355,7 @@ fn the_response_is_visible_to_a_test_script() {
         headers: vec![("Content-Type".to_string(), "application/json".to_string())],
         body_base64: None,
         body: "{\"id\":7}".to_string(),
+        truncated: false,
         response_time_ms: 12,
     };
     sandbox

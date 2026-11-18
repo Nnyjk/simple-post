@@ -413,6 +413,8 @@ impl SourceFetcher for CountingFetcher {
                 status: self.status,
                 content_type: "application/json".into(),
                 body: self.body.clone(),
+                truncated: false,
+                body_base64: None,
                 headers: vec![],
                 duration_ms: 0,
             })
@@ -448,7 +450,10 @@ fn seeded_pool() -> (db::DbPool, std::path::PathBuf) {
 }
 
 fn context(pool: &db::DbPool) -> ResolveContext {
-    ResolveContext { pool: pool.clone() }
+    ResolveContext {
+        pool: pool.clone(),
+        environment_id: None,
+    }
 }
 
 #[tokio::test]
@@ -512,6 +517,42 @@ async fn a_force_ignores_the_cache() {
         .await
         .expect("解析");
     assert_eq!(fetcher.calls(), 2);
+}
+
+/// 改了抽取规则之后，缓存里那份按旧规则算出来的值作废，下一次解析重新取数。
+#[tokio::test]
+async fn changing_the_extraction_rule_refetches_instead_of_reading_the_old_value() {
+    let (pool, _dir) = seeded_pool();
+    let ctx = context(&pool);
+    let fetcher = CountingFetcher::new("[{\"name\":\"A\"}]");
+
+    // 定义第一条是 `$`：整个响应体进缓存。
+    let whole = resolve_names(&ctx, Some("p1"), &["sns".to_string()], false, &fetcher)
+        .await
+        .expect("解析");
+    assert_eq!(
+        whole.values.get("sns").map(String::as_str),
+        Some("[{\"name\":\"A\"}]")
+    );
+    assert_eq!(fetcher.calls(), 1);
+
+    db::with_tx(&pool, |c| {
+        db::dynamic_variables::update(
+            c,
+            "d1",
+            crate::domain::DynamicVariablePatch {
+                extract_path: Some("$[0].name".into()),
+                ..Default::default()
+            },
+        )
+    })
+    .expect("patch");
+
+    let narrowed = resolve_names(&ctx, Some("p1"), &["sns".to_string()], false, &fetcher)
+        .await
+        .expect("解析");
+    assert_eq!(fetcher.calls(), 2, "旧值已作废，必须重新取数");
+    assert_eq!(narrowed.values.get("sns").map(String::as_str), Some("A"));
 }
 
 #[tokio::test]
@@ -918,11 +959,12 @@ fn the_source_context_names_the_module_the_endpoint_sits_in() {
     def.source_endpoint_id = Some("e1".into());
     def.source_inline_json = None;
 
-    let ctx = source_context(&pool, &def).expect("取数上下文");
+    let ctx = source_context(&pool, &def, None).expect("取数上下文");
     assert_eq!(ctx.module_id.as_deref(), Some("m1"));
     assert_eq!(ctx.project_id.as_deref(), Some("p1"));
 }
 
+/// 定义点名的环境是**指定**，压过调用方此刻选中的那个。
 #[test]
 fn the_source_context_takes_the_environment_the_definition_names() {
     let (pool, _dir) = pool_with_a_module();
@@ -931,19 +973,74 @@ fn the_source_context_takes_the_environment_the_definition_names() {
     def.source_inline_json = None;
     def.source_environment_id = Some("env_b".into());
 
-    let ctx = source_context(&pool, &def).expect("取数上下文");
+    let ctx = source_context(&pool, &def, Some("env_a")).expect("取数上下文");
     assert_eq!(ctx.environment_id.as_deref(), Some("env_b"));
 }
 
+/// 定义没点名环境就是**继承**：用调用方此刻选中的那个。这条是本次改动的核心语义——
+/// 同一个 `{{name}}` 随用户切环境换值，故缓存键也跟着换。
 #[test]
-fn the_source_context_falls_back_to_the_first_environment_of_the_project() {
+fn the_source_context_inherits_the_callers_environment() {
     let (pool, _dir) = pool_with_a_module();
     let mut def = definition(60, false);
     def.source_endpoint_id = Some("e1".into());
     def.source_inline_json = None;
 
-    // 环境按名字排序，故第一个是 `alpha`。
-    let ctx = source_context(&pool, &def).expect("取数上下文");
+    let ctx = source_context(&pool, &def, Some("env_b")).expect("取数上下文");
+    assert_eq!(ctx.environment_id.as_deref(), Some("env_b"));
+}
+
+/// 调用方没有环境时回落到数据源项目里最早创建的那个（`environments::get_default`）。
+#[test]
+fn the_source_context_falls_back_to_the_projects_default_environment() {
+    let (pool, _dir) = pool_with_a_module();
+    let mut def = definition(60, false);
+    def.source_endpoint_id = Some("e1".into());
+    def.source_inline_json = None;
+
+    // 两个环境的 `created_at` 相同（同一毫秒建的），故按 id 取较小的那个：`env_a`。
+    let ctx = source_context(&pool, &def, None).expect("取数上下文");
+    assert_eq!(ctx.environment_id.as_deref(), Some("env_a"));
+}
+
+/// 调用方选中的环境属于**别的**项目时不算数：环境的格子按 (环境 × 模块) 寻址，拿别处
+/// 的环境去取数会取到别的内容。回落到数据源项目的默认环境。
+#[test]
+fn the_source_context_ignores_an_environment_of_another_project() {
+    let (pool, _dir) = pool_with_a_module();
+    db::with_tx(&pool, |c| {
+        db::projects::create(
+            c,
+            &Project {
+                id: "p2".into(),
+                name: "Second".into(),
+                description: None,
+                color: "#000000".into(),
+                created_at: 1,
+                updated_at: 1,
+            },
+        )?;
+        db::environments::create(
+            c,
+            &crate::domain::Environment {
+                id: "env_p2".into(),
+                project_id: "p2".into(),
+                name: "other".into(),
+                module_base_urls: Default::default(),
+                variables: Default::default(),
+                disabled_variables: Vec::new(),
+                created_at: 0,
+            },
+        )?;
+        Ok(())
+    })
+    .expect("seed p2");
+
+    let mut def = definition(60, false);
+    def.source_endpoint_id = Some("e1".into());
+    def.source_inline_json = None;
+
+    let ctx = source_context(&pool, &def, Some("env_p2")).expect("取数上下文");
     assert_eq!(ctx.environment_id.as_deref(), Some("env_a"));
 }
 
@@ -952,7 +1049,8 @@ fn an_inline_source_has_no_project_no_environment_and_no_module() {
     let (pool, _dir) = pool_with_a_module();
     let def = definition(60, false);
 
-    let ctx = source_context(&pool, &def).expect("取数上下文");
+    // 内联请求自带完整地址，调用方选了什么环境都一样。
+    let ctx = source_context(&pool, &def, Some("env_a")).expect("取数上下文");
     assert!(ctx.project_id.is_none());
     assert!(ctx.environment_id.is_none());
     assert!(ctx.module_id.is_none());

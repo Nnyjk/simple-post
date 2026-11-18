@@ -16,18 +16,22 @@ use crate::domain::{
 };
 use crate::error::AppError;
 
-use crate::dynamic_api::DynamicVariableView;
+use crate::dynamic_api::{DynamicVariableView, PreviewDraft, PreviewResult};
 
 /// 列出全部动态变量，带当前值与缓存状态。
 ///
 /// 只读缓存行，**不取数**。不带「哪些端点引用了它」：那条信息只在接口那侧存在，变量这一侧不维护
 /// 反向索引。
+///
+/// `environment_id` 是调用方此刻选中的环境：只对继承取数环境的定义起作用，缓存行按实际生效的
+/// 环境取。
 #[tauri::command]
 pub fn dynamic_variables_list(
     state: State<DbPool>,
     project_id: Option<String>,
+    environment_id: Option<String>,
 ) -> Result<Vec<DynamicVariableView>, AppError> {
-    crate::dynamic_api::list(&state, project_id.as_deref())
+    crate::dynamic_api::list(&state, project_id.as_deref(), environment_id.as_deref())
 }
 
 /// 新建一条动态变量定义。
@@ -93,18 +97,22 @@ pub fn dynamic_variables_delete(state: State<DbPool>, id: String) -> Result<(), 
 ///
 /// `project_id` 决定这些名字在哪个范围里找：给了就只认那个项目里的定义（请求发送走的就是
 /// 这条）；不给就是跨项目取值。
+///
+/// `environment_id` 是调用方此刻选中的环境，只对继承取数环境的定义起作用。
 #[tauri::command]
 pub async fn dynamic_variables_resolve(
     state: State<'_, DbPool>,
     names: Vec<String>,
     project_id: Option<String>,
     force: Option<bool>,
+    environment_id: Option<String>,
 ) -> Result<DynamicResolution, AppError> {
     crate::dynamic_api::resolve(
         &state,
         project_id.as_deref(),
         &names,
         force.unwrap_or(false),
+        environment_id.as_deref(),
     )
     .await
 }
@@ -120,16 +128,59 @@ pub fn dynamic_variables_set_override(
     value: Option<String>,
     expires_at: Option<i64>,
     forever: Option<bool>,
+    environment_id: Option<String>,
 ) -> Result<DynamicVariableView, AppError> {
-    crate::dynamic_api::set_override(&state, &id, value, expires_at, forever.unwrap_or(false))?;
-    crate::dynamic_api::get(&state, &id)
+    crate::dynamic_api::set_override(
+        &state,
+        &id,
+        value,
+        expires_at,
+        forever.unwrap_or(false),
+        environment_id.as_deref(),
+    )?;
+    crate::dynamic_api::get(&state, &id, environment_id.as_deref())
 }
 
-/// 强制重新取一次数。
+/// 强制重新取一次数。`environment_id` 是调用方此刻选中的环境。
 #[tauri::command]
 pub async fn dynamic_variables_refresh(
     state: State<'_, DbPool>,
     id: String,
+    environment_id: Option<String>,
 ) -> Result<DynamicValueStatus, AppError> {
-    crate::dynamic_api::refresh(&state, &id).await
+    crate::dynamic_api::refresh(&state, &id, environment_id.as_deref()).await
+}
+
+/// 用表单里当前这份草稿真取一次数，把响应交给人点选抽取路径。
+///
+/// 参数**扁平**：`#[tauri::command]` 按参数名（`to_lower_camel_case`）去 payload 里取值，
+/// 故渲染层发的是那些 camelCase 字段名本身。`environment_id` 是调用方此刻选中的环境，
+/// 只对「继承取数环境」的草稿起作用——它与 `source_environment_id`（定义点名的那一个
+/// 环境）是两件事。
+///
+/// 预览不碰持久状态：不读不写缓存、不写覆盖值、不写响应历史，故重复预览幂等。
+///
+/// **参数必须扁平**（同上：与 REST body 的字段名逐字段对应，塞进 opts 结构体会让桌面侧的
+/// payload 变成 `{ opts: {...} }`，与浏览器侧发出去的那个对象对不上，只坏一端），故超过七个。
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub async fn dynamic_variables_preview(
+    state: State<'_, DbPool>,
+    name: Option<String>,
+    source_endpoint_id: Option<String>,
+    source_inline_json: Option<String>,
+    source_environment_id: Option<String>,
+    extract_path: Option<String>,
+    transform_script: Option<String>,
+    environment_id: Option<String>,
+) -> Result<PreviewResult, AppError> {
+    let draft = PreviewDraft {
+        name,
+        source_endpoint_id,
+        source_inline_json,
+        source_environment_id,
+        extract_path,
+        transform_script,
+    };
+    crate::dynamic_api::preview(&state, draft, environment_id.as_deref()).await
 }

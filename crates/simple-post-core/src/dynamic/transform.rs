@@ -40,8 +40,9 @@ pub async fn apply(
         status: raw.status.to_string(),
         headers: raw.headers.clone(),
         body: raw.body.clone(),
-        // 动态变量的取数响应只有文本形态：抽取规则是 JSONPath，它读的是解析后的 JSON。
-        body_base64: None,
+        // 取数的响应可能只有二进制形态（图片、压缩包）。原样透传，脚本看到的是同一份响应。
+        body_base64: raw.body_base64.clone(),
+        truncated: raw.truncated,
         response_time_ms: raw.duration_ms,
     };
     let env = EnvSnapshot {

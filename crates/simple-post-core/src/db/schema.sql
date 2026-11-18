@@ -301,9 +301,9 @@ CREATE TABLE IF NOT EXISTS oauth2_tokens (
 -- 定义本身要留下来并标成「数据源已删除」，而不是跟着消失——用户删错一个端点不该连带
 -- 丢掉一份定义。
 --
--- 取数用的环境由定义自己点名：`source_environment_id` 为空表示用数据源接口所属
--- 项目的第一个可用环境。取数上下文于是只由定义决定，与谁消费它无关——同一个 `{{name}}`
--- 在任何项目里取到的值都一样。
+-- 取数用的环境有两种形态：`source_environment_id` 有名就是**指定**的那个环境；为空就是
+-- **继承**——用调用方此刻选中的环境（它不属于数据源接口所属项目时，回落到那个项目的默认
+-- 环境）。故消费方换了环境，同一个 `{{name}}` 取到的值可以不同。
 CREATE TABLE IF NOT EXISTS dynamic_variables (
   id                 TEXT PRIMARY KEY,
   -- 归属项目。定义挂在项目里，故不同项目可以有同名变量而互不覆盖。
@@ -314,7 +314,7 @@ CREATE TABLE IF NOT EXISTS dynamic_variables (
   -- 数据源：引用树里的一个端点，或内联一份请求。两者二选一。
   source_endpoint_id TEXT REFERENCES nodes(id) ON DELETE SET NULL,
   source_inline_json TEXT,
-  -- 取数用的环境。为空 = 数据源接口所属项目的第一个可用环境。
+  -- 取数用的环境。为空 = 继承调用方此刻选中的环境。
   source_environment_id TEXT REFERENCES environments(id) ON DELETE SET NULL,
   -- JSONPath 表达式。`$` 表示整段响应。
   extract_path       TEXT NOT NULL DEFAULT '$',
@@ -348,9 +348,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_dynamic_vars_orphan_name
 --
 -- 一行 = 一个（定义 × 取数环境）。`environment_id` 为空串表示「没有环境」。
 --
--- 取数环境由定义自己决定（点名的那个，或数据源接口所属项目的第一个可用环境），
--- 故一条定义只在一个环境上取值。这一列仍在键里：定义改了环境之后，旧环境上取到的那份
--- 值留在原处，用户改回去时那份值还在。
+-- 取数环境按（定义 × 实际生效的环境）分开：指定模式的那个环境，或继承模式下调用方此刻
+-- 选中的那个（含回落后的默认环境）。故切环境一定换一个键，不会读到上一个环境的值；而定义
+-- 改了环境之后，旧环境上取到的那份值留在原处，用户改回去时那份值还在。
 --
 -- 存放位置是 SQLite 而不是进程内存：桌面端、`serve-web`、MCP 守护进程是三个独立进程，
 -- 各自的内存缓存互不可见；持久化之后三者读写同一份缓存。
