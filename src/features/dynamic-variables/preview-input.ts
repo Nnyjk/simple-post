@@ -52,7 +52,43 @@ export function previewPayload(input: PreviewInput): PreviewPayload {
  *
  * 只看抽取规则与「有没有脚本」不够：换掉内联 URL、换一个数据源接口、换取数环境，或改掉
  * 脚本正文，拿到的都是另一份输入下的结果，却会被当成「当前草稿」的结果继续展示。
+ *
+ * 调用方环境只在**继承**时才算数：定义点名了取数环境、或者干脆是内联请求，切一下环境并不
+ * 改变这次取数会拿到什么，指纹却因此变了就会误标「这份结果对应旧输入」，让用户白白再打一次
+ * 请求（非幂等接口就是对端生效两次）。
  */
 export function previewFingerprint(input: PreviewInput): string {
-  return JSON.stringify(previewPayload(input));
+  const payload = previewPayload(input);
+  // 实际生效的环境：定义点名的那个，否则是继承来的调用方环境；内联请求用不到环境。
+  const effectiveEnvironmentId =
+    payload.sourceEnvironmentId ?? (input.usesEndpoint ? input.activeEnvironmentId : null);
+  return JSON.stringify({
+    sourceEndpointId: payload.sourceEndpointId,
+    sourceInlineJson: payload.sourceInlineJson,
+    sourceEnvironmentId: payload.sourceEnvironmentId,
+    extractPath: payload.extractPath,
+    transformScript: payload.transformScript,
+    environmentId: effectiveEnvironmentId,
+  });
+}
+
+/** 预览失败也只属于交出它的那份输入。 */
+export interface PreviewFailure {
+  /** 发起时那份输入的指纹。 */
+  fingerprint: string;
+  /** 后端或传输层给的原因。 */
+  message: string;
+}
+
+/**
+ * 这条失败该不该显示在当前草稿下面。
+ *
+ * 指纹对不上就是「上一份输入的失败」：把它摆在当前草稿名下，用户会以为刚改的这份也失败了。
+ */
+export function previewFailureMessage(
+  failure: PreviewFailure | null,
+  fingerprint: string,
+): string | null {
+  if (failure === null || failure.fingerprint !== fingerprint) return null;
+  return failure.message;
 }

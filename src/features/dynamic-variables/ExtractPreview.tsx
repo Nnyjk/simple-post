@@ -26,7 +26,13 @@ import { errorText } from '@/lib/error-text';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { buildScriptSnippet, shouldConfirmOverwrite } from './extract-path';
-import { previewFingerprint, previewPayload, type PreviewInput } from './preview-input';
+import {
+  previewFailureMessage,
+  previewFingerprint,
+  previewPayload,
+  type PreviewFailure,
+  type PreviewInput,
+} from './preview-input';
 import { PreviewJsonTree } from './PreviewJsonTree';
 
 export interface ExtractPreviewProps {
@@ -95,7 +101,8 @@ export function ExtractPreview({
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<DynamicPreviewResult | null>(null);
   const [snapshot, setSnapshot] = useState<DraftSnapshot | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  /** 最近一次失败，连着**发起时**那份输入的指纹：改草稿之后它就自动不再属于当前这一份。 */
+  const [failure, setFailure] = useState<PreviewFailure | null>(null);
   /** 当前选中的节点路径（树上点的那一条）。它就是「生成脚本片段」的起点。 */
   const [pickedPath, setPickedPath] = useState<string | null>(null);
   /** 待写入脚本的片段。有它就说明「覆写确认」还在等人点头。 */
@@ -115,9 +122,11 @@ export function ExtractPreview({
     transformScript,
     activeEnvironmentId: activeEnvironmentId || null,
   };
+  const currentFingerprint = previewFingerprint(currentInput);
   // 与快照不同就说明结果已经不对应眼前这份草稿了。
-  const draftChanged =
-    snapshot !== null && snapshot.fingerprint !== previewFingerprint(currentInput);
+  const draftChanged = snapshot !== null && snapshot.fingerprint !== currentFingerprint;
+  // 失败也一样：指纹对不上就当这份草稿还没有结果，别把上一份输入的失败摆在它名下。
+  const error = previewFailureMessage(failure, currentFingerprint);
   /** 预览请求的世代号：连点两次时，先发的那一次可能后回来，它的结果不能盖掉后发的。 */
   const previewSeq = useRef(0);
 
@@ -125,7 +134,7 @@ export function ExtractPreview({
     // 号在发请求之前取：回来时不是最后发出的那一次就整个丢掉（连点、改完再点都会走到这里）。
     const seq = ++previewSeq.current;
     setBusy(true);
-    setError(null);
+    setFailure(null);
     setSnippetHint(null);
     try {
       // 参数就是算指纹的那一份：数据源按形态归零（另一种显式清空），`environmentId` 是
@@ -148,7 +157,7 @@ export function ExtractPreview({
         hasScript: transformScript.trim() !== '',
         environment,
         // 指纹记的是**发起时**的输入，不是回来时的：回来时草稿可能已经改了。
-        fingerprint: previewFingerprint(currentInput),
+        fingerprint: currentFingerprint,
       });
       setResult(preview);
       setPickedPath(null);
@@ -156,7 +165,8 @@ export function ExtractPreview({
       if (seq !== previewSeq.current) return;
       setResult(null);
       setSnapshot(null);
-      setError(errorText(e));
+      // 失败也带着指纹一起记：这条错误属于刚才那份输入，不属于之后改成的样子。
+      setFailure({ fingerprint: currentFingerprint, message: errorText(e) });
     } finally {
       if (seq === previewSeq.current) setBusy(false);
     }

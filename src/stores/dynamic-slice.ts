@@ -192,8 +192,15 @@ export interface DynamicSliceState {
   dynamicValues: Record<string, Record<string, DynamicValueStatus>>;
   /** (项目 × 取数环境) → 变量名 → 最近一次取数失败的原因。取数成功时该条目被清掉。 */
   dynamicErrors: Record<string, Record<string, DynamicError>>;
-  /** 正在取数。界面上据此显示「正在取数…」。 */
-  dynamicResolving: boolean;
+  /**
+   * 还在路上的值请求条数。界面上据此显示「正在取数…」。
+   *
+   * 计数而不是布尔：成批解析与单条刷新会同时在路上，先回来的那一条不该把按钮提前恢复成
+   * 可点——那一批还没跑完。
+   */
+  dynamicInFlight: number;
+  /** 正在保存的定义 id（`updateDynamicVariable` 在飞期间）。表单据此禁用保存按钮。 */
+  savingDynamicVariableIds: Set<string>;
   /** 最近一次取数或写操作失败的原因。 */
   dynamicError: string | null;
 }
@@ -221,12 +228,17 @@ export interface DynamicSliceActions {
    */
   clearDynamicVariableDraft: (projectId: string) => void;
   /**
-   * 保存成功后收尾：只有当前草稿仍是**提交的那一份**时才清。
+   * 保存成功后收尾。
    *
-   * 保存请求在路上时用户又敲了一格，那一格属于下一份草稿；无条件清会把新敲的内容一起
-   * 抹掉，连带把标签的脏标记也摘了。
+   * 当前草稿仍是**提交的那一份**就清掉；保存请求在路上时用户又敲了一格，那一格属于下一份
+   * 草稿，于是留着它，但把身份与基准换成刚落地的那一份（`saved`）：不换，再点保存要么以
+   * 旧基线算 patch 而漏发，要么还是 `creating` 状态、再创建一条撞上项目内的名字唯一约束。
    */
-  finishDynamicVariableSave: (projectId: string, submitted: DynamicVariableDraft) => void;
+  finishDynamicVariableSave: (
+    projectId: string,
+    submitted: DynamicVariableDraft,
+    saved: DynamicVariable,
+  ) => void;
   /**
    * 载入定义。
    *
@@ -234,10 +246,18 @@ export interface DynamicSliceActions {
    * 只读缓存行，**不取数**。
    */
   loadDynamicVariables: (projectId?: string) => Promise<void>;
-  /** 新建一条定义，返回它的 id（失败返回 null）。 */
-  createDynamicVariable: (input: CreateDynamicVariableInput) => Promise<string | null>;
-  /** 改一条定义。成功返回 true，失败返回 false（原因在 `dynamicError` 里）。 */
-  updateDynamicVariable: (id: string, patch: Partial<DynamicVariable>) => Promise<boolean>;
+  /** 新建一条定义，返回后端落库的那一份（失败返回 null）。 */
+  createDynamicVariable: (input: CreateDynamicVariableInput) => Promise<DynamicVariable | null>;
+  /**
+   * 改一条定义。成功返回后端落库的那一份（失败返回 null，原因在 `dynamicError` 里）。
+   *
+   * 同一条定义在飞期间再提交会被直接挡回 null：web 传输下两个 PATCH 可以乱序落地，
+   * 旧的那次后到就会盖掉新的编辑。挡住的是这一条定义，别的定义照常能存。
+   */
+  updateDynamicVariable: (
+    id: string,
+    patch: Partial<DynamicVariable>,
+  ) => Promise<DynamicVariable | null>;
   /** 删一条定义。 */
   deleteDynamicVariable: (id: string) => Promise<void>;
   /**
@@ -298,15 +318,18 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
   };
 
   /**
-   * 让这个名字在所有格上**在飞**的发布作废。
+   * 让**这个项目里**这个名字在所有格上在飞着的发布作废。
    *
-   * 定义被改了（抽取规则、数据源……），按旧定义取到的值不该再落进桶里——否则保存之后桶里
-   * 还留着旧规则算出来的值，看上去像新规则的结果。
+   * 定义被改了或删了（抽取规则、数据源……），按旧定义取到的值不该再落进桶里——否则保存之后
+   * 桶里还留着旧规则算出来的值，看上去像新规则的结果。
+   *
+   * 键是 `项目 \u0000 环境 \u0000 变量名`，故先按前缀认出项目：别的项目里同名变量那一份
+   * 还在飞的东西不能被一起作废，那会让它那一格白白丢掉刚取到的值。
    */
-  const invalidateName = (name: string) => {
-    const suffix = `\u0000${name}`;
+  const invalidateName = (projectId: string, name: string) => {
     for (const [key, seq] of valueSeq) {
-      if (key.endsWith(suffix)) valueSeq.set(key, seq + 1);
+      if (!key.endsWith(`\u0000${name}`) || scopeProjectId(key) !== projectId) continue;
+      valueSeq.set(key, seq + 1);
     }
   };
 
@@ -347,7 +370,8 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
     dynamicDrafts: {},
     dynamicValues: {},
     dynamicErrors: {},
-    dynamicResolving: false,
+    dynamicInFlight: 0,
+    savingDynamicVariableIds: new Set<string>(),
     dynamicError: null,
 
     beginCreateDynamicVariableDraft: (projectId) =>
@@ -392,11 +416,28 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
 
     clearDynamicVariableDraft: (projectId) => set((s) => clearedDrafts(s, projectId) ?? {}),
 
-    finishDynamicVariableSave: (projectId, submitted) =>
+    finishDynamicVariableSave: (projectId, submitted, saved) =>
       set((s) => {
-        // 当前草稿已经不是提交的那一份：保存期间用户又敲了内容，留着并继续算脏。
-        if (s.dynamicDrafts[projectId] !== submitted) return {};
-        return clearedDrafts(s, projectId) ?? {};
+        const current = s.dynamicDrafts[projectId];
+        // 草稿已经被别处清掉了（取消、关标签）：没什么要收的。
+        if (current === undefined) return {};
+        // 还是提交的那一份：内容都落了库，草稿可以走。
+        if (current === submitted) return clearedDrafts(s, projectId) ?? {};
+        // 保存期间用户已经点开另一条定义的表单：这份草稿不归这次保存管，别把它改写成上一条。
+        if (current.editingId !== null && current.editingId !== saved.id) return {};
+        // 保存期间又敲了内容：留着这一份，但把它改写成「正在编辑刚落地的那条」。
+        // 不改写的话 `creating` 还挂着，再点保存就是第二次创建。
+        return {
+          dynamicDrafts: {
+            ...s.dynamicDrafts,
+            [projectId]: {
+              ...current,
+              creating: false,
+              editingId: saved.id,
+              openedWith: saved,
+            },
+          },
+        };
       }),
 
     /**
@@ -440,6 +481,8 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
         set({ dynamicVariables: views, dynamicError: null });
       } catch (e) {
         console.error('[store] dynamic_variables_list failed', e);
+        // 期间又发过一次：这一份的失败属于旧项目或旧环境，别把它盖到新的那一屏上。
+        if (seq !== listSeq) return;
         set({ dynamicError: errorText(e) });
       }
     },
@@ -462,7 +505,8 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
         });
         // 列表随即重载：面板要显示的当前值与缓存状态都在列表里。
         await get().loadDynamicVariables(input.projectId);
-        return created.id;
+        // 落库的那一份交回去：提交期间草稿若又变了，表单要把草稿改写成这条的编辑态。
+        return created;
       } catch (e) {
         console.error('[store] dynamic_variables_create failed', e);
         set({ dynamicError: errorText(e) });
@@ -471,21 +515,34 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
     },
 
     updateDynamicVariable: async (id, patch) => {
+      // 同一条定义一次只发一个 PATCH：web 传输下两个请求可以乱序落地，旧的那个后到就会
+      // 盖掉新编辑。挡住的是这一条定义，别的定义照常能存。
+      if (get().savingDynamicVariableIds.has(id)) return null;
+      set((s) => ({ savingDynamicVariableIds: new Set(s.savingDynamicVariableIds).add(id) }));
       // 改之前的名字：改名之后旧名下的值与错误都不再有意义。
       const before = get().dynamicVariables.find((v) => v.id === id);
       try {
-        await invokeCmd<DynamicVariable>(COMMANDS.dynamicVariablesUpdate, { id, patch });
+        const updated = await invokeCmd<DynamicVariable>(COMMANDS.dynamicVariablesUpdate, {
+          id,
+          patch,
+        });
         if (before) {
           // 定义变了：按旧定义取到、还在路上的结果不能再落进桶里。
-          invalidateName(before.name);
+          invalidateName(before.projectId ?? '', before.name);
           get().dropDynamicValue(before.projectId ?? '', before.name);
         }
         await get().loadDynamicVariables(scopeOf(get(), id));
-        return true;
+        return updated;
       } catch (e) {
         console.error('[store] dynamic_variables_update failed', e);
         set({ dynamicError: errorText(e) });
-        return false;
+        return null;
+      } finally {
+        set((s) => {
+          const next = new Set(s.savingDynamicVariableIds);
+          next.delete(id);
+          return { savingDynamicVariableIds: next };
+        });
       }
     },
 
@@ -494,6 +551,8 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
       try {
         await invokeCmd<void>(COMMANDS.dynamicVariablesDelete, { id });
         if (before) {
+          // 定义没了：还在路上的取数结果不能把它加回桶里。
+          invalidateName(before.projectId ?? '', before.name);
           get().dropDynamicValue(before.projectId ?? '', before.name);
           // 正在编辑的那条定义被删了：表单已经存不回去，草稿跟着走。
           const projectId = before.projectId ?? '';
@@ -519,7 +578,8 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
       for (const name of names) issued.set(name, issueValueSeq(scope, name));
       /** 这个名字的结果还没被同名的新请求顶掉。 */
       const fresh = (name: string) => valueSeq.get(valueKey(scope, name)) === issued.get(name);
-      set({ dynamicResolving: true });
+      // 计数不计数布尔：别的值请求还在路上时，这一次先回来不该把「正在取数」摘掉。
+      set((s) => ({ dynamicInFlight: s.dynamicInFlight + 1 }));
       try {
         const resolution = await invokeCmd<{
           values: Record<string, string>;
@@ -563,7 +623,7 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
         set({ dynamicError: errorText(e) });
         return { values: {}, errors: [] };
       } finally {
-        set({ dynamicResolving: false });
+        set((s) => ({ dynamicInFlight: s.dynamicInFlight - 1 }));
       }
     },
 
@@ -606,7 +666,7 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
       // 号只压住这一个名字：同一格里的其它变量（成批解析在路上）不受影响。
       const name = definition?.name ?? '';
       const seq = issueValueSeq(scope, name);
-      set({ dynamicResolving: true });
+      set((s) => ({ dynamicInFlight: s.dynamicInFlight + 1 }));
       try {
         const status = await invokeCmd<DynamicValueStatus>(COMMANDS.dynamicVariablesRefresh, {
           id,
@@ -634,7 +694,7 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
         console.error('[store] dynamic_variables_refresh failed', e);
         set({ dynamicError: errorText(e) });
       } finally {
-        set({ dynamicResolving: false });
+        set((s) => ({ dynamicInFlight: s.dynamicInFlight - 1 }));
       }
     },
   };
