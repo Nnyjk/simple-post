@@ -85,7 +85,8 @@ beforeEach(() => {
     dynamicDrafts: {},
     dynamicValues: {},
     dynamicErrors: {},
-    dynamicResolving: false,
+    dynamicInFlight: 0,
+    savingDynamicVariableIds: new Set<string>(),
     dynamicError: null,
   });
 });
@@ -367,7 +368,7 @@ describe('草稿让标签变脏：「关闭已保存」不许带走表单', () =
     // 保存请求还在路上时用户又改了一格：草稿换成了新对象。
     actions().patchDynamicVariableDraft('p1', { name: 'sns2' });
 
-    actions().finishDynamicVariableSave('p1', submitted);
+    actions().finishDynamicVariableSave('p1', submitted, view({ name: 'sns1' }));
 
     assert.equal(draftOf('p1')?.name, 'sns2', '新敲的内容不许被这次保存的收尾抹掉');
     assert.equal(
@@ -375,13 +376,15 @@ describe('草稿让标签变脏：「关闭已保存」不许带走表单', () =
       true,
       '还有没保存的内容，标签继续算脏',
     );
+    // 基准推进到刚落地的那一份：否则「改回原值」会被算成没变而不发出去。
+    assert.equal(draftOf('p1')?.openedWith?.name, 'sns1');
   });
 
   it('保存完成时草稿没变，就清掉并摘脏', () => {
     actions().beginEditDynamicVariableDraft(view());
     const submitted = draftOf('p1');
 
-    actions().finishDynamicVariableSave('p1', submitted);
+    actions().finishDynamicVariableSave('p1', submitted, view());
 
     assert.equal(draftOf('p1'), undefined);
     assert.equal(useAppStore.getState().dirtyTabIds.has(dynamicTabId('p1')), false);
@@ -457,5 +460,116 @@ describe('草稿让标签变脏：「关闭已保存」不许带走表单', () =
       '切回来仍是脏的，不该被关掉',
     );
     assert.ok(draftOf('p1'));
+  });
+  it('新建期间又敲了内容：收尾把草稿转成刚建那条的编辑态，不再算「新建」', () => {
+    // 不转的话 `creating` 还挂着，再点保存就是第二次创建，撞项目内的名字唯一约束。
+    actions().beginCreateDynamicVariableDraft('p1');
+    actions().patchDynamicVariableDraft('p1', {
+      name: 'sns',
+      sourceInlineJson: '{"method":"GET","url":"https://example.test/points"}',
+    });
+    const submitted = draftOf('p1');
+    assert.equal(submitted?.creating, true);
+    // 请求还在路上，用户又补了一句说明：草稿换成新对象。
+    actions().patchDynamicVariableDraft('p1', { description: '后来补的' });
+
+    actions().finishDynamicVariableSave('p1', submitted!, view({ id: 'd-new', name: 'sns' }));
+
+    const draft = draftOf('p1');
+    assert.equal(draft?.creating, false, '落库之后就是编辑态');
+    assert.equal(draft?.editingId, 'd-new', '再保存要改成这条定义，而不是再建一条');
+    assert.equal(draft?.openedWith?.id, 'd-new', '基线换成落库的那一份');
+    assert.equal(draft?.description, '后来补的', '期间敲的内容留着');
+    assert.equal(
+      useAppStore.getState().dirtyTabIds.has(dynamicTabId('p1')),
+      true,
+      '还有没保存的内容，标签继续算脏',
+    );
+  });
+
+  it('草稿已被别处清掉时才收尾：什么也不重建', () => {
+    actions().beginEditDynamicVariableDraft(view());
+    const submitted = draftOf('p1');
+    actions().clearDynamicVariableDraft('p1');
+
+    actions().finishDynamicVariableSave('p1', submitted!, view());
+
+    assert.equal(draftOf('p1'), undefined, '取消之后又被一次迟到的保存叫回来，就是幽灵表单');
+  });
+
+  it('暂存标签的 endpoint 草稿不被清扫抹掉', () => {
+    // 暂存进 `projectTabs` 的标签不在 `openTabs` 里：从 `valid` 重建草稿表就会把它抹掉，
+    // 于是它那条脏标记成了「脏而无草稿」。
+    const stashed = 'draft:stashed';
+    useAppStore.setState({
+      openTabs: [{ id: 'ep-gone', kind: 'endpoint' }],
+      activeTabId: 'ep-gone',
+      endpointDrafts: { [stashed]: { url: '/kept' } } as never,
+      dirtyTabIds: new Set([stashed, 'ep-gone']),
+      projectTabs: {
+        p2: { tabs: [{ id: stashed, kind: 'endpoint-draft' }], activeTabId: stashed },
+      },
+    });
+
+    actions().pruneStaleTabs();
+
+    const state = useAppStore.getState();
+    assert.equal(state.endpointDrafts[stashed]?.url, '/kept', '暂存标签的草稿要留着');
+    assert.equal(state.dirtyTabIds.has(stashed), true, '它仍算脏');
+    assert.equal(state.endpointDrafts['ep-gone'], undefined, '被清扫掉的那个才真清');
+  });
+
+  it('「关闭全部」只带走标签条上那些 endpoint 草稿', () => {
+    const live = 'draft:live';
+    const stashed = 'draft:stashed';
+    useAppStore.setState({
+      openTabs: [{ id: live, kind: 'endpoint-draft' }],
+      activeTabId: live,
+      endpointDrafts: { [live]: { url: '/live' }, [stashed]: { url: '/kept' } } as never,
+      draftEndpoints: { [live]: { id: live }, [stashed]: { id: stashed } } as never,
+      dirtyTabIds: new Set([live, stashed]),
+    });
+
+    actions().closeAllTabs();
+
+    const state = useAppStore.getState();
+    assert.equal(state.endpointDrafts[live], undefined, '关掉的那条草稿跟着走');
+    assert.equal(state.endpointDrafts[stashed]?.url, '/kept', '暂存标签仍算开着');
+    assert.equal(state.draftEndpoints[stashed] !== undefined, true);
+    assert.equal(state.draftEndpoints[live], undefined);
+  });
+  it('保存期间点开另一条定义：收尾不改写那份草稿', () => {
+    actions().beginEditDynamicVariableDraft(view({ id: 'd-a', name: 'a' }));
+    const submitted = draftOf('p1');
+    // 保存还在路上，用户点开了另一条定义的表单。
+    actions().beginEditDynamicVariableDraft(view({ id: 'd-b', name: 'b' }));
+
+    actions().finishDynamicVariableSave('p1', submitted!, view({ id: 'd-a', name: 'a' }));
+
+    const draft = draftOf('p1');
+    assert.equal(draft?.editingId, 'd-b', '另一条定义的表单不许被上一条的保存收尾劫走');
+    assert.equal(draft?.name, 'b');
+  });
+  it('「关闭已保存」也只带走标签条上那些 endpoint 草稿', () => {
+    // 暂存标签的草稿若被抹掉，它那条脏标记还在——于是「脏而无草稿」，再也存不回去。
+    const clean = 'ep-clean';
+    const stashed = 'draft:stashed';
+    useAppStore.setState({
+      openTabs: [{ id: clean, kind: 'endpoint' }],
+      activeTabId: clean,
+      endpointDrafts: { [clean]: { url: '/closed' }, [stashed]: { url: '/kept' } } as never,
+      draftEndpoints: { [stashed]: { id: stashed } } as never,
+      dirtyTabIds: new Set([stashed]),
+      projectTabs: {
+        p2: { tabs: [{ id: stashed, kind: 'endpoint-draft' }], activeTabId: stashed },
+      },
+    });
+
+    assert.equal(actions().closeSavedTabs(), 1, '只有标签条上那条干净的标签会被关');
+
+    const state = useAppStore.getState();
+    assert.equal(state.endpointDrafts[clean], undefined, '被关掉的那条的草稿跟着走');
+    assert.equal(state.endpointDrafts[stashed]?.url, '/kept', '暂存标签的草稿要留着');
+    assert.equal(state.draftEndpoints[stashed] !== undefined, true, '它的文档也留着');
   });
 });

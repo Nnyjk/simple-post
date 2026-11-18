@@ -13,7 +13,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAppStore } from '@/stores/app-store';
-import type { DynamicVariableView, ValueMode } from '@/types/domain';
+import type { DynamicVariable, DynamicVariableView, ValueMode } from '@/types/domain';
 import { Button } from '@/components/ui/button';
 import { EmptyHint } from '@/components/ui/empty-hint';
 import { DynamicVariableForm } from './DynamicVariableForm';
@@ -25,7 +25,7 @@ export function DynamicVariablesPanel() {
   // 切了环境，这个列表就得重载，否则卡片上的值还是上一个环境的。
   const activeEnvironmentId = useAppStore((s) => s.activeEnvironmentId);
   const loaded = useAppStore((s) => s.dynamicVariables);
-  const resolving = useAppStore((s) => s.dynamicResolving);
+  const resolving = useAppStore((s) => s.dynamicInFlight > 0);
   const error = useAppStore((s) => s.dynamicError);
   const loadDynamicVariables = useAppStore((s) => s.loadDynamicVariables);
   const resolveDynamicVariables = useAppStore((s) => s.resolveDynamicVariables);
@@ -118,7 +118,7 @@ export function DynamicVariablesPanel() {
             editing={editingId === variable.id}
             onEdit={() => beginEdit(variable)}
             onCancelEdit={() => clearDraft(projectId)}
-            onFinishEdit={(submitted) => finishSave(projectId, submitted)}
+            onFinishEdit={(submitted, saved) => finishSave(projectId, submitted, saved)}
             onRefresh={() => void handleRefresh(variable)}
             onClearOverride={() => void handleClearOverride(variable)}
             onDelete={() => void deleteDynamicVariable(variable.id)}
@@ -129,7 +129,7 @@ export function DynamicVariablesPanel() {
           <DynamicVariableForm
             projectId={projectId}
             onCancel={() => clearDraft(projectId)}
-            onDone={(submitted) => finishSave(projectId, submitted)}
+            onDone={(submitted, saved) => finishSave(projectId, submitted, saved)}
           />
         )}
       </div>
@@ -146,8 +146,8 @@ interface DynamicVariableCardProps {
   editing: boolean;
   onEdit: () => void;
   onCancelEdit: () => void;
-  /** 编辑表保存成功：草稿的快照交回去，调用方据此决定清不清。 */
-  onFinishEdit: (submitted: DynamicVariableDraft) => void;
+  /** 编辑表保存成功：提交的那份草稿与落库的那份定义一起交回去。 */
+  onFinishEdit: (submitted: DynamicVariableDraft, saved: DynamicVariable) => void;
   onRefresh: () => void;
   onClearOverride: () => void;
   onDelete: () => void;

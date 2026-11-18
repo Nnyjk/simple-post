@@ -36,7 +36,10 @@ function makeHarness() {
     dynamicVariables: [] as DynamicVariable[],
     dynamicValues: {} as Record<string, Record<string, DynamicValueStatus>>,
     dynamicErrors: {} as Record<string, Record<string, DynamicError>>,
-    dynamicResolving: false,
+    dynamicInFlight: 0,
+    savingDynamicVariableIds: new Set<string>(),
+    dynamicDrafts: {} as Record<string, unknown>,
+    dirtyTabIds: new Set<string>(),
     dynamicError: null as string | null,
     activeProjectId: 'p1',
     activeEnvironmentId: 'env1',
@@ -317,15 +320,15 @@ describe('dynamic slice', () => {
     assert.equal(override?.[1].environmentId, 'env1');
   });
 
-  it('保存失败时 updateDynamicVariable 返回 false', async () => {
+  it('保存失败时 updateDynamicVariable 返回 null', async () => {
     const bag = makeHarness();
     installIpcMock((cmd) => {
       if (cmd === 'dynamic_variables_update') throw new Error('名字重复');
       return null;
     });
 
-    const ok = await bag.updateDynamicVariable('d-sns', { name: 'sns' });
-    assert.equal(ok, false);
+    const saved = await bag.updateDynamicVariable('d-sns', { name: 'sns' });
+    assert.equal(saved, null);
     assert.match(bag.dynamicError ?? '', /名字重复/);
   });
 
@@ -382,7 +385,7 @@ describe('dynamic slice', () => {
       sourceInlineJson: '{"method":"GET","url":"http://127.0.0.1:9/points"}',
     });
 
-    assert.equal(created, 'd-sns');
+    assert.equal(created?.id, 'd-sns');
     assert.equal(seen[0].projectId, 'p2');
   });
   it('列表回来得早的那一次不会把晚发出的那一次挤掉', async () => {
@@ -563,5 +566,159 @@ describe('dynamic slice', () => {
 
     assert.equal(bag.dynamicValues[scope1]?.sns, undefined, '按旧抽取规则取到的值不许留在桶里');
     assert.equal(stale.values.sns, '[old-rule]', '调用方仍拿到它自己那一次的结果');
+  });
+  it('刷新把取到的那份值写进对应格子的桶里', async () => {
+    const bag = makeHarness();
+    bag.dynamicVariables = [view('c')];
+    installIpcMock((cmd) => {
+      if (cmd === 'dynamic_variables_refresh') {
+        return { name: 'c', value: '[c-fresh]', source: 'auto', isOverride: false, error: null };
+      }
+      if (cmd === 'dynamic_variables_list') return [];
+      return null;
+    });
+
+    await bag.refreshDynamicVariable('d-c');
+
+    assert.equal(bag.dynamicValues[scope1]?.c?.value, '[c-fresh]', '面板要立刻显示这次重取的值');
+    assert.equal(bag.dynamicErrors[scope1]?.c, undefined, '重取成功要清掉上一次的失败原因');
+  });
+
+  it('同一条定义在保存中时再提交被挡回，且标志随请求结束清掉', async () => {
+    // web 传输下两个 PATCH 可以乱序落地：旧的那个后到就会盖掉新编辑。挡住的是这一条定义。
+    const bag = makeHarness();
+    bag.dynamicVariables = [view('sns')];
+    const pending: Array<(value: unknown) => void> = [];
+    installIpcMock((cmd) => {
+      if (cmd === 'dynamic_variables_update') {
+        return new Promise((resolve) => {
+          pending.push(resolve);
+        });
+      }
+      if (cmd === 'dynamic_variables_list') return [];
+      return null;
+    });
+
+    const first = bag.updateDynamicVariable('d-sns', { name: 'sns' });
+    assert.equal(bag.savingDynamicVariableIds.has('d-sns'), true, '在飞期间表单要禁用保存');
+    const second = bag.updateDynamicVariable('d-sns', { name: 'sns2' });
+    // 等一轮微任务：被挡住的那次立刻结算，不会再多发一个 PATCH。
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(pending.length, 1, '同一条定义的第二次提交不该再发 PATCH');
+    assert.equal(await second, null, '同一条定义的第二次提交直接挡回');
+
+    pending[0](definition('sns'));
+    await first;
+    assert.equal(bag.savingDynamicVariableIds.has('d-sns'), false, '结束了就要放开');
+  });
+
+  it('保存失败也放开那条定义的保存中标志', async () => {
+    const bag = makeHarness();
+    bag.dynamicVariables = [view('sns')];
+    installIpcMock((cmd) => {
+      if (cmd === 'dynamic_variables_update') throw new Error('网络断了');
+      return null;
+    });
+
+    assert.equal(await bag.updateDynamicVariable('d-sns', { name: 'sns' }), null);
+    assert.equal(bag.savingDynamicVariableIds.has('d-sns'), false, '失败也要放开，否则再也存不了');
+  });
+
+  it('作废只按项目作废：别的项目里同名变量照常落地', async () => {
+    const bag = makeHarness();
+    const p2View = { ...view('sns', 'p2'), id: 'd-p2-sns' } as DynamicVariableView;
+    bag.dynamicVariables = [view('sns'), p2View];
+    const pending: Array<(value: unknown) => void> = [];
+    installIpcMock((cmd) => {
+      if (cmd === 'dynamic_variables_resolve') {
+        return new Promise((resolve) => {
+          pending.push(resolve);
+        });
+      }
+      if (cmd === 'dynamic_variables_update') return definition('sns');
+      if (cmd === 'dynamic_variables_list') return [];
+      return null;
+    });
+
+    const otherProject = bag.resolveDynamicVariables(['sns'], 'p2');
+    await bag.updateDynamicVariable('d-sns', { extractPath: '$.other' });
+    pending[0](resolution(['sns'], { sns: '[p2]' }));
+    await otherProject;
+
+    assert.equal(
+      bag.dynamicValues[dynamicValueScope('p2', 'env1')]?.sns?.value,
+      '[p2]',
+      'p2 的在飞结果与 p1 的保存无关',
+    );
+  });
+
+  it('删除之后迟到的解析不把值加回桶里', async () => {
+    const bag = makeHarness();
+    bag.dynamicVariables = [view('sns')];
+    const pending: Array<(value: unknown) => void> = [];
+    installIpcMock((cmd) => {
+      if (cmd === 'dynamic_variables_resolve') {
+        return new Promise((resolve) => {
+          pending.push(resolve);
+        });
+      }
+      if (cmd === 'dynamic_variables_delete') return null;
+      if (cmd === 'dynamic_variables_list') return [];
+      return null;
+    });
+
+    const inFlight = bag.resolveDynamicVariables(['sns'], 'p1');
+    await bag.deleteDynamicVariable('d-sns');
+    pending[0](resolution(['sns'], { sns: '[gone]' }));
+    await inFlight;
+
+    assert.equal(bag.dynamicValues[scope1]?.sns, undefined, '定义没了，迟到的值不许回来');
+  });
+
+  it('两个值请求并发时，先回来的那个不把「正在取数」摘掉', async () => {
+    const bag = makeHarness();
+    bag.dynamicVariables = [view('a'), view('b')];
+    const pending: Array<(value: unknown) => void> = [];
+    installIpcMock((cmd) => {
+      if (cmd === 'dynamic_variables_resolve') {
+        return new Promise((resolve) => {
+          pending.push(resolve);
+        });
+      }
+      return null;
+    });
+
+    const batch = bag.resolveDynamicVariables(['a'], 'p1');
+    const single = bag.resolveDynamicVariables(['b'], 'p1');
+    assert.equal(bag.dynamicInFlight, 2, '两条都在路上');
+
+    pending[0](resolution(['a'], { a: '[a]' }));
+    await batch;
+    assert.equal(bag.dynamicInFlight, 1, '整批还没回来，按钮不许恢复成可点');
+
+    pending[1](resolution(['b'], { b: '[b]' }));
+    await single;
+    assert.equal(bag.dynamicInFlight, 0, '全部结束才归零');
+  });
+
+  it('被顶掉的列表请求失败时不写错误原因', async () => {
+    const bag = makeHarness();
+    const pending: Array<{ resolve: (v: unknown) => void; reject: (e: unknown) => void }> = [];
+    installIpcMock((cmd) => {
+      if (cmd !== 'dynamic_variables_list') return null;
+      return new Promise((resolve, reject) => {
+        pending.push({ resolve, reject });
+      });
+    });
+
+    const first = bag.loadDynamicVariables('p1');
+    const second = bag.loadDynamicVariables('p2');
+    pending[1].resolve([view('points', 'p2')]);
+    await second;
+    pending[0].reject(new Error('p1 那次挂了'));
+    await first;
+
+    assert.equal(bag.dynamicError, null, '旧项目那次失败不该盖到新那一屏上');
+    assert.equal(bag.dynamicVariables[0]?.projectId, 'p2', '留下的是后发那次的结果');
   });
 });

@@ -2,7 +2,6 @@ import type { StateCreator } from 'zustand';
 import type { AppState } from '../app-store';
 import { SETTINGS_TAB_ID, dynamicTabId, dynamicTabProjectId } from '../store-types';
 import type {
-  DraftEndpoint,
   EndpointDraft,
   OpenTab,
   ProjectTabSet,
@@ -294,14 +293,11 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
         .map((t) => t.id);
       const nextDirty = new Set(s.dirtyTabIds);
       for (const id of removedIds) nextDirty.delete(id);
-      // 这里同时丢掉 endpoint 已消失的草稿。draft endpoint 自己的 id 不在 `nodes` 里，故按标签
-      // 种类而不是按查找保留——否则用户仍开着的标签上编辑的内容会凭空消失。
-      const nextDrafts: Record<string, EndpointDraft | undefined> = {};
-      for (const t of valid) {
-        if (carriesEndpointDraft(t.kind) && s.endpointDrafts[t.id]) {
-          nextDrafts[t.id] = s.endpointDrafts[t.id];
-        }
-      }
+      // 同样只减不重建：暂存进 `projectTabs` 的 draft 标签不在 `openTabs` 里，重建会把那份草稿
+      // 抹掉，于是它那条脏标记就成了「脏而无草稿」。「底层实体已经没了、标签还在」的判定守的是
+      // 另一件事（见上面 `valid` 的过滤），不在这里重复。
+      const nextDrafts: Record<string, EndpointDraft | undefined> = { ...s.endpointDrafts };
+      for (const id of removedIds) delete nextDrafts[id];
       return {
         openTabs: valid,
         activeTabId: nextActive,
@@ -325,9 +321,10 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
         openTabs: [],
         activeTabId: null,
         dirtyTabIds,
-        endpointDrafts: {},
-        // 与上面同一条理由、上一级：关掉的 draft 标签就是一份再也存不下去的草稿，故「全关」必须把文档一起带走。
-        draftEndpoints: {},
+        // 关掉的 draft 标签就是一份再也存不下去的草稿，故要带走它的正文；暂存进 `projectTabs`
+        // 的标签仍算开着，那一份留着。故这里也是「只减」——按被关掉的 id 逐个清。
+        endpointDrafts: withoutTabKeys(s.endpointDrafts, closed),
+        draftEndpoints: withoutTabKeys(s.draftEndpoints, closed),
         // 同上：在标签条上的动态变量标签全被关掉，它们的草稿不再有归处。暂存进 `projectTabs`
         // 的那些不在 `openTabs` 里，仍算开着，草稿留着。
         dynamicDrafts: withoutClosedDynamicDrafts(s, closed),
@@ -347,25 +344,17 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
       if (nextActive !== null && closeSet.has(nextActive)) {
         nextActive = nextTabs[nextTabs.length - 1]?.id ?? null;
       }
-      // 这里丢掉被关掉的 endpoint 标签的草稿。draft-endpoint 标签也算：它们就是普通标签，
-      // 标签关掉时那个 id 下的编辑也该一起走。
-      const nextDrafts: Record<string, EndpointDraft | undefined> = {};
-      // ……以及它们的文档，同一条理由：标签没了的草稿永远存不下去。这次清扫确实会发生——
-      // draft 标签在创建时就被标脏所以本动作会绕开它，但用户把编辑清回存储默认值时草稿也会变干净。
-      const nextDraftEndpoints: Record<string, DraftEndpoint> = {};
-      for (const t of nextTabs) {
-        if (carriesEndpointDraft(t.kind) && s.endpointDrafts[t.id]) {
-          nextDrafts[t.id] = s.endpointDrafts[t.id];
-        }
-        if (t.kind === 'endpoint-draft' && s.draftEndpoints[t.id]) {
-          nextDraftEndpoints[t.id] = s.draftEndpoints[t.id];
-        }
-      }
+      // 丢掉被关掉的 endpoint 标签的草稿与文档：标签没了的草稿永远存不下去。draft-endpoint
+      // 标签也算——它们就是普通标签。这次清扫确实会发生：draft 标签在创建时就被标脏，故本动作
+      // 一般会绕开它，但用户把编辑清回存储默认值时草稿也会变干净。
+      //
+      // 只减不重建：暂存进 `projectTabs` 的标签不在 `openTabs` 里，按可见标签重建会把它的草稿
+      // 抹掉，而它那条脏标记还留着——于是出现「脏而无草稿」。同 `pruneStaleTabs`。
       return {
         openTabs: nextTabs,
         activeTabId: nextActive,
-        endpointDrafts: nextDrafts,
-        draftEndpoints: nextDraftEndpoints,
+        endpointDrafts: withoutTabKeys(s.endpointDrafts, closeSet),
+        draftEndpoints: withoutTabKeys(s.draftEndpoints, closeSet),
         // 被关掉的动态变量标签带走它那个项目的草稿——与上面同一条理由。
         dynamicDrafts: withoutClosedDynamicDrafts(s, closeSet),
         // 被关掉的标签带走它的响应与流视图——与草稿、文档同一条理由。

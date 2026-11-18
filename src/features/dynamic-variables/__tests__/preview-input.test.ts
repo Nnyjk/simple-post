@@ -8,7 +8,12 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { previewFingerprint, previewPayload, type PreviewInput } from '../preview-input';
+import {
+  previewFailureMessage,
+  previewFingerprint,
+  previewPayload,
+  type PreviewInput,
+} from '../preview-input';
 
 function base(over: Partial<PreviewInput> = {}): PreviewInput {
   return {
@@ -98,12 +103,30 @@ describe('previewFingerprint', () => {
     assert.notEqual(previewFingerprint(asEndpoint), previewFingerprint(other));
   });
 
-  it('改调用方当前的环境也是另一份输入：继承的定义按它取数', () => {
-    const other = base({ activeEnvironmentId: 'env-2' });
-    assert.notEqual(previewFingerprint(base()), previewFingerprint(other));
+  it('只有继承环境的草稿才受调用方环境影响', () => {
+    const inheriting = base({ usesEndpoint: true, sourceEndpointId: 'ep-1' });
     assert.notEqual(
+      previewFingerprint(inheriting),
+      previewFingerprint({ ...inheriting, activeEnvironmentId: 'env-2' }),
+      '继承的定义按调用方环境取数，换环境就是另一份输入',
+    );
+    assert.notEqual(
+      previewFingerprint(inheriting),
+      previewFingerprint({ ...inheriting, activeEnvironmentId: null }),
+    );
+
+    // 点名了取数环境：这一次取数不会因为调用方换了环境而不同，指纹也不该变——变了就会误报
+    // 「这份结果对应旧输入」，让用户白白再打一次请求（非幂等接口就是对端生效两次）。
+    const pinned = base({ usesEndpoint: true, sourceEndpointId: 'ep-1', environmentId: 'env-9' });
+    assert.equal(
+      previewFingerprint(pinned),
+      previewFingerprint({ ...pinned, activeEnvironmentId: 'env-2' }),
+    );
+
+    // 内联请求根本用不到环境。
+    assert.equal(
       previewFingerprint(base()),
-      previewFingerprint(base({ activeEnvironmentId: null })),
+      previewFingerprint(base({ activeEnvironmentId: 'env-2' })),
     );
   });
 
@@ -127,5 +150,26 @@ describe('previewFingerprint', () => {
     const left = base({ extractPath: '$.a', transformScript: 'b' });
     const right = base({ extractPath: '$.ab', transformScript: '' });
     assert.notEqual(previewFingerprint(left), previewFingerprint(right));
+  });
+});
+
+describe('previewFailureMessage', () => {
+  it('指纹一致才显示：那条错误属于这份输入', () => {
+    assert.equal(
+      previewFailureMessage({ fingerprint: 'fp-1', message: '连接被拒绝' }, 'fp-1'),
+      '连接被拒绝',
+    );
+  });
+
+  it('指纹对不上就当这份草稿还没有结果', () => {
+    // URL A 的失败不该显示在改后的 B 名下。
+    assert.equal(
+      previewFailureMessage({ fingerprint: 'fp-a', message: '连接被拒绝' }, 'fp-b'),
+      null,
+    );
+  });
+
+  it('没有失败时什么也不显示', () => {
+    assert.equal(previewFailureMessage(null, 'fp-1'), null);
   });
 });

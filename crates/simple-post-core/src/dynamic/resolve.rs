@@ -173,16 +173,6 @@ impl OneOutcome {
     }
 }
 
-/// 决定「取数」这条路时，前面几步留下的两件事。
-///
-/// `stale_fallback` 是取数失败时可以顶上的过期值；`had_live_override` 记的是取数**开始前**
-/// 那一行是不是仍然生效的覆盖值——写回时要靠它区分「刷新该换掉的手工值」与「取数途中别人
-/// 新写下的手工值」。
-struct FetchPlan {
-    stale_fallback: Option<String>,
-    had_live_override: bool,
-}
-
 /// 解析一条定义。
 async fn resolve_one(
     ctx: &ResolveContext,
@@ -197,9 +187,8 @@ async fn resolve_one(
         db::dynamic_variable_cache::get(c, &def.id, &env_key)
     })?;
 
-    // 取数开始前**已经有**有效覆盖值时，只有 `force` 这条路会走到这里（见 `decide`）：
-    // 刷新要的就是把那份手工值换掉，故写回时不再保护它。取数途中新写下的覆盖值才算别人
-    // 的手工值，见 `fetch_one` 的写回段。
+    // 进门这一刻那一行是不是仍然生效的覆盖值。写回侧要保护的只是**这之后**才写下的手工值，
+    // 故这个判断取的是此刻——不是锁后那一次（见 `fetch_one`）。
     let had_live_override = entry
         .as_ref()
         .map(|e| live_override(e, now))
@@ -207,82 +196,88 @@ async fn resolve_one(
 
     match decide(def, entry.as_ref(), now, force) {
         Decision::UseOverride { value_json } => {
-            let value = serialize_value(&parse_raw(&value_json), def.value_mode);
-            Ok(OneOutcome {
-                value: Some(value),
-                source: DynamicValueSource::Override,
-                fetched_at: entry.as_ref().map(|e| e.fetched_at),
-                expires_at: entry.as_ref().and_then(|e| e.override_expires_at),
-                is_override: true,
-                error: None,
-            })
+            Ok(override_outcome(def, entry.as_ref(), &value_json))
         }
-        Decision::UseCache { value_json } => {
-            let value = serialize_value(&parse_raw(&value_json), def.value_mode);
-            Ok(OneOutcome {
-                value: Some(value),
-                source: DynamicValueSource::Auto,
-                fetched_at: entry.as_ref().map(|e| e.fetched_at),
-                expires_at: entry.as_ref().map(|e| e.expires_at),
-                is_override: false,
-                error: None,
-            })
+        Decision::UseCache { value_json } => Ok(cache_outcome(def, entry.as_ref(), &value_json)),
+        // 这次结论只说「大概要走取数」：单飞行锁要等，等的那段时间缓存行还会变，故
+        // `fetch_one` 拿到锁之后会重算一次。
+        Decision::Fetch { .. } => {
+            fetch_one(ctx, def, source, force, had_live_override, fetcher).await
         }
-        Decision::Fetch { stale_fallback } => {
-            let plan = FetchPlan {
-                stale_fallback,
-                had_live_override,
-            };
-            fetch_one(ctx, def, source, now, force, plan, fetcher).await
-        }
+    }
+}
+
+/// 用覆盖值这条路的出口。
+fn override_outcome(
+    def: &DynamicVariable,
+    entry: Option<&DynamicCacheEntry>,
+    value_json: &str,
+) -> OneOutcome {
+    let value = serialize_value(&parse_raw(value_json), def.value_mode);
+    OneOutcome {
+        value: Some(value),
+        source: DynamicValueSource::Override,
+        fetched_at: entry.map(|e| e.fetched_at),
+        expires_at: entry.and_then(|e| e.override_expires_at),
+        is_override: true,
+        error: None,
+    }
+}
+
+/// 用新鲜缓存这条路的出口。
+fn cache_outcome(
+    def: &DynamicVariable,
+    entry: Option<&DynamicCacheEntry>,
+    value_json: &str,
+) -> OneOutcome {
+    let value = serialize_value(&parse_raw(value_json), def.value_mode);
+    OneOutcome {
+        value: Some(value),
+        source: DynamicValueSource::Auto,
+        fetched_at: entry.map(|e| e.fetched_at),
+        expires_at: entry.map(|e| e.expires_at),
+        is_override: false,
+        error: None,
     }
 }
 
 /// 取数、抽取、落缓存。
 ///
 /// single-flight 在这里生效：同一个（定义 × 环境）同时只发一次取数请求，其余等待同一个结果。
-/// 拿到锁之后**重新查一次缓存**——前一个等待者可能刚把值填好。
+/// 拿到锁之后**重读缓存行并重跑 `decide`**——等锁那段时间别的连接可以填好缓存、也可以写
+/// 覆盖值，故进门时那份结论只当「大概要走取数」，真正的结论在锁后取。
 async fn fetch_one(
     ctx: &ResolveContext,
     def: &DynamicVariable,
     source: &SourceContext,
-    now: i64,
     force: bool,
-    plan: FetchPlan,
+    had_live_override: bool,
     fetcher: &dyn SourceFetcher,
 ) -> Result<OneOutcome, AppError> {
-    let FetchPlan {
-        stale_fallback,
-        had_live_override,
-    } = plan;
     // 缓存键的环境段取自取数上下文——**实际生效**的那个环境（指定模式是定义点名的那个，
     // 继承模式是调用方选中的那个）。它随调用方切环境而变，故切环境不会读到上一个环境的值。
     let env_key = source.environment_id.clone().unwrap_or_default();
     let lock = flight_lock(&(def.id.clone(), env_key.clone()));
     let _guard = lock.lock().await;
 
-    // 本次解析重新查一次缓存：等锁期间前一个等待者可能已经取好并落库了。
-    // 没有数据源的定义不读自动值——那份值已经没有数据源支撑（见 `cache::decide`）。
+    // 等锁那段时间缓存行会变：前一个等待者可能刚把值填好，用户在另一条连接上可能刚点
+    // 「保存为覆盖值」。故拿到锁之后按锁后这一刻的时刻重读缓存行、重跑同一个 `decide`，
+    // 用它这一刻的结论——结论变成「用手工值」或「用新鲜缓存」就直接返回，不发请求，也不进
+    // 写回事务。写回侧仍用进门时那份 `had_live_override`：刷新在等锁期间被写下的手工值
+    // 也算「途中写的」，不该由这次刷新顶掉。
+    let now = crate::domain::now_ms();
     let entry = db::with_conn(&ctx.pool, |c| {
         db::dynamic_variable_cache::get(c, &def.id, &env_key)
     })?;
-    if !force && def.has_source() {
-        if let Some(e) = &entry {
-            if !e.is_override && e.expires_at > now {
-                if let Some(value_json) = &e.value_json {
-                    let value = serialize_value(&parse_raw(value_json), def.value_mode);
-                    return Ok(OneOutcome {
-                        value: Some(value),
-                        source: DynamicValueSource::Auto,
-                        fetched_at: Some(e.fetched_at),
-                        expires_at: Some(e.expires_at),
-                        is_override: false,
-                        error: None,
-                    });
-                }
-            }
+    let stale_fallback = match decide(def, entry.as_ref(), now, force) {
+        Decision::UseOverride { value_json } => {
+            return Ok(override_outcome(def, entry.as_ref(), &value_json));
         }
-    }
+        Decision::UseCache { value_json } => {
+            return Ok(cache_outcome(def, entry.as_ref(), &value_json));
+        }
+        Decision::Fetch { stale_fallback } => stale_fallback,
+    };
 
     let raw = match fetcher.fetch(def, ctx, source).await {
         Ok(raw) => raw,
@@ -367,10 +362,13 @@ async fn fetch_one(
     // 写入放在**同一个事务**里——中间插不进另一次修改；定义不再是开始那一份就跳过写入。
     // 值照常返回给这次调用方：它只是不进缓存，下一次解析会按新定义重新取数。
     //
-    // 同一个事务里还要看一眼当前的缓存行：用户在取数途中点了「保存为覆盖值」，那一行是他
-    // 在这个环境上亲手钉住的，而这次取数只是「本该这样算」，不该盖过人手写的值。
-    // 只在**取数开始前还没有**有效覆盖值时才保护——开始前就有的话，这次取数只可能是刷新
+    // 同一个事务里还要看一眼当前的缓存行：用户在取数途中（锁前、锁后都算）点了「保存为
+    // 覆盖值」，那一行是他在这个环境上亲手钉住的，而这次取数只是「本该这样算」，不该盖过
+    // 人手写的值。
+    // 只在**进门那一刻还没有**有效覆盖值时才保护——那一刻就有的话，这次取数只可能是刷新
     // 走上来的（`cache::decide` 的 `force` 特意跳过覆盖值），刷新要的就是把那份手工值换掉。
+    // 反过来，刷新在等锁期间被别人写下的手工值也算「途中写的」：`had_live_override` 取的是
+    // 进门那一刻，不是锁后那一次。
     let stored = db::with_tx(&ctx.pool, |c| {
         let current = match db::dynamic_variables::get(c, &def.id) {
             Ok(current) => current,
