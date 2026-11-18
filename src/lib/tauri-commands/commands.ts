@@ -136,6 +136,12 @@ export const COMMANDS = {
   // `force` 供 UI 的「获取 Token」按钮绕过后端缓存；发请求时不传，走按需刷新。
   oauth2Token: 'oauth2_token',
 
+  // ----- logs -----
+  // 导出本次运行期间的日志，以及渲染进程的上报口。逻辑在 server crate 的 `log_api`，
+  // REST 侧同名路由调的是同一批函数。
+  logClientEvent: 'log_client_event',
+  logExport: 'log_export',
+
   // ----- updates -----
   // `updateCheck` 两条传输都有：桌面的 `update_check` 命令调 server crate 的同一个函数，
   // 拿到的是线上实时 release body；`serve-web` 走 `/api/update/check`。

@@ -10,6 +10,9 @@ pub mod domain;
 pub mod dynamic;
 pub mod error;
 pub mod http_executor;
+/// 本次运行期间的日志环形缓冲。tracing 层、panic hook 与前端上报都写它，「导出日志」
+/// 从这里读。
+pub mod logbuf;
 pub mod oauth2;
 pub mod path_params;
 pub mod permissions;

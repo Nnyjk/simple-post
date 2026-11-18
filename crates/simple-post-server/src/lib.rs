@@ -41,6 +41,11 @@ pub mod http_config;
 /// 导入 / 导出的编排层。Tauri 命令与 REST 路由都只调它，故两条 transport 不必
 /// 各写一遍——见 AGENTS.md 的 dual-transport invariant。
 pub mod interchange_api;
+/// 日志导出的编排层。Tauri 命令与 REST 路由都只调它，故两条 transport 不必各写一遍
+/// ——见 AGENTS.md 的 dual-transport invariant。
+pub mod log_api;
+/// 把 `tracing` 事件抄进 core 日志缓冲的订阅层；只有 host 需要它。
+mod log_layer;
 /// MCP 守护进程自己那个端口上的 router（挂载路径 + Host/Origin 守卫 + bearer 闸）。
 pub mod mcp_router;
 pub mod port_registry;
@@ -265,9 +270,18 @@ pub async fn run_serve_web(
 /// 认 `RUST_LOG`（经 `EnvFilter`），未设置时默认 `info`。用 `try_init`，重复初始化（测试 +
 /// GUI + CLI）会静默 no-op 而不是 panic。
 pub fn init_tracing() {
+    use tracing_subscriber::prelude::*;
     use tracing_subscriber::EnvFilter;
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
+    // 写入端必须是 stderr：MCP 形态下 stdout 整条被 JSON-RPC 占用，混进一行日志就会
+    // 让客户端解析失败。第二次调用时 `try_init` 返回 Err，这里刻意吞掉。
+    let _ = tracing_subscriber::registry()
+        .with(filter)
+        .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
+        .with(log_layer::LogBufferLayer)
+        .try_init();
+    // panic 不会自动经过 tracing，故单独挂一层 hook 把它也写进导出缓冲区。
+    simple_post_core::logbuf::init_panic_hook();
 }
 
 /// 四处注册表的差集。挂在 crate 根：它同时读前端两张表、`src-tauri/src/lib.rs` 与本 crate 的

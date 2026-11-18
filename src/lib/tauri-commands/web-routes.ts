@@ -360,6 +360,15 @@ export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
       `/api/ws/sessions/${encodeURIComponent(String(a.sessionId))}${buildQuery({ code: a.code, reason: a.reason })}`,
   },
 
+  // ----- logs -----
+  // `scope` 走查询串（`all` / `errors`），缺省由服务端按 `all` 处理。两条都**不在**
+  // `auth::is_public_path` 名单里：导出可能含凭据与内部地址，口令模式下必须带 bearer。
+  [COMMANDS.logExport]: {
+    method: 'GET',
+    path: (a) => `/api/logs/export${buildQuery({ scope: a.scope })}`,
+  },
+  [COMMANDS.logClientEvent]: { method: 'POST', path: () => '/api/logs/client' },
+
   // ----- updates -----
   // 三条都有 `serve-web` 路由。桌面壳只实现 `update_check`（走 IPC，不经过 `WEB_ROUTES`）；
   // `deployment` / `apply` 在桌面没有实现。

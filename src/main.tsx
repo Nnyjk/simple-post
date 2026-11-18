@@ -2,6 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import { ingestBearerFromUrl } from './lib/tauri-commands';
+import { installGlobalErrorLogging } from './lib/log-client';
 import { useAppStore } from './stores/app-store';
 import './styles/globals.css';
 
@@ -11,6 +12,10 @@ import './styles/globals.css';
 // also strips the query from `window.history` so the token doesn't
 // end up in browser history / Referer headers / bookmarks.
 ingestBearerFromUrl();
+
+// 全局错误捕获要早于任何一次后端往返与 React 挂载：`bootstrap()` 在下面几行就发起，
+// 而它内部的失败如果发生在安装之前，导出里就看不到。
+installGlobalErrorLogging();
 
 // ---------------------------------------------------------------------------
 // 主题由 `index.html` 的 `<head>` 里那段内联脚本在 HTML 解析期就写到 `<html>` 上了。
