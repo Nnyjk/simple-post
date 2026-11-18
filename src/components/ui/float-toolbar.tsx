@@ -51,6 +51,8 @@ export function FloatToolbar({ actions, className }: FloatToolbarProps) {
               onClick={action.onClick}
               disabled={action.disabled}
               aria-pressed={action.active}
+              // 按钮只有图标，读屏要拿到与 Tooltip 同一句文案。
+              aria-label={hint}
               data-testid={action.testId}
             >
               {action.icon}

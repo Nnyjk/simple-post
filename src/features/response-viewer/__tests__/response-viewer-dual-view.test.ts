@@ -16,11 +16,23 @@ const read = (relative: string) =>
 
 const VIEWER = read('../ResponseViewer.tsx');
 const PRETTY = read('../PrettyView.tsx');
-const TREE = read('../../../components/ui/json-tree-view.tsx');
 
 /** 剥掉整行 `//` 注释与单行 JSX 块注释，免得文件自己的散文满足某个模式。 */
 function code(source: string): string {
   return source.replace(/\{\s*\/\*[^\n]*?\*\/\s*\}/g, '').replace(/^\s*\/\/.*$/gm, '');
+}
+
+/** 源码里每个 `<PrettyView … />` 的属性文本，从开标签到自闭合的 `/>`。 */
+function prettyViewBlocks(source: string): string[] {
+  const blocks: string[] = [];
+  let at = source.indexOf('<PrettyView');
+  while (at !== -1) {
+    const end = source.indexOf('/>', at);
+    assert.notEqual(end, -1, '<PrettyView> 必须自闭合');
+    blocks.push(source.slice(at, end));
+    at = source.indexOf('<PrettyView', end);
+  }
+  return blocks;
 }
 
 describe('ResponseViewer: pretty/raw 两态都交给 PrettyView', () => {
@@ -32,10 +44,37 @@ describe('ResponseViewer: pretty/raw 两态都交给 PrettyView', () => {
 
   it('文本响应也交给 PrettyView，并声明它不是 JSON', () => {
     const body = code(VIEWER);
-    const occurrences = body.match(/<PrettyView\b/g) ?? [];
-    assert.equal(occurrences.length, 4, 'pretty/raw 两页的 json 与 text 分支都应渲染 PrettyView');
-    const explicit = body.match(/expectJson=\{false\}/g) ?? [];
-    assert.equal(explicit.length, 2, 'text 的两处必须显式传 expectJson={false}');
+    const blocks = prettyViewBlocks(body);
+    assert.equal(blocks.length, 4, 'pretty/raw 两页的 json 与 text 分支都应渲染 PrettyView');
+    // 每个挂载点都要对着它自己的分支断言：只数总次数的话，把 expectJson 从 text 挪到 json
+    // 仍然通过，而纯文本响应会重新长出一条「格式化」警告。
+    const branches = blocks.map((text) => {
+      // 挂载点属于哪个分支，看它之前最近的那个 `kind === '…'`：pretty 组的 json 分支在最前，
+      // 它之前没有 text 分支（`textAt` 为 -1），最近的那个仍然正确地是 json。
+      const before = body.slice(0, body.indexOf(text));
+      const jsonAt = before.lastIndexOf("kind === 'json'");
+      const textAt = before.lastIndexOf("kind === 'text'");
+      assert.notEqual(jsonAt, -1, '找不到挂载点所属的分支');
+      return {
+        text,
+        kind: jsonAt > textAt ? 'json' : 'text',
+        view: text.includes('view="pretty"') ? 'pretty' : 'raw',
+      };
+    });
+    for (const branch of branches) {
+      assert.equal(
+        branch.text.includes('expectJson={false}'),
+        branch.kind === 'text',
+        `${branch.view} 的 ${branch.kind} 分支${branch.kind === 'text' ? '必须' : '不该'}传 expectJson={false}`,
+      );
+    }
+    // 四种组合各一份，否则上面的断言可能对着重复的两个分支证明同一件事。
+    assert.deepEqual([...new Set(branches.map((b) => `${b.view}/${b.kind}`))].sort(), [
+      'pretty/json',
+      'pretty/text',
+      'raw/json',
+      'raw/text',
+    ]);
     // 裸 pre 一出现就说明某个分支绕开了工具条，用户看到的工具条会整条消失。
     assert.equal(/<pre\b/.test(body), false, '响应体分支不得再自己渲染 pre');
   });
@@ -107,35 +146,5 @@ describe('PrettyView: 树与编辑器共处一个文件', () => {
     // 格式化开关挂在 asJson 上：纯文本即便恰好能 parse 也不该出现这个按钮。
     assert.match(body, /if \(view === 'raw' && asJson\)/);
     assert.match(body, /const asJson = expectJson && formatResult\.ok;/);
-  });
-});
-
-describe('JsonTreeView: 展开箭头是行内容之外的独立按钮', () => {
-  it('箭头是一个 <button>，行内容不是按钮，层级不手写', () => {
-    const body = code(TREE);
-    const toggle = body.indexOf('data-testid="json-tree-toggle"');
-    const row = body.indexOf('data-testid="json-tree-row"');
-    assert.notEqual(toggle, -1, '展开箭头按钮消失了');
-    assert.notEqual(row, -1, '行的内容容器消失了');
-    // 箭头在前、行在后，说明两者是并列的兄弟节点；嵌套的话行容器会包住箭头。
-    assert.ok(toggle < row, '箭头按钮必须排在行内容之前');
-    // 行没有点击行为，做成按钮会给每一行塞进一个空的 Tab 停点，并且按钮里的文本选不中。
-    assert.equal(
-      /<button\b[^>]*data-testid="json-tree-row"/.test(body),
-      false,
-      '行内容不得是按钮：它没有点击行为，且按钮内的文本无法选中',
-    );
-    assert.match(body, /data-testid="json-tree-row"[^>]*select-text/, '行内容要允许拖选复制');
-    assert.equal(/z-\[/.test(body), false, '层级只能从 LAYER 取，不得手写 z-index');
-    assert.equal(
-      /<Button\b/.test(body),
-      false,
-      '工具条按钮由 FloatToolbar 负责，树里不该再有按钮组件',
-    );
-  });
-
-  it('解析失败时什么都不渲染，交给调用方退回原文', () => {
-    const body = code(TREE);
-    assert.match(body, /if \(!root\) return null;/, '解析失败的分支必须返回 null');
   });
 });

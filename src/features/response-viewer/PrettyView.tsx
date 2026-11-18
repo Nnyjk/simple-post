@@ -49,7 +49,7 @@ export function PrettyView({
   // 打开的换行一到 Pretty 就没了，而那个开关读起来是「这份响应体怎么读」，不是「这个页签
   // 怎么读」。故状态由宿主持有，这里只负责渲染与上报。同理，新响应到达时由宿主重置。
 
-  const [copied, setCopied] = useState(false);
+  const [copyState, setCopyState] = useState<'idle' | 'ok' | 'fail'>('idle');
   const flashTimer = useRef<number | null>(null);
   useEffect(
     () => () => {
@@ -58,11 +58,17 @@ export function PrettyView({
     [],
   );
 
-  const copyAll = () => {
-    void navigator.clipboard?.writeText(body);
-    setCopied(true);
+  /** 先等剪贴板给出结论再点亮按钮：写失败却显示「已复制」，用户会以为内容已经在剪贴板里。 */
+  const copyAll = async () => {
+    try {
+      if (!navigator.clipboard) throw new Error('剪贴板不可用');
+      await navigator.clipboard.writeText(body);
+      setCopyState('ok');
+    } catch {
+      setCopyState('fail');
+    }
     if (flashTimer.current !== null) window.clearTimeout(flashTimer.current);
-    flashTimer.current = window.setTimeout(() => setCopied(false), 1500);
+    flashTimer.current = window.setTimeout(() => setCopyState('idle'), 1500);
   };
 
   // Raw 页用 `formatResult` 的格式化文本；Pretty 页的树自己从原文解析，这里不再解析一遍。
@@ -71,12 +77,13 @@ export function PrettyView({
   const actions: FloatToolbarAction[] = [
     {
       id: 'copy',
-      label: copied ? '已复制' : '复制响应体',
-      icon: copied ? (
-        <Check className="h-3.5 w-3.5 text-success" />
-      ) : (
-        <Copy className="h-3.5 w-3.5" />
-      ),
+      label: copyState === 'ok' ? '已复制' : copyState === 'fail' ? '复制失败' : '复制响应体',
+      icon:
+        copyState === 'ok' ? (
+          <Check className="h-3.5 w-3.5 text-success" />
+        ) : (
+          <Copy className={cn('h-3.5 w-3.5', copyState === 'fail' && 'text-destructive')} />
+        ),
       onClick: copyAll,
       testId: 'copy-response-body-btn',
     },

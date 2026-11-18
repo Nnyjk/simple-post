@@ -16,8 +16,10 @@ import {
   pairText,
   parseJsonTree,
   scalarText,
+  subtreeJson,
   valueText,
   type JsonTreeNode,
+  type JsonValue,
 } from '../json-tree';
 
 /** 取某个路径的节点；取不到就让测试当场失败，免得后续断言对着 undefined 空转。 */
@@ -83,17 +85,85 @@ describe('标量文本', () => {
 });
 
 describe('子树 JSON', () => {
-  it('每个节点都带自己那棵子树缩进 2 的 JSON', () => {
+  it('子树 JSON 只在复制时现拼，缩进 2、键序按子节点顺序', () => {
     const root = buildJsonTree({ list: [{ id: 1 }] });
-    assert.equal(root.json, '{\n  "list": [\n    {\n      "id": 1\n    }\n  ]\n}');
-    assert.equal(at(root, '$.list[0]').json, '{\n  "id": 1\n}');
-    assert.equal(at(root, '$.list[0].id').json, '1');
+    assert.equal(subtreeJson(root), '{\n  "list": [\n    {\n      "id": 1\n    }\n  ]\n}');
+    assert.equal(subtreeJson(at(root, '$.list[0]')), '{\n  "id": 1\n}');
+    assert.equal(subtreeJson(at(root, '$.list[0].id')), '1');
+  });
+
+  it('空容器写成 {} 与 []，数组元素不带键名前缀', () => {
+    const root = buildJsonTree({ empty: {}, list: [], mixed: [1, { a: 2 }] });
+    assert.equal(subtreeJson(root.children[0]), '{}');
+    assert.equal(subtreeJson(root.children[1]), '[]');
+    assert.equal(subtreeJson(root.children[2]), '[\n  1,\n  {\n    "a": 2\n  }\n]');
   });
 
   it('键值对文本对对象成员给 key: value，对数组元素给下标', () => {
     const root = buildJsonTree({ items: ['x'] });
     assert.equal(pairText(root.children[0]), 'items: [\n  "x"\n]');
     assert.equal(pairText(at(root, '$.items[0]')), '0: x');
+  });
+});
+
+describe('原始 token', () => {
+  it('大整数不被 double 吃掉', () => {
+    const result = parseJsonTree('{"id":9007199254740993}');
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    const id = at(result.root, '$.id');
+    // double 只能表达到 9007199254740992，故这一行只能是原文。
+    assert.equal(id.scalarText, '9007199254740993');
+    assert.equal(valueText(id), '9007199254740993');
+    assert.equal(pairText(id), 'id: 9007199254740993');
+    assert.equal(subtreeJson(result.root), '{\n  "id": 9007199254740993\n}');
+  });
+
+  it('1.0 与 1e10 保持用户写的形状', () => {
+    const result = parseJsonTree('{"a":1.0,"b":1e10,"c":-0.5e-3}');
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(valueText(at(result.root, '$.a')), '1.0');
+    assert.equal(valueText(at(result.root, '$.b')), '1e10');
+    assert.equal(valueText(at(result.root, '$.c')), '-0.5e-3');
+    assert.equal(subtreeJson(result.root), '{\n  "a": 1.0,\n  "b": 1e10,\n  "c": -0.5e-3\n}');
+  });
+
+  it('字符串仍按 JSON.stringify 转义，值文本是解码后的那一份', () => {
+    const result = parseJsonTree('{"s":"a\\u00e9\\n"}');
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    const s = at(result.root, '$.s');
+    assert.equal(s.scalarText, '"aé\\n"');
+    assert.equal(valueText(s), 'aé\n');
+    assert.equal(subtreeJson(result.root), '{\n  "s": "aé\\n"\n}');
+  });
+});
+
+describe('自写解析器的边界', () => {
+  it('结尾多余字符、非法数字与缺逗号都判失败', () => {
+    for (const text of ['{} {}', '01', '[1,]', '{"a":1,}', '{"a" 1}', 'nul', '[1 2]']) {
+      const result = parseJsonTree(text);
+      assert.equal(result.ok, false, `${text} 应判失败`);
+      assert.ok(result.ok === false && result.error.length > 0);
+    }
+  });
+
+  it('合法值的边界写法照收', () => {
+    for (const text of ['null', 'true', 'false', '0', '-0', '1E+2', '[]', '{}', '{"a":[]}']) {
+      assert.equal(parseJsonTree(text).ok, true, `${text} 应判合法`);
+    }
+  });
+
+  it('重复键名以最后一次为准，位置留在第一次出现处', () => {
+    const result = parseJsonTree('{"a":1,"b":2,"a":3}');
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.deepEqual(
+      result.root.children.map((n) => n.key),
+      ['a', 'b'],
+    );
+    assert.equal(valueText(result.root.children[0]), '3');
   });
 });
 
@@ -167,7 +237,7 @@ describe('深层嵌套', () => {
   const DEPTH = 40;
 
   it('路径逐层拼接，摊平后层数等于深度', () => {
-    let value: unknown = { leaf: 'end' };
+    let value: JsonValue = { leaf: 'end' };
     for (let i = 0; i < DEPTH; i += 1) value = { a: value };
     const root = buildJsonTree(value);
     const rows = flattenTree(root, () => true);
@@ -178,6 +248,6 @@ describe('深层嵌套', () => {
 
   it('深层节点的子树 JSON 仍是格式化文本', () => {
     const root = buildJsonTree({ a: { a: { leaf: [1, 2] } } });
-    assert.equal(at(root, '$.a.a.leaf').json, '[\n  1,\n  2\n]');
+    assert.equal(subtreeJson(at(root, '$.a.a.leaf')), '[\n  1,\n  2\n]');
   });
 });

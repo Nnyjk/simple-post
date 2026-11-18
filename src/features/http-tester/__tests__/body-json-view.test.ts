@@ -48,10 +48,13 @@ describe('请求体 json 载荷区：树 / Raw 两档', () => {
   });
 
   it('默认视图由载荷能否解析成 JSON 决定', () => {
+    // 判据必须与真正建树的是同一个解析器：只调 `JSON.parse` 的 `isJsonPayload` 会放行
+    // 建不出来的载荷（数字原文那条路），树于是落进空态。
     assert.ok(
-      /isJsonPayload\(value\.content\)\s*\?\s*'tree'\s*:\s*'raw'/.test(CODE),
+      /parseJsonTree\(value\.content\)\.ok\s*\?\s*'tree'\s*:\s*'raw'/.test(CODE),
       '能解析就进树，解析不出来或空就落在 Raw',
     );
+    assert.equal(CODE.includes('isJsonPayload'), false, '不要留第二份解析判定');
   });
 
   it('用户手选过视图之后不再自动切换', () => {
@@ -83,8 +86,14 @@ describe('请求体 json 载荷区：树 / Raw 两档', () => {
   });
 
   it('树渲染不出来时给可见说明，不留空白', () => {
-    const emptyAt = CODE.indexOf('JSON 格式有误，切到 Raw 修改');
-    assert.notEqual(emptyAt, -1, '载荷非法时树返回 null，必须有一句替代说明');
-    assert.ok(CODE.lastIndexOf('<EmptyHint', emptyAt) < emptyAt, '那句说明要渲染在 EmptyHint 里');
+    const messageAt = CODE.indexOf('JSON 格式有误，切到 Raw 修改');
+    assert.notEqual(messageAt, -1, '载荷非法时树返回 null，必须有一句替代说明');
+    // 先确认这句话外面真有一个 EmptyHint：只比「开标签位置小于消息位置」的话，在没有
+    // 开标签（-1）时同样成立。
+    const openAt = CODE.lastIndexOf('<EmptyHint', messageAt);
+    assert.notEqual(openAt, -1, '那句说明要渲染在 EmptyHint 里');
+    const closeAt = CODE.indexOf('</EmptyHint>', messageAt);
+    assert.notEqual(closeAt, -1, 'EmptyHint 必须闭合');
+    assert.ok(openAt < messageAt && messageAt < closeAt, '那句说明要落在 EmptyHint 的开闭标签之间');
   });
 });

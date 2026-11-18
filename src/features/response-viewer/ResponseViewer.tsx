@@ -66,10 +66,11 @@ export function ResponseViewer() {
   // 表格化的 JSON 一旦折行，缩进层级就读不出来了；Raw 的档位默认格式化，新响应到达时复位。
   const [wrapBody, setWrapBody] = useState(false);
   const [formatted, setFormatted] = useState(true);
-  const bodyText = response?.body ?? '';
+  // 依赖整份响应而不是它的 body：两次内容完全相同的响应也是两次响应，用户看过第一份的
+  // 原文之后，第二份到达仍该回到格式化那一档。
   useEffect(() => {
     setFormatted(true);
-  }, [bodyText]);
+  }, [response]);
   const toggleWrap = useCallback(() => setWrapBody((v) => !v), []);
   const toggleFormatted = useCallback(() => setFormatted((v) => !v), []);
 
