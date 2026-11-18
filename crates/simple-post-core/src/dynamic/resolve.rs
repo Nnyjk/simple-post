@@ -236,10 +236,11 @@ async fn fetch_one(
     let _guard = lock.lock().await;
 
     // 本次解析重新查一次缓存：等锁期间前一个等待者可能已经取好并落库了。
+    // 没有数据源的定义不读自动值——那份值已经没有数据源支撑（见 `cache::decide`）。
     let entry = db::with_conn(&ctx.pool, |c| {
         db::dynamic_variable_cache::get(c, &def.id, &env_key)
     })?;
-    if !force {
+    if !force && def.has_source() {
         if let Some(e) = &entry {
             if !e.is_override && e.expires_at > now {
                 if let Some(value_json) = &e.value_json {
@@ -335,22 +336,52 @@ async fn fetch_one(
         is_override: false,
         override_expires_at: None,
     };
-    let stored = db::with_tx(&ctx.pool, |c| db::dynamic_variable_cache::upsert(c, &entry));
-    if let Err(e) = stored {
-        // 落库失败不影响这次取值：值已经在手，故记一条错误但仍然用它。
-        let error = DynamicError {
-            name: def.name.clone(),
-            kind: DynamicErrorKind::SourceError,
-            message: format!("缓存写入失败：{e}"),
+    // 取数期间用户可能改了定义：数据源 / 抽取规则 / 处理脚本 / 取数环境一变，值该怎么算就
+    // 变了，写路径那时已经把这条定义的缓存行删掉。这次 fetch 用的是开始那份定义，故比对与
+    // 写入放在**同一个事务**里——中间插不进另一次修改；定义不再是开始那一份就跳过写入。
+    // 值照常返回给这次调用方：它只是不进缓存，下一次解析会按新定义重新取数。
+    let stored = db::with_tx(&ctx.pool, |c| {
+        let current = match db::dynamic_variables::get(c, &def.id) {
+            Ok(current) => current,
+            // 定义已经不在了：值仍可交给这次调用方，但没有缓存可写。
+            Err(AppError::NotFound(_)) => return Ok(false),
+            Err(e) => return Err(e),
         };
-        return Ok(OneOutcome {
-            value: Some(serialized),
-            source: DynamicValueSource::Auto,
-            fetched_at: Some(now),
-            expires_at: Some(expires_at),
-            is_override: false,
-            error: Some(error),
-        });
+        if !same_fetch_inputs(&current, def) {
+            return Ok(false);
+        }
+        db::dynamic_variable_cache::upsert(c, &entry)?;
+        Ok(true)
+    });
+    match stored {
+        Ok(true) => {}
+        Ok(false) => {
+            return Ok(OneOutcome {
+                value: Some(serialized),
+                source: DynamicValueSource::Auto,
+                fetched_at: Some(now),
+                // 没有落库，故没有过期时间可报：下一次解析会重新取数。
+                expires_at: None,
+                is_override: false,
+                error: None,
+            });
+        }
+        Err(e) => {
+            // 落库失败不影响这次取值：值已经在手，故记一条错误但仍然用它。
+            let error = DynamicError {
+                name: def.name.clone(),
+                kind: DynamicErrorKind::SourceError,
+                message: format!("缓存写入失败：{e}"),
+            };
+            return Ok(OneOutcome {
+                value: Some(serialized),
+                source: DynamicValueSource::Auto,
+                fetched_at: Some(now),
+                expires_at: Some(expires_at),
+                is_override: false,
+                error: Some(error),
+            });
+        }
     }
 
     Ok(OneOutcome {
@@ -361,6 +392,18 @@ async fn fetch_one(
         is_override: false,
         error: None,
     })
+}
+
+/// 这两份定义算出来的值会一样吗：数据源、取数环境、抽取规则、处理脚本。
+///
+/// 只有决定「取哪一段、怎么加工」的字段在这里；名字、描述、TTL、`value_mode` 改了不影响
+/// 这份值的语义（`value_mode` 在读取时现算），故不必让这次取数作废。
+fn same_fetch_inputs(current: &DynamicVariable, fetched: &DynamicVariable) -> bool {
+    current.source_endpoint_id == fetched.source_endpoint_id
+        && current.source_inline_json == fetched.source_inline_json
+        && current.source_environment_id == fetched.source_environment_id
+        && current.extract_path == fetched.extract_path
+        && current.transform_script == fetched.transform_script
 }
 
 /// 取数失败（或值不可用）时的退化：有回退候选就用它并标「过期值」，否则按缺失处理。

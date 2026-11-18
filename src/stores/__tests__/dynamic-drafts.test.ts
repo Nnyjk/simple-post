@@ -250,16 +250,29 @@ describe('清理时机', () => {
 
   it('切项目只暂存标签，草稿留着（切回来继续填）', () => {
     const dynamicTab = dynamicTabId('p1');
+    const p2Tab = dynamicTabId('p2');
+    // 两个项目都开着标签：p2 的标签这一轮会被搬进 `projectTabs`，若它根本不在 `openTabs` 里，
+    // 这个用例即使把草稿丢掉了也照样绿。
     useAppStore.setState({
-      openTabs: [{ id: dynamicTab, kind: 'dynamic-variables' }],
+      openTabs: [
+        { id: dynamicTab, kind: 'dynamic-variables' },
+        { id: p2Tab, kind: 'dynamic-variables' },
+      ],
       activeTabId: dynamicTab,
     });
     actions().beginCreateDynamicVariableDraft('p1');
     actions().patchDynamicVariableDraft('p1', { name: 'sns' });
+    actions().beginCreateDynamicVariableDraft('p2');
 
     actions().switchProjectTabs('p2');
 
     assert.equal(draftOf('p1')?.name, 'sns', '标签只是暂存，不是关掉');
+    assert.ok(draftOf('p2'), '切过去的那个项目的草稿也不许被这一轮带走');
+    assert.deepEqual(
+      useAppStore.getState().projectTabs.p1?.tabs.map((t) => t.id),
+      [dynamicTab],
+      'p1 的标签进了暂存区',
+    );
   });
 
   it('项目被清扫掉时（pruneStaleTabs 退役它的标签）草稿跟着退役', () => {
@@ -292,5 +305,60 @@ describe('清理时机', () => {
     });
     await actions().deleteProject('p1');
     assert.equal(draftOf('p1'), undefined);
+  });
+});
+
+describe('草稿让标签变脏：「关闭已保存」不许带走表单', () => {
+  it('有草稿时标签进脏集，closeSavedTabs 不关它', () => {
+    const dynamicTab = dynamicTabId('p1');
+    useAppStore.setState({
+      openTabs: [{ id: dynamicTab, kind: 'dynamic-variables' }],
+      activeTabId: dynamicTab,
+    });
+    actions().beginCreateDynamicVariableDraft('p1');
+    actions().patchDynamicVariableDraft('p1', { name: 'sns' });
+
+    assert.ok(
+      useAppStore.getState().dirtyTabIds.has(dynamicTab),
+      '有未保存草稿的动态变量标签必须算脏——否则「关闭已保存」会把表单一起关掉',
+    );
+    assert.equal(actions().closeSavedTabs(), 0);
+    assert.ok(draftOf('p1'), '草稿还在');
+  });
+
+  it('草稿清掉之后标签变干净，closeSavedTabs 就能关它', () => {
+    const dynamicTab = dynamicTabId('p1');
+    useAppStore.setState({
+      openTabs: [{ id: dynamicTab, kind: 'dynamic-variables' }],
+      activeTabId: dynamicTab,
+    });
+    actions().beginCreateDynamicVariableDraft('p1');
+
+    actions().clearDynamicVariableDraft('p1');
+
+    assert.equal(useAppStore.getState().dirtyTabIds.has(dynamicTab), false);
+    assert.equal(actions().closeSavedTabs(), 1);
+    assert.equal(
+      useAppStore.getState().openTabs.some((t) => t.id === dynamicTab),
+      false,
+    );
+  });
+
+  it('关掉标签时脏标记一起摘掉', () => {
+    const dynamicTab = dynamicTabId('p1');
+    useAppStore.setState({
+      openTabs: [{ id: dynamicTab, kind: 'dynamic-variables' }],
+      activeTabId: dynamicTab,
+    });
+    actions().beginCreateDynamicVariableDraft('p1');
+    assert.ok(useAppStore.getState().dirtyTabIds.has(dynamicTab));
+
+    actions().closeTab(dynamicTab);
+
+    assert.equal(
+      useAppStore.getState().dirtyTabIds.has(dynamicTab),
+      false,
+      '标签没了，脏标记也不该留着',
+    );
   });
 });

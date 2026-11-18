@@ -45,10 +45,12 @@ pub(in crate::web_api::spec) fn routes() -> Vec<RouteSpec> {
         RouteSpec {
             method: "POST",
             path: "/api/dynamic-variables/preview",
-            summary: "Dry-run one draft definition: fetch from its data source, run the \
-                      extraction and the transform, and report the response body plus the \
-                      extracted and final values. Touches no cache, no override and no \
-                      history, and a failed extraction still returns the body",
+            summary: "Dry-run one draft definition: really sends the request, then runs the \
+                      extraction and the transform, and reports the response body plus the \
+                      extracted and final values. It touches no local persistent state (cache, \
+                      override, environment variables, history), but a non-idempotent POST \
+                      takes effect twice. A rejected status, a failed extraction or an \
+                      oversized value still returns the body",
             request: Some("DynamicVariablePreview"),
             response: Some("DynamicPreviewResult"),
         },
@@ -71,9 +73,11 @@ pub(in crate::web_api::spec) fn routes() -> Vec<RouteSpec> {
         RouteSpec {
             method: "POST",
             path: "/api/dynamic-variables/{id}/refresh",
-            summary: "Force a dynamic variable to be fetched again",
-            // 刷新不需要请求体：取数上下文由定义自己决定。
-            request: None,
+            summary: "Force a dynamic variable to be fetched again; the body is optional and \
+                      may carry `environmentId` (the environment you have selected), which only \
+                      matters for definitions that inherit their fetch environment",
+            // body 可省略（省略 = 调用方没有环境）；给了也只认 `environmentId`。
+            request: Some("DynamicVariableRefreshBody"),
             response: Some("DynamicValueStatus"),
         },
     ]

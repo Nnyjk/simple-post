@@ -3,9 +3,17 @@
 //! 这里不起网络，故钉的是「预览能给人什么」这件事：抽取失败仍带正文与 bodyJson、二进制
 //! 被点名、截断被透传、处理脚本失败不吞掉抽取结果。
 
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use serde_json::json;
 
-use simple_post_core::domain::{DynamicVariable, Project, ValueMode};
+use simple_post_core::db;
+use simple_post_core::domain::{
+    AuthConfig, DynamicValueSource, DynamicVariable, EndpointDetail, Environment, HttpMethod,
+    Project, RequestBody, ResourceNode, ResourceNodeType, ValueMode,
+};
 
 use super::*;
 
@@ -174,5 +182,195 @@ fn endpoint_wins_when_both_sources_are_given() {
     assert_eq!(
         draft.into_definition().source_endpoint_id.as_deref(),
         Some("ep1")
+    );
+}
+
+#[tokio::test]
+async fn a_non_2xx_response_keeps_the_body_but_has_no_value() {
+    // 401 的 `{"token":"expired"}` 不是值：运行时按缺失处理，预览不能把它当最终值展示。
+    let mut rejected = raw(r#"{"token":"expired"}"#);
+    rejected.status = 401;
+
+    let out = evaluate(&definition("$.token", None), &rejected, &context()).await;
+
+    assert_eq!(out.body_json, Some(json!({"token": "expired"})));
+    assert_eq!(out.extracted, Some(json!("expired")), "抽取照做");
+    assert_eq!(out.value, None, "非 2xx 不取值");
+    let issue = out.extract_error.expect("要说清楚为什么没取值");
+    assert_eq!(issue.kind, "http_status");
+    assert!(issue.message.contains("401"), "{}", issue.message);
+}
+
+#[tokio::test]
+async fn an_oversized_value_is_reported_as_too_large() {
+    // 小 200 响应 + 一个产出 300 KiB 字符串的脚本：线上按缺失处理，预览也不能显示成最终值。
+    let def = definition("$.a", Some("return 'x'.repeat(300 * 1024);"));
+    let out = evaluate(&def, &raw(r#"{"a":1}"#), &context()).await;
+
+    assert_eq!(out.extracted, Some(json!(1)), "抽取结果要留着");
+    assert!(out.value.is_none(), "超限不取值");
+    let issue = out.extract_error.expect("超限要有错误");
+    assert_eq!(issue.kind, "too_large");
+    assert!(issue.message.contains("262144"), "{}", issue.message);
+}
+
+/// 一个项目 `p1`（含模块与取数端点）加另一个项目 `p2` 的环境。
+fn pool_with_a_foreign_environment() -> DbPool {
+    let dir = std::env::temp_dir().join(format!(
+        "simple-post-mcp-preview-test-{}-{}",
+        std::process::id(),
+        simple_post_core::domain::now_ms()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    let pool = simple_post_core::db::init(&dir).expect("init");
+    db::with_tx(&pool, |c| {
+        for (id, name) in [("p1", "First"), ("p2", "Second")] {
+            db::projects::create(
+                c,
+                &Project {
+                    id: id.into(),
+                    name: name.into(),
+                    description: None,
+                    color: "#000000".into(),
+                    created_at: 1,
+                    updated_at: 1,
+                },
+            )?;
+        }
+        db::nodes::create(
+            c,
+            &ResourceNode {
+                id: "m1".into(),
+                root_id: "p1".into(),
+                parent_id: None,
+                kind: ResourceNodeType::Module,
+                name: "模块".into(),
+                description: None,
+                sort_order: 0,
+                created_at: 1,
+                updated_at: 1,
+            },
+            None,
+        )?;
+        db::nodes::create(
+            c,
+            &ResourceNode {
+                id: "e1".into(),
+                root_id: "p1".into(),
+                parent_id: Some("m1".into()),
+                kind: ResourceNodeType::Endpoint,
+                name: "取数接口".into(),
+                description: None,
+                sort_order: 0,
+                created_at: 1,
+                updated_at: 1,
+            },
+            Some(&EndpointDetail {
+                node_id: "e1".into(),
+                method: HttpMethod::Get,
+                url: "/points".into(),
+                base_url_override: None,
+                params: vec![],
+                path_params: vec![],
+                headers: vec![],
+                body: RequestBody::default(),
+                auth: AuthConfig::default(),
+                docs: None,
+                notes: None,
+                tags: vec![],
+                pre_request_script: None,
+                test_script: None,
+                tls: None,
+                responses: vec![],
+                protocol: Default::default(),
+                graphql: None,
+            }),
+        )?;
+        db::environments::create(
+            c,
+            &Environment {
+                id: "env_p2".into(),
+                project_id: "p2".into(),
+                name: "other".into(),
+                module_base_urls: Default::default(),
+                variables: Default::default(),
+                disabled_variables: Vec::new(),
+                created_at: 0,
+            },
+        )?;
+        Ok(())
+    })
+    .expect("seed");
+    pool
+}
+
+/// 一条被叫到就算失败的取数器：环境判定必须发生在发请求之前。
+struct NeverFetcher {
+    calls: AtomicUsize,
+}
+
+impl SourceFetcher for NeverFetcher {
+    fn fetch<'a>(
+        &'a self,
+        def: &'a DynamicVariable,
+        _ctx: &'a ResolveContext,
+        _source: &'a SourceContext,
+    ) -> Pin<Box<dyn Future<Output = Result<RawSource, DynamicError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Err(DynamicError {
+                name: def.name.clone(),
+                kind: DynamicErrorKind::Network,
+                message: "不该被调用".into(),
+            })
+        })
+    }
+}
+
+/// 定义点名的环境不属于数据源接口所属的项目：预览与解析给同一个结论。
+#[tokio::test]
+async fn a_named_environment_of_another_project_is_refused_by_preview_and_resolve() {
+    let pool = pool_with_a_foreign_environment();
+    let draft = PreviewDraft {
+        name: Some("sns".into()),
+        source_endpoint_id: Some("e1".into()),
+        source_environment_id: Some("env_p2".into()),
+        ..PreviewDraft::default()
+    };
+
+    // 预览入口：整条预览失败，文案与保存侧那句对齐。
+    let err = preview(&pool, draft.clone(), None)
+        .await
+        .expect_err("预览要拒");
+    assert!(
+        matches!(err, AppError::Validation(_)),
+        "要按校验错误报出来：{err:?}"
+    );
+    assert!(
+        err.to_string().contains("不在数据源接口所属的项目里"),
+        "{err}"
+    );
+
+    // 解析入口：同一个结论，按 source_error 报出来并当缺失处理。
+    let definition = draft.into_definition();
+    let ctx = ResolveContext {
+        pool: pool.clone(),
+        environment_id: None,
+    };
+    let fetcher = NeverFetcher {
+        calls: AtomicUsize::new(0),
+    };
+    let status = simple_post_core::dynamic::resolve_definition(&ctx, &definition, true, &fetcher)
+        .await
+        .expect("解析");
+    assert_eq!(fetcher.calls.load(Ordering::SeqCst), 0, "判定在发请求之前");
+    assert_eq!(status.source, DynamicValueSource::Missing);
+    assert!(status.value.is_none());
+    let error = status.error.expect("要报取数失败");
+    assert_eq!(error.kind, DynamicErrorKind::SourceError);
+    assert!(
+        error.message.contains("不在数据源接口所属的项目里"),
+        "{}",
+        error.message
     );
 }

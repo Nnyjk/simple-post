@@ -26,6 +26,7 @@ import { disposeSession, startSse } from './stream/stream-sessions';
 import { useGraphQlSchema } from './graphql/use-graphql-schema';
 import { pickQueryHistory, type QueryHistoryEntry } from './graphql/query-history';
 import type { GraphQlPanelTools } from './GraphQlPanel';
+import { dynamicValueScope } from '@/stores/dynamic-slice';
 
 export function HttpTester() {
   // `useActiveEndpointResource` 对草稿接口同样有答案：两行都没有时它从 `DraftEndpoint` 合成。
@@ -66,6 +67,8 @@ export function HttpTester() {
   const activeProjectId = useAppStore((s) => s.activeProjectId);
   const dynamicVariables = useAppStore((s) => s.dynamicVariables);
   const dynamicValues = useAppStore((s) => s.dynamicValues);
+  // 值按 (项目 × 取数环境) 分桶：当前环境那一格才是这次请求要用的值。
+  const activeEnvironmentId = useAppStore((s) => s.activeEnvironmentId);
   const loadDynamicVariables = useAppStore((s) => s.loadDynamicVariables);
   const resolveDynamicVariables = useAppStore((s) => s.resolveDynamicVariables);
   const dynamicError = useAppStore((s) => s.dynamicError);
@@ -240,8 +243,8 @@ export function HttpTester() {
   //
   // 取当前项目里的定义与它们当前项目的取值桶：别的项目的同名变量不参与这次替换。
   const projectDynamicValues = useMemo(
-    () => dynamicValues[activeProjectId] ?? {},
-    [dynamicValues, activeProjectId],
+    () => dynamicValues[dynamicValueScope(activeProjectId, activeEnvironmentId || null)] ?? {},
+    [dynamicValues, activeProjectId, activeEnvironmentId],
   );
 
   // 变量候选：环境变量与动态变量并进同一份候选（不新开页签）。
@@ -343,9 +346,11 @@ export function HttpTester() {
   };
 
   // 当前项目里的全部动态变量定义。这里只要当前值。
+  //
+  // 切环境也要重载：定义生效的取数环境与当前值都可能变（继承的定义换个环境就是另一份值）。
   useEffect(() => {
     void loadDynamicVariables(activeProjectId);
-  }, [loadDynamicVariables, activeProjectId]);
+  }, [loadDynamicVariables, activeProjectId, activeEnvironmentId]);
 
   // 本次请求引用到的动态变量名。由共享推导给出，与批量运行取的是同一份名单。
   const dynamicNames = parts.dynamicNames;
@@ -357,7 +362,8 @@ export function HttpTester() {
       void resolveDynamicVariables(dynamicNames, activeProjectId);
     }, 300);
     return () => window.clearTimeout(timer);
-  }, [dynamicNames, activeProjectId, resolveDynamicVariables]);
+    // 环境变了要重新取数：值按 (项目 × 环境) 分桶，切到另一格时那一格还是空的。
+  }, [dynamicNames, activeProjectId, activeEnvironmentId, resolveDynamicVariables]);
 
   const dynamicVars = useMemo(
     () => buildDynamicVars(projectDynamicValues, enabledDynamicNames),

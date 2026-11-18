@@ -414,6 +414,7 @@ fn response_json(response: &ScriptResponse) -> Json {
         "headers": headers_map(&response.headers),
         "body": response.body,
         "bodyBase64": response.body_base64,
+        "truncated": response.truncated,
         "responseTime": response.response_time_ms,
     })
 }

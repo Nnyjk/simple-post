@@ -40,8 +40,10 @@ pub struct HttpResponse {
     pub body: String,
     /// 响应体的**二进制形态**：原始字节的 base64。
     ///
-    /// 响应字节不是合法 UTF-8 时才有它（图片、压缩包、PDF…），此时 `body` 是宽松解码后的结果
-    /// ——非法字节已被替换成 U+FFFD，原始字节不可恢复。字节是合法 UTF-8 时不给这条通道。
+    /// 正文不是文本时才有它（图片、压缩包、PDF…）。判据先问 Content-Type：主类型是
+    /// `text/*`、或以 `json` / `xml` 等文本类型结尾时算文本，哪怕字节不是合法 UTF-8；
+    /// 其余的才按字节判。此时 `body` 是**空串**，原始字节只能从这条通道取——宽松解码会
+    /// 把二进制弄坏，故传输层不给出那份残影。文本正文（含宽松解码后的那份）不给这条通道。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub body_base64: Option<String>,
     pub content_type: String,

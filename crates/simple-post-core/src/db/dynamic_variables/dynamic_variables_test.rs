@@ -464,6 +464,45 @@ fn a_database_failure_is_not_reported_as_a_definition_without_a_project() {
 }
 
 #[test]
+fn a_database_failure_does_not_null_a_valid_source_environment() {
+    // 「环境那一行不存在」才是配置错误。数据库坏了若也被读成那个结论，一次只改名字的
+    // patch 就会把 `source_environment_id` 静默清成 NULL——定义从此不再点名环境，
+    // 取数换到继承档。故这里让查环境那一步真的坏掉，断言整次更新报数据库错误、
+    // 而且那一列原封不动。
+    let (pool, dir) = fresh_pool();
+    let mut def = definition("d1", "sns");
+    def.source_endpoint_id = Some("e1".into());
+    def.source_inline_json = None;
+    def.source_environment_id = Some("env1".into());
+    seed_environment(&pool, "env1", "p1", "Local");
+    db::with_tx(&pool, |c| create(c, &def)).expect("create");
+
+    // 删掉 environments 表：`lookup_project_id` 会拿到一次真正的数据库错误。
+    {
+        let conn = rusqlite::Connection::open(dir.join("store.db")).expect("open");
+        conn.execute_batch("PRAGMA foreign_keys = OFF; DROP TABLE environments;")
+            .expect("drop environments");
+    }
+
+    let err = db::with_tx(&pool, |c| {
+        update(
+            c,
+            "d1",
+            DynamicVariablePatch {
+                name: Some("renamed".into()),
+                ..Default::default()
+            },
+        )
+    })
+    .expect_err("数据库出错不该把「环境已失效」当成结论");
+    assert!(matches!(err, crate::error::AppError::Sqlite(_)), "{err:?}");
+
+    let stored = db::with_conn(&pool, |c| get(c, "d1")).expect("read back");
+    assert_eq!(stored.source_environment_id.as_deref(), Some("env1"));
+    assert_eq!(stored.name, "sns", "这次更新该整个失败，不该改一半");
+}
+
+#[test]
 fn a_duplicate_id_is_reported_as_an_id_conflict() {
     let (pool, _dir) = fresh_pool();
     db::with_tx(&pool, |c| create(c, &definition("d1", "sns"))).expect("create");

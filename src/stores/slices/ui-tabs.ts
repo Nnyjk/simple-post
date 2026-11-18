@@ -170,6 +170,11 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
           dirtyTabIds.delete(closing.id);
         }
       }
+      if (closing && closing.kind === 'dynamic-variables' && s.dirtyTabIds.has(closing.id)) {
+        // 动态变量标签的脏只来自它那份草稿；草稿随标签一起走，脏标记也就没有意义了。
+        dirtyTabIds = new Set(s.dirtyTabIds);
+        dirtyTabIds.delete(closing.id);
+      }
       if (closing && closing.kind === 'endpoint-draft' && closing.id in draftEndpoints) {
         // draft endpoint 只活在 `draftEndpoints` 里，关掉它的标签就是回收那一行的唯一时刻。
         // 只删上面的 `endpointDrafts` 会把文档字段留在这个再没人引用的 id 下——该 id 一旦被

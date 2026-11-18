@@ -17,6 +17,7 @@ pub enum Decision {
 ///
 /// | 情形 | 决定 |
 /// |---|---|
+/// | 没有数据源 | 重新取数；自动值既不读也不当回退候选，覆盖值照旧生效 |
 /// | `force` 为真 | 重新取数，跳过缓存里的一切（包括手动指定的值） |
 /// | 有覆盖值且没过期 | 用覆盖值 |
 /// | 有覆盖值但已过期 | 重新取数；过期值留作取数失败时的回退候选（定义允许时） |
@@ -34,12 +35,21 @@ pub fn decide(
             stale_fallback: None,
         };
     };
+    // 没有数据源的定义取不到值：数据源接口被删掉之后，它过去写下的自动值已经没有数据源
+    // 支撑，故既不读它，也不拿它当取数失败的回退候选——按缺失处理。覆盖值是人手写的，
+    // 与数据源无关，仍按下面的覆盖值规则生效。
+    let has_source = def.has_source();
     if force {
         // `force` 为真时：跳过缓存里的**一切**——包括用户手动指定的值——重新取数。
         // 一个叫「刷新」却什么都不做的按钮比它丢掉的那份手动值更糟；丢掉的动作是可见的
         // （来源徽标从「手动改的」变回「自动取回」），且用户可以再写一次。
         return Decision::Fetch {
-            stale_fallback: stale_candidate(def, entry),
+            // 覆盖值过期后留下的候选仍是人手写的值；自动值只在有数据源时才算数。
+            stale_fallback: if has_source || entry.is_override {
+                stale_candidate(def, entry)
+            } else {
+                None
+            },
         };
     }
     if entry.is_override {
@@ -55,7 +65,7 @@ pub fn decide(
             stale_fallback: stale_candidate(def, entry),
         };
     }
-    if !force && entry.expires_at > now {
+    if has_source && entry.expires_at > now {
         if let Some(value_json) = &entry.value_json {
             return Decision::UseCache {
                 value_json: value_json.clone(),
@@ -63,7 +73,11 @@ pub fn decide(
         }
     }
     Decision::Fetch {
-        stale_fallback: stale_candidate(def, entry),
+        stale_fallback: if has_source {
+            stale_candidate(def, entry)
+        } else {
+            None
+        },
     }
 }
 

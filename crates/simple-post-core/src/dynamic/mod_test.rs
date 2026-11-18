@@ -14,8 +14,8 @@ const INLINE_SOURCE: &str = r#"{"method":"GET","url":"http://127.0.0.1:9/points"
 use crate::db;
 use crate::domain::{
     AuthConfig, AuthType, DynamicCacheEntry, DynamicErrorKind, DynamicValueSource, DynamicVariable,
-    EndpointDetail, HttpMethod, KeyValue, Project, RequestBody, ResourceNode, ResourceNodeType,
-    ValueMode,
+    DynamicVariablePatch, EndpointDetail, HttpMethod, KeyValue, Project, RequestBody, ResourceNode,
+    ResourceNodeType, ValueMode,
 };
 
 // -------------------------------------------------------------------------
@@ -1054,4 +1054,233 @@ fn an_inline_source_has_no_project_no_environment_and_no_module() {
     assert!(ctx.project_id.is_none());
     assert!(ctx.environment_id.is_none());
     assert!(ctx.module_id.is_none());
+}
+
+/// 补一个属于另一个项目 `p2` 的环境。
+fn seed_foreign_environment(pool: &db::DbPool) {
+    db::with_tx(pool, |c| {
+        db::projects::create(
+            c,
+            &Project {
+                id: "p2".into(),
+                name: "Second".into(),
+                description: None,
+                color: "#000000".into(),
+                created_at: 1,
+                updated_at: 1,
+            },
+        )?;
+        db::environments::create(
+            c,
+            &crate::domain::Environment {
+                id: "env_p2".into(),
+                project_id: "p2".into(),
+                name: "other".into(),
+                module_base_urls: Default::default(),
+                variables: Default::default(),
+                disabled_variables: Vec::new(),
+                created_at: 0,
+            },
+        )?;
+        Ok(())
+    })
+    .expect("seed p2");
+}
+
+/// 定义点名的环境不属于数据源接口所属的项目：与保存侧同一条规则，取数直接报错。
+///
+/// 报错而不是静默换成默认环境——否则「这个值从哪个环境来」的回报就是假的。
+#[tokio::test]
+async fn a_named_environment_of_another_project_is_rejected() {
+    let (pool, _dir) = pool_with_a_module();
+    seed_foreign_environment(&pool);
+    let mut def = definition(60, false);
+    def.source_endpoint_id = Some("e1".into());
+    def.source_inline_json = None;
+    def.source_environment_id = Some("env_p2".into());
+
+    let err = match source_context(&pool, &def, Some("env_a")) {
+        Ok(_) => panic!("点名的环境不属于数据源的项目"),
+        Err(err) => err,
+    };
+    let crate::error::AppError::Validation(message) = err else {
+        panic!("要按校验错误报出来：{err:?}");
+    };
+    assert!(message.contains("不在数据源接口所属的项目里"), "{message}");
+
+    // 解析侧同一个结论：报 source_error 并按缺失处理，取数器根本没被叫到。
+    let fetcher = CountingFetcher::new("\"不该取到\"");
+    let status = resolve_definition(&context(&pool), &def, true, &fetcher)
+        .await
+        .expect("解析");
+    assert_eq!(fetcher.calls(), 0, "判定在发请求之前");
+    assert_eq!(status.source, DynamicValueSource::Missing);
+    assert!(status.value.is_none());
+    let error = status.error.expect("要报取数失败");
+    assert_eq!(error.kind, DynamicErrorKind::SourceError);
+    assert!(
+        error.message.contains("不在数据源接口所属的项目里"),
+        "{}",
+        error.message
+    );
+}
+
+/// 数据源端点被删之后（`ON DELETE SET NULL`）留下的自动缓存值不再算数。
+///
+/// 没有可执行的数据源，它的旧值就没有依据；按缺失处理，而不是把旧值当成当前值。
+#[tokio::test]
+async fn a_definition_without_a_source_ignores_its_cached_value() {
+    let (pool, _dir) = seeded_pool();
+    let now = crate::domain::now_ms();
+    db::with_tx(&pool, |c| {
+        db::dynamic_variable_cache::upsert(
+            c,
+            &DynamicCacheEntry {
+                definition_id: "d1".into(),
+                environment_id: String::new(),
+                value_json: Some("\"旧值\"".into()),
+                fetched_at: now - 1_000,
+                expires_at: now + 60_000,
+                is_override: false,
+                override_expires_at: None,
+            },
+        )
+    })
+    .expect("seed 缓存");
+
+    let mut def = definition(60, false);
+    def.source_inline_json = None; // 数据源被删：两个来源都空
+                                   // 真实取数器在这里报「没有数据源」；这条用例只关心「根本没读缓存就去了取数」。
+    let fetcher = CountingFetcher::failing();
+    let status = resolve_definition(&context(&pool), &def, false, &fetcher)
+        .await
+        .expect("解析");
+
+    assert_eq!(fetcher.calls(), 1, "没有数据源就不读自动缓存行");
+    assert!(status.value.is_none(), "旧值不再生效：{:?}", status.value);
+    assert_eq!(status.source, DynamicValueSource::Missing);
+}
+
+/// 覆盖值是用户手写的，不来自取数：没有数据源也照样生效。
+#[tokio::test]
+async fn a_definition_without_a_source_still_serves_an_override() {
+    let (pool, _dir) = seeded_pool();
+    let now = crate::domain::now_ms();
+    db::with_tx(&pool, |c| {
+        db::dynamic_variable_cache::upsert(
+            c,
+            &DynamicCacheEntry {
+                definition_id: "d1".into(),
+                environment_id: String::new(),
+                value_json: Some("\"手写\"".into()),
+                fetched_at: now,
+                expires_at: now + 60_000,
+                is_override: true,
+                override_expires_at: None,
+            },
+        )
+    })
+    .expect("seed 覆盖值");
+
+    let mut def = definition(60, false);
+    def.source_inline_json = None;
+    let fetcher = CountingFetcher::new("\"不该取\"");
+    let status = resolve_definition(&context(&pool), &def, false, &fetcher)
+        .await
+        .expect("解析");
+
+    assert_eq!(fetcher.calls(), 0, "覆盖值不取数");
+    assert_eq!(status.value.as_deref(), Some("手写"));
+    assert_eq!(status.source, DynamicValueSource::Override);
+}
+
+/// 取数时顺手改掉定义的那条取数器，模拟「用户在请求飞行途中保存了编辑」。
+struct RewritingFetcher {
+    pool: db::DbPool,
+    changed: AtomicUsize,
+}
+
+impl SourceFetcher for RewritingFetcher {
+    fn fetch<'a>(
+        &'a self,
+        def: &'a DynamicVariable,
+        _ctx: &'a ResolveContext,
+        _source: &'a SourceContext,
+    ) -> Pin<Box<dyn Future<Output = Result<RawSource, DynamicError>> + Send + 'a>> {
+        Box::pin(async move {
+            // 与写路径同一个入口：改抽取规则同时清掉自动缓存行。
+            db::with_tx(&self.pool, |c| {
+                db::dynamic_variables::update(
+                    c,
+                    &def.id,
+                    DynamicVariablePatch {
+                        extract_path: Some("$.name".into()),
+                        ..Default::default()
+                    },
+                )
+            })
+            .map_err(|e| DynamicError {
+                name: def.name.clone(),
+                kind: DynamicErrorKind::SourceError,
+                message: e.to_string(),
+            })?;
+            self.changed.fetch_add(1, Ordering::SeqCst);
+            Ok(RawSource {
+                status: 200,
+                content_type: "application/json".into(),
+                body: r#"{"name":"A001"}"#.into(),
+                truncated: false,
+                body_base64: None,
+                headers: vec![],
+                duration_ms: 0,
+            })
+        })
+    }
+}
+
+/// 取数途中改了抽取规则：这次请求的值照常返回，但不写进缓存。
+///
+/// 否则下一次解析读到的是一整对象（旧规则算出来的），而用户已经把规则改成 `$.name`。
+#[tokio::test]
+async fn a_definition_changed_during_the_fetch_is_not_cached_with_the_old_value() {
+    let (pool, _dir) = seeded_pool();
+    let def = db::with_conn(&pool, |c| db::dynamic_variables::get(c, "d1")).expect("定义");
+    let fetcher = RewritingFetcher {
+        pool: pool.clone(),
+        changed: AtomicUsize::new(0),
+    };
+
+    let first = resolve_definition(&context(&pool), &def, true, &fetcher)
+        .await
+        .expect("解析");
+    assert_eq!(fetcher.changed.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        first.value.as_deref(),
+        Some(r#"{"name":"A001"}"#),
+        "这次请求照常返回"
+    );
+    assert!(
+        first.expires_at.is_none(),
+        "没有写缓存就没有到期时间：{:?}",
+        first.expires_at
+    );
+
+    // 旧规则算出的值不落库。
+    let cached =
+        db::with_conn(&pool, |c| db::dynamic_variable_cache::get(c, "d1", "")).expect("读缓存");
+    assert!(cached.is_none(), "改了定义之后不写旧值");
+
+    // 下一次解析按新规则重新取数。
+    let again = CountingFetcher::new(r#"{"name":"A001"}"#);
+    let second = resolve_names(
+        &context(&pool),
+        Some("p1"),
+        &["sns".to_string()],
+        false,
+        &again,
+    )
+    .await
+    .expect("解析");
+    assert_eq!(again.calls(), 1, "缓存里没有值，故重新取数");
+    assert_eq!(second.values.get("sns").map(String::as_str), Some("A001"));
 }

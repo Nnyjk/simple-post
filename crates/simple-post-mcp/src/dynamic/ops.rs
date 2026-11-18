@@ -13,8 +13,9 @@ use serde::Serialize;
 
 use simple_post_core::db::{self, DbPool};
 use simple_post_core::domain::{
-    now_ms, uid, DynamicCacheEntry, DynamicError, DynamicResolution, DynamicValueSource,
-    DynamicValueStatus, DynamicVariable, DynamicVariablePatch, Environment, ValueMode,
+    now_ms, uid, DynamicCacheEntry, DynamicError, DynamicErrorKind, DynamicResolution,
+    DynamicValueSource, DynamicValueStatus, DynamicVariable, DynamicVariablePatch, Environment,
+    ValueMode,
 };
 use simple_post_core::dynamic::{parse_raw, serialize_value, ResolveContext, SourceContext};
 use simple_post_core::error::AppError;
@@ -87,6 +88,10 @@ pub struct DynamicVariableView {
 ///
 /// **不取数**：读的是缓存行。取数可能发出站请求，而这是一次纯读。
 ///
+/// **一条坏行不拖垮整张列表**：取数上下文构造不出来的定义（点名的环境属于别的项目、
+/// 环境行已删）只让自己那一行没有值，错误记在那一行的 `error` 上。面板一次列全部定义，
+/// 整批失败等于那个 tab 打不开，比展示一条带错误的行更难收拾。
+///
 /// **不带「哪些端点引用了它」**：那条信息只在接口那侧存在——接口知道自己配了哪些变量，
 /// 变量这一侧不维护反向索引。一个被几乎每个接口用到的通用变量会把这条列表撑爆，
 /// 而那条信息对维护变量本身没有用。
@@ -104,7 +109,15 @@ pub fn list(
     let now = now_ms();
     let mut out = Vec::with_capacity(definitions.len());
     for definition in definitions {
-        let source = simple_post_core::dynamic::source_context(pool, &definition, environment_id)?;
+        let source =
+            match simple_post_core::dynamic::source_context(pool, &definition, environment_id) {
+                Ok(source) => source,
+                Err(err) => {
+                    let error = context_error(&definition, err);
+                    out.push(view_of_failed_context(definition, error));
+                    continue;
+                }
+            };
         let env_key = source.environment_id.clone().unwrap_or_default();
         let entry = db::with_conn(pool, |c| {
             db::dynamic_variable_cache::get(c, &definition.id, &env_key)
@@ -115,13 +128,23 @@ pub fn list(
 }
 
 /// 读一条定义，带当前值与缓存状态。
+///
+/// 取数上下文构造失败时同样降级：返回这一行、`error` 里带原因，而不是整次读取失败——
+/// 详情页要能显示「这条定义的环境是坏的」，那比一个 400 有用。
 pub fn get(
     pool: &DbPool,
     definition_id: &str,
     environment_id: Option<&str>,
 ) -> Result<DynamicVariableView, AppError> {
     let definition = db::with_conn(pool, |c| db::dynamic_variables::get(c, definition_id))?;
-    let source = simple_post_core::dynamic::source_context(pool, &definition, environment_id)?;
+    let source = match simple_post_core::dynamic::source_context(pool, &definition, environment_id)
+    {
+        Ok(source) => source,
+        Err(err) => {
+            let error = context_error(&definition, err);
+            return Ok(view_of_failed_context(definition, error));
+        }
+    };
     let env_key = source.environment_id.clone().unwrap_or_default();
     let entry = db::with_conn(pool, |c| {
         db::dynamic_variable_cache::get(c, definition_id, &env_key)
@@ -271,6 +294,42 @@ pub fn set_override(
     Ok(())
 }
 
+/// 取数上下文构造失败的那一行：没有值、没有缓存时间，原因放在 `error` 上。
+///
+/// 项目与环境都是空的——上下文没算出来，就没有「值从哪个环境来」可报。行本身的身份
+/// （id、名字、数据源、抽取规则）照旧给出，用户要靠它找到那条坏定义。
+fn view_of_failed_context(definition: DynamicVariable, error: DynamicError) -> DynamicVariableView {
+    DynamicVariableView {
+        definition,
+        value: None,
+        source: DynamicValueSource::Missing,
+        fetched_at: None,
+        expires_at: None,
+        is_override: false,
+        error: Some(error),
+        source_project_id: None,
+        source_project_name: None,
+        effective_environment_id: None,
+        effective_environment_name: None,
+    }
+}
+
+/// 取数上下文构造失败的原因 → 行上的那条错误。
+///
+/// 校验与「行不存在」两种错误带的就是给人看的那句话（与保存侧逐字相同）；其它错误
+/// （数据库坏了）原样转写，别把它说成配置错误。
+fn context_error(definition: &DynamicVariable, err: AppError) -> DynamicError {
+    let message = match &err {
+        AppError::Validation(message) | AppError::NotFound(message) => message.clone(),
+        other => other.to_string(),
+    };
+    DynamicError {
+        name: definition.name.clone(),
+        kind: DynamicErrorKind::SourceError,
+        message,
+    }
+}
+
 /// 一条定义 + 它的缓存行 → 视图。
 fn view_of(
     definition: DynamicVariable,
@@ -278,6 +337,12 @@ fn view_of(
     entry: Option<&DynamicCacheEntry>,
     now: i64,
 ) -> DynamicVariableView {
+    // 没有数据源的定义不展示自动值：数据源接口被删掉之后，那份值已经没有数据源支撑，
+    // 解析也按缺失处理（见 `core::dynamic::cache::decide`）。覆盖值是人手写的，照旧展示。
+    let entry = match entry {
+        Some(e) if !e.is_override && !definition.has_source() => None,
+        other => other,
+    };
     let (value, source_kind, fetched_at, expires_at, is_override) = match entry {
         None => (None, DynamicValueSource::Missing, None, None, false),
         Some(e) if e.is_override => {

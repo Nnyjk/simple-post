@@ -144,12 +144,12 @@ describe('buildScriptSnippet', () => {
     assert.match(snippet.code, /点选的这一格：pm\.data\.a\.b/);
   });
 
-  it('节点不在抽取规则之下时退回原始响应，并明说它不依赖抽取规则', () => {
+  it('节点不在抽取规则之下时退回原始响应，并说明抽取仍须成功脚本才会跑', () => {
     const snippet = buildScriptSnippet('$.data.list', '$.data.items');
     assert.equal(snippet.usesExtract, false);
     assert.match(snippet.code, /点选的这一格：pm\.response\.json\(\)\.data\.list/);
     assert.match(snippet.code, /^return pm\.data;$/m, '换了取材点也不许改默认取值');
-    assert.match(snippet.hint, /不依赖抽取规则/);
+    assert.match(snippet.hint, /抽取仍须成功/);
   });
 
   it('根节点在别的抽取规则之下也算「不在下面」', () => {
@@ -179,5 +179,24 @@ describe('shouldConfirmOverwrite', () => {
     assert.equal(shouldConfirmOverwrite('   '), false);
     assert.equal(shouldConfirmOverwrite(null), false);
     assert.equal(shouldConfirmOverwrite('return pm.data;'), true);
+  });
+});
+
+describe('escapeKey：行分隔符', () => {
+  it('U+2028 / U+2029 转成转义序列，注释不会被截断', () => {
+    assert.equal(escapeKey('a\u2028b'), 'a\\u2028b');
+    assert.equal(escapeKey('a\u2029b'), 'a\\u2029b');
+  });
+
+  it('含这两个码点的键拼成的片段里没有裸码点，且整段能被解析', () => {
+    const path = pathForKey('$', 'a\u2028b\u2029c');
+    assert.equal(path, "$['a\\u2028b\\u2029c']");
+    const snippet = buildScriptSnippet(path, '$');
+    for (const char of snippet.code) {
+      const code = char.codePointAt(0) ?? 0;
+      assert.notEqual(code, 0x2028, '片段里不该出现裸 U+2028');
+      assert.notEqual(code, 0x2029, '片段里不该出现裸 U+2029');
+    }
+    assert.doesNotThrow(() => new Function(snippet.code));
   });
 });

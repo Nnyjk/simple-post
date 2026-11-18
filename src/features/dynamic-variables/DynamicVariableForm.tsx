@@ -21,11 +21,12 @@
 import { useMemo, useState } from 'react';
 import { useAppStore } from '@/stores/app-store';
 import { emptyDynamicVariableDraft } from '@/stores/dynamic-slice';
-import type { DynamicVariable, DynamicVariableView, ValueMode } from '@/types/domain';
+import type { DynamicVariableView, ValueMode } from '@/types/domain';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { EndpointTreePicker } from './EndpointTreePicker';
 import { ExtractPreview } from './ExtractPreview';
+import { buildEditPatch, ttlSecondsOf } from './edit-patch';
 
 export interface DynamicVariableFormProps {
   /** 传了就走编辑模式，不传就是新建。 */
@@ -127,50 +128,23 @@ export function DynamicVariableForm({
   const sourceIsAcceptable = hasSource || (variable !== undefined && !definitionHadSource);
 
   /**
-   * 写成编辑用的 patch：**只发动过的字段**。
+   * 差量比对以**打开表单时那份定义的快照**为准，不以「此刻的 `variable`」为准。
    *
-   * 来源那一组字段尤其如此。「没动过」必须真的缺席，而不是显式发 `null`——后端把 `null`
-   * 读作明确的意图（清除），把没动过的字段也当成清除，一份只改名字的 patch 就顺带宣称
-   * 「这条定义没有数据源」，撞上「必须有一个数据源」的校验，用户的感受是「改个名都存不
-   * 下来」。故这三格逐一比对当前值，一样就缺席。
+   * 快照随草稿一起存在 store 里（`draft.openedWith`）：表单可能被卸载重挂（切标签），列表也
+   * 可能被刷新（切环境、别处保存都会触发重载）。拿刷新后的定义当基线，会把别人刚存的改动
+   * 判成「我改的」再写回去——两个窗口各改一格时互相覆盖。
    */
-  const editPatch = (ttlValue: number): Partial<DynamicVariable> => {
-    const patch: Partial<DynamicVariable> = {
-      name,
-      description: description || null,
-      extractPath,
-      transformScript: transformScript.trim() === '' ? null : transformScript,
-      valueMode,
-      ttlSeconds: ttlValue,
-      staleFallback,
-      enabled,
-    };
-    // 三种形态各自「保存后应当是什么」：切到内联就把接口引用清掉，切回引用就把内联请求清掉。
-    const nextEndpointId = usesEndpoint ? sourceEndpointId || null : null;
-    const nextInlineJson = usesEndpoint ? null : sourceInlineJson || null;
-    // 内联请求自带完整地址，用不到取数环境，故那种形态下这一格就是「没有」。
-    const nextEnvironmentId = usesEndpoint ? environmentId || null : null;
-    if (nextEndpointId !== (variable?.sourceEndpointId ?? null)) {
-      patch.sourceEndpointId = nextEndpointId;
-    }
-    if (nextInlineJson !== (variable?.sourceInlineJson ?? null)) {
-      patch.sourceInlineJson = nextInlineJson;
-    }
-    if (nextEnvironmentId !== (variable?.sourceEnvironmentId ?? null)) {
-      patch.sourceEnvironmentId = nextEnvironmentId;
-    }
-    return patch;
-  };
+  const openedWith = draft.openedWith;
 
   const handleSubmit = async () => {
     setBusy(true);
     try {
-      // 缓存时长：0 是有意义的（不缓存，每次重新取数），故不能用 `|| 60`——那会把 0
-      // 变成假值再回退成 60。
-      const ttl = Number(ttlSeconds);
-      const ttlValue = Number.isFinite(ttl) ? ttl : 60;
+      const ttlValue = ttlSecondsOf(ttlSeconds);
       if (variable) {
-        const ok = await updateDynamicVariable(variable.id, editPatch(ttlValue));
+        // 兜底用此刻这条定义：草稿是被 `patchDynamicVariableDraft` 凭空垫出来的那种极端情形，
+        // 也不能把「编辑」错走成「新建」。
+        const baseline = openedWith ?? variable;
+        const ok = await updateDynamicVariable(variable.id, buildEditPatch(baseline, draft));
         // 保存失败时表单留着：用户填的内容不丢。
         if (!ok) return;
       } else {
@@ -284,7 +258,7 @@ export function DynamicVariableForm({
               </select>
               <span className="text-micro text-muted-foreground">
                 {environmentId === ''
-                  ? '取数时用你发送请求时选中的那个环境；你切环境，它的值就跟着变。'
+                  ? '取数时用你发送请求时选中的那个环境；你切环境，它的值就跟着变。没有可用环境时，用这个接口所属项目的默认环境（最早建的那个）。'
                   : '固定用这个环境。'}
               </span>
             </label>

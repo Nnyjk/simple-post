@@ -380,3 +380,75 @@ fn the_response_is_visible_to_a_test_script() {
     assert!(run.effects.assertions.iter().all(|a| a.passed));
     assert_eq!(run.effects.logs[0].message, "200 12");
 }
+
+/// 一个够脚本读的响应。
+fn response(truncated: bool) -> ScriptResponse {
+    ScriptResponse {
+        code: 200,
+        status: "OK".to_string(),
+        headers: vec![("Content-Type".to_string(), "application/json".to_string())],
+        body_base64: None,
+        body: "{}".to_string(),
+        truncated,
+        response_time_ms: 1,
+    }
+}
+
+/// 建沙箱并注入一个响应。
+fn sandbox_with_response(
+    limits: &ScriptLimits,
+    request: &ScriptRequest,
+    response: &ScriptResponse,
+) -> Sandbox {
+    let sandbox = Sandbox::new(limits).expect("engine should start");
+    sandbox
+        .init(
+            request,
+            Some(response),
+            &EnvSnapshot::default(),
+            None,
+            limits,
+        )
+        .expect("init should succeed");
+    sandbox
+}
+
+#[test]
+fn a_complete_response_reports_truncated_false() {
+    let limits = limits(5_000);
+    let request = request();
+    let response = response(false);
+    let sandbox = sandbox_with_response(&limits, &request, &response);
+
+    let run = sandbox.run(
+        "pm.test('完整', function () { pm.expect(pm.response.truncated).to.equal(false); });",
+        &request,
+    );
+
+    assert!(run.failure.is_none());
+    assert_eq!(run.effects.assertions.len(), 1);
+    assert!(
+        run.effects.assertions[0].passed,
+        "truncated=false 要原样交给脚本"
+    );
+}
+
+#[test]
+fn a_truncated_response_reports_truncated_true() {
+    let limits = limits(5_000);
+    let request = request();
+    let response = response(true);
+    let sandbox = sandbox_with_response(&limits, &request, &response);
+
+    let run = sandbox.run(
+        "pm.test('被裁过', function () { pm.expect(pm.response.truncated).to.equal(true); });",
+        &request,
+    );
+
+    assert!(run.failure.is_none());
+    assert_eq!(run.effects.assertions.len(), 1);
+    assert!(
+        run.effects.assertions[0].passed,
+        "truncated=true 要交给脚本"
+    );
+}

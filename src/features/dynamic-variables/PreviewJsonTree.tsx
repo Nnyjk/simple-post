@@ -10,7 +10,7 @@
  * 一次最多画 200 个孩子 —— 预览是给人瞄一眼挑路径的，不是导出器。超出的部分明说还有多少，
  * 不静默截断成「看起来就这么点」。
  */
-import { useState } from 'react';
+import { useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { ChevronRight } from 'lucide-react';
 import { cn, focusRing } from '@/lib/utils';
 import { pathForIndex, pathForKey } from './extract-path';
@@ -117,8 +117,45 @@ function TreeNode({
   const children = entries.slice(0, MAX_CHILDREN);
   const hidden = entries.length - children.length;
 
+  /**
+   * 键盘操作都落在这一行上：↑↓ 在同级的可见行之间走，←→ 收起与展开，回车「用这条」。
+   *
+   * 行是 `tabIndex` 的停靠点：只有根行是 0，其余是 -1（可以用程序聚焦，但不占一个 Tab 位），
+   * 于是 Tab 进来只落一次，之后用方向键在树里走。行内那两个按钮因此不再各自占 Tab 位。
+   */
+  const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    // 行内那两个按钮自己能处理回车与空格（松开箭头、选中这一格）：它们的键事件冒泡到行上时
+    // 不能再当成「用这条」，否则在箭头上按回车会顺手把路径写进抽取规则。
+    if (event.target !== event.currentTarget) return;
+    if (event.key === 'Enter') {
+      onPick(path, value);
+      return;
+    }
+    if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
+      if (!expandable) return;
+      event.preventDefault();
+      setOpen(event.key === 'ArrowRight');
+      return;
+    }
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    const tree = event.currentTarget.closest('[role="tree"]');
+    if (!tree) return;
+    // DOM 次序就是树的先序：兄弟、子、侄都在这个列表里，故「下一行」直接按序号取。
+    const rows = Array.from(tree.querySelectorAll<HTMLElement>('[role="treeitem"]'));
+    const next = rows[rows.indexOf(event.currentTarget) + (event.key === 'ArrowDown' ? 1 : -1)];
+    if (!next) return;
+    event.preventDefault();
+    next.focus();
+  };
+
   return (
-    <div role="treeitem" aria-expanded={expandable ? open : undefined} aria-level={depth + 1}>
+    <div
+      role="treeitem"
+      aria-expanded={expandable ? open : undefined}
+      aria-level={depth + 1}
+      tabIndex={depth === 0 ? 0 : -1}
+      onKeyDown={handleKeyDown}
+    >
       <div
         className="group flex items-start gap-1 rounded pr-1 hover:bg-overlay-hover"
         style={{ paddingLeft: depth * 12 + 4 }}
@@ -128,6 +165,7 @@ function TreeNode({
             type="button"
             aria-expanded={open}
             aria-label={open ? '收起' : '展开'}
+            tabIndex={-1}
             onClick={() => setOpen((previous) => !previous)}
             className={cn(
               'mt-0.5 shrink-0 rounded text-muted-foreground hover:text-foreground',
@@ -141,6 +179,7 @@ function TreeNode({
         )}
         <button
           type="button"
+          tabIndex={-1}
           onClick={() => onPick(path, value)}
           title={`把这条路径写进抽取规则：${path}`}
           className={cn(

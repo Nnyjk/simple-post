@@ -15,8 +15,16 @@ pub(super) fn check_source_endpoint(
     let Some(endpoint_id) = endpoint_id else {
         return Ok(None);
     };
-    let project_id = crate::db::nodes::root_id_of(conn, endpoint_id)
-        .map_err(|_| AppError::Validation(format!("数据源接口 {endpoint_id} 不存在")))?;
+    let project_id = match crate::db::nodes::root_id_of(conn, endpoint_id) {
+        Ok(project_id) => project_id,
+        // 只有「节点不存在」是配置错误；数据库出错照抛，别让它冒充「接口已删」。
+        Err(AppError::NotFound(_)) => {
+            return Err(AppError::Validation(format!(
+                "数据源接口 {endpoint_id} 不存在"
+            )))
+        }
+        Err(e) => return Err(e),
+    };
     Ok(Some(project_id))
 }
 
@@ -34,8 +42,15 @@ pub(super) fn check_source_environment(
         return Ok(None);
     };
     if let Some(env_id) = environment_id {
-        let owner = crate::db::environments::lookup_project_id(conn, env_id)
-            .map_err(|_| AppError::Validation(format!("环境 {env_id} 不存在")))?;
+        let owner = match crate::db::environments::lookup_project_id(conn, env_id) {
+            Ok(owner) => owner,
+            // 只有「环境行不存在」是配置错误。数据库出错照抛：`update` 会把这条
+            // `Validation` 读成「沿用的旧环境已失效」，进而在只改名的 patch 里把它清成 NULL。
+            Err(AppError::NotFound(_)) => {
+                return Err(AppError::Validation(format!("环境 {env_id} 不存在")))
+            }
+            Err(e) => return Err(e),
+        };
         if owner != project_id {
             return Err(AppError::Validation(format!(
                 "环境 {env_id} 不在数据源接口所属的项目里"

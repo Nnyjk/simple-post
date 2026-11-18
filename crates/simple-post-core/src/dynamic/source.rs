@@ -26,14 +26,17 @@ pub struct SourceContext {
 /// 算出这条定义的取数上下文。
 ///
 /// - 数据源是内联请求：没有项目、没有环境——内联请求自带完整地址。
-/// - 环境：`def.source_environment_id` 有名就是**指定**，就是那个环境；为空就是**继承**
-///   ——用 `caller_environment_id`（调用方此刻选中的环境），但只在它属于数据源端点所属
-///   项目时；调用方没有环境、或那个环境不属于这个项目时，回落到该项目的**默认环境**
+/// - 环境：`def.source_environment_id` 有名就是**指定**，就是那个环境——它必须属于数据源
+///   端点所属的项目，否则报错（与保存侧同一条归属规则）；为空就是**继承**——用
+///   `caller_environment_id`（调用方此刻选中的环境），但只在它属于数据源端点所属项目时；
+///   调用方没有环境、或那个环境不属于这个项目时，回落到该项目的**默认环境**
 ///   （`db::environments::get_default`，最早创建的那个）；再不行为没有环境。
 /// - 模块：数据源端点所在的那个模块。base URL 挂在模块上，故端点的模块决定取哪一格。
 ///
-/// 继承的那一档让「同一个 `{{name}}` 跟着用户切环境换值」成立，而缓存键取的是这里算出的
-/// `environment_id`，故切环境一定命中另一个键——不会读到上一个环境的值。
+/// 缓存键跟着**实际生效**的环境走（这里算出的 `environment_id`）：定义点名了环境时，
+/// 调用方换环境不改这个键；两个调用方各自的选中项回落到同一个默认环境时，也是同一个键。
+/// 继承的那一档让「同一个 `{{name}}` 跟着用户切环境换值」成立——切环境一定命中另一个键，
+/// 不会读到上一个环境的值。
 pub fn source_context(
     pool: &db::DbPool,
     def: &DynamicVariable,
@@ -54,7 +57,9 @@ pub fn source_context(
     let project = db::with_conn(pool, |c| db::projects::get(c, &project_id))?;
 
     let env = match def.source_environment_id.as_deref() {
-        Some(env_id) => environment_by_id(pool, env_id)?,
+        // 点名了环境就只认它：那个环境不在数据源端点所属项目里时报错，不静默换环境——
+        // 换掉会让「值从哪个环境来」的回报失真，也会拿另一个项目的 base URL 与凭据去取数。
+        Some(env_id) => Some(named_environment(pool, env_id, &project_id)?),
         None => inherited_environment(pool, &project_id, caller_environment_id)?,
     };
 
@@ -67,8 +72,35 @@ pub fn source_context(
     })
 }
 
+/// 取定义点名的那个环境，并校验它属于数据源端点所属的项目。
+///
+/// 归属规则与保存侧（`db::dynamic_variables::validation::check_source_environment`）
+/// 同一条、同一句话：环境决定 base URL 与变量，取数打的是那个项目的接口，故别的项目的
+/// 环境在这里就是配置错误。环境行不存在同样是错误——指定档没有「回落到默认环境」这一说。
+fn named_environment(
+    pool: &db::DbPool,
+    environment_id: &str,
+    project_id: &str,
+) -> Result<Environment, AppError> {
+    let env = match db::with_conn(pool, |c| db::environments::get(c, environment_id)) {
+        Ok(env) => env,
+        Err(AppError::NotFound(_)) => {
+            return Err(AppError::Validation(format!(
+                "环境 {environment_id} 不存在"
+            )))
+        }
+        Err(e) => return Err(e),
+    };
+    if env.project_id != project_id {
+        return Err(AppError::Validation(format!(
+            "环境 {environment_id} 不在数据源接口所属的项目里"
+        )));
+    }
+    Ok(env)
+}
+
 /// 按 id 取环境。环境行被删掉了就是没有环境——外键那条路本来也会把定义里的 id 置空，
-/// 故这不是异常。
+/// 故这不是异常。继承档用它：调用方给的环境不可用就回落到默认环境。
 fn environment_by_id(
     pool: &db::DbPool,
     environment_id: &str,
