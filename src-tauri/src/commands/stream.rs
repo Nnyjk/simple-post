@@ -70,8 +70,13 @@ pub fn stream_cancel(stream_id: String) -> Result<(), AppError> {
 }
 
 /// 打开一条 WebSocket 会话。登记的 Channel 先于建连：首帧 `state: connecting` 不会丢。
+///
+/// **必须是 `async`**（与 `stream_request` 同形）：core 的 `ws::connect` 里是裸
+/// `tokio::spawn`，同步命令跑在 Tauri 的 IPC 线程上，那里没有 reactor 上下文，首连会
+/// panic（"there is no reactor running"）。`async` 让 Tauri 把命令投到它自己的运行时里，
+/// `spawn` 才有地方挂。`stream.rs::ws_connect_is_an_async_command` 用源码形状钉住这点。
 #[tauri::command]
-pub fn ws_connect(
+pub async fn ws_connect(
     session_id: String,
     url: String,
     headers: Vec<(String, String)>,
@@ -106,11 +111,61 @@ pub fn ws_send(
 }
 
 /// 关闭一条会话。`code` 缺席时发一个正常关闭帧（1000）。
+///
+/// 幂等：会话可能已经自行收尾（对端关闭、建连失败、重连顶掉），此时 core 回
+/// `NotFound`，这里吸收成 `Ok`。REST 的 `DELETE /api/ws/sessions/{id}` **仍然**回 404——
+/// 那边有状态码可看；桌面渲染层的关闭路径是 `void handle.close()`，不 catch，未处理的
+/// rejection 会当成 UI 错误冒出来。
 #[tauri::command]
 pub fn ws_close(
     session_id: String,
     code: Option<u16>,
     reason: Option<String>,
 ) -> Result<(), AppError> {
-    ws::close(&session_id, code, reason.as_deref().unwrap_or_default())
+    match ws::close(&session_id, code, reason.as_deref().unwrap_or_default()) {
+        Err(AppError::NotFound(_)) => Ok(()),
+        other => other,
+    }
+}
+
+// ----- 护栏 ---------------------------------------------------------------
+//
+// 这两条都是「编译得过、真机才炸」的那类回退：签名一改成同步，`cargo check` 依旧全绿，
+// 只有桌面端点开 WebSocket 面板时才会 panic。故读本文件源码把形状钉住——与
+// `src-tauri/src/http_request_test.rs` 同一手法。
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SOURCE: &str = include_str!("stream.rs");
+
+    #[test]
+    fn ws_connect_is_an_async_command() {
+        // 按行找声明本身，而不是在整份源码里 `contains`：本测试的断言文本也在同一个文件
+        // 里，整文件搜索会把自己的字符串当证据。
+        let signature = SOURCE
+            .lines()
+            .find(|line| line.starts_with("pub ") && line.contains(" ws_connect("))
+            .expect("stream.rs 里应有 ws_connect 的声明");
+        assert!(
+            signature.starts_with("pub async fn "),
+            "ws_connect 必须是 `pub async fn`（现在写的是 `{signature}`）：同步命令跑在 Tauri \
+             的 IPC 线程上，core 里裸的 tokio::spawn 没有 reactor 上下文，桌面端首连会 panic"
+        );
+    }
+
+    /// 会话已自行收尾时（注册表里没有这个 id），core 回 `NotFound`，命令必须吸收成 `Ok`。
+    #[test]
+    fn ws_close_absorbs_not_found() {
+        let missing = "definitely-not-a-live-ws-session";
+        // 先确认这个 id 确实走 NotFound 那条路，而不是被别的校验挡下。
+        assert!(
+            matches!(ws::close(missing, None, ""), Err(AppError::NotFound(_))),
+            "缺省情况下 core 应回 NotFound"
+        );
+        assert!(
+            ws_close(missing.to_string(), None, None).is_ok(),
+            "渲染层的关闭路径不 catch，NotFound 必须被吸收"
+        );
+    }
 }

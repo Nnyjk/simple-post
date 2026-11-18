@@ -1,5 +1,5 @@
 {
-  "$comment": "GraphQL 组装规则的一致性样本。Rust 的 `variable_fill::resolve::graphql_payload`（MCP 端）与 TS 的 `src/lib/graphql.ts::buildGraphQlPayload`（桌面端）读同一份本文件，产出必须逐条相同。样本钉的是**规则**：query 与 variables 都做 `{{var}}` 替换、variables 原文 trim 空不带键、非空必须是 JSON 对象、operationName 的 trim 只用作空判定、写进 payload 的是 trim 后的串（trim 空则不带键）、payload 的键序与缺失变量的收集。`vars` 里 `enabled` 为 false 的条目不进变量池，故出现在模板里就是缺失变量。",
+  "$comment": "GraphQL 组装规则的一致性样本。Rust 的 `variable_fill::resolve::graphql_payload`（MCP 端）与 TS 的 `src/lib/graphql.ts::buildGraphQlPayload`（桌面端）读同一份本文件，产出必须逐条相同。样本钉的是**规则**：query 与 variables 都做 `{{var}}` 替换、variables 原文 trim 空不带键、非空必须是 JSON 对象、operationName 的 trim 只用作空判定、写进 payload 的是 trim 后的串（trim 空则不带键）、payload 的键序与缺失变量的收集。`vars` 里 `enabled` 为 false 的条目不进变量池，故出现在模板里就是缺失变量。`expectedBody` 是 `PreparedRequest.body` 的**精确串**（组装失败时为 null），`expectedError` 是问题清单里的**一条**（按子串比较；组装成功时为 null）；这两个键由桌面端读取，`expectedPayload` / `expectedMissing` 保留原来的语义供 Rust 端读取。组装失败的样本 `expectedPayload` 为 null。",
   "cases": [
     {
       "name": "只有 query：不带 variables 与 operationName 键",
@@ -10,10 +10,12 @@
       "expectedPayload": {
         "query": "{ ping }"
       },
-      "expectedMissing": []
+      "expectedMissing": [],
+      "expectedBody": "{\"query\":\"{ ping }\"}",
+      "expectedError": null
     },
     {
-      "name": "variables 是对象：首尾空白不影响解析与键值",
+      "name": "variables 是对象：首尾空白不影响解析，键序规范化为 a、b",
       "graphql": {
         "query": "{ ping }",
         "variables": "  {\"b\":2,\"a\":1}  "
@@ -26,7 +28,9 @@
           "a": 1
         }
       },
-      "expectedMissing": []
+      "expectedMissing": [],
+      "expectedBody": "{\"query\":\"{ ping }\",\"variables\":{\"a\":1,\"b\":2}}",
+      "expectedError": null
     },
     {
       "name": "variables 纯空白：payload 不含 variables 键",
@@ -38,7 +42,9 @@
       "expectedPayload": {
         "query": "{ ping }"
       },
-      "expectedMissing": []
+      "expectedMissing": [],
+      "expectedBody": "{\"query\":\"{ ping }\"}",
+      "expectedError": null
     },
     {
       "name": "query 与 variables 同时含 {{id}}：两处都替换",
@@ -64,7 +70,9 @@
           "id": 42
         }
       },
-      "expectedMissing": []
+      "expectedMissing": [],
+      "expectedBody": "{\"query\":\"query { user(id: 42) { id } }\",\"variables\":{\"id\":42}}",
+      "expectedError": null
     },
     {
       "name": "{{id}} 没有启用中的定义：保留原文并报告缺失（停用的那条不算）",
@@ -81,7 +89,9 @@
       "expectedPayload": {
         "query": "{ user(id: {{id}}) { id } }"
       },
-      "expectedMissing": ["id"]
+      "expectedMissing": ["id"],
+      "expectedBody": "{\"query\":\"{ user(id: {{id}}) { id } }\"}",
+      "expectedError": null
     },
     {
       "name": "operationName 首尾空白：带上的是去掉空白后的名字",
@@ -94,7 +104,64 @@
         "query": "{ ping }",
         "operationName": "Ping"
       },
-      "expectedMissing": []
+      "expectedMissing": [],
+      "expectedBody": "{\"query\":\"{ ping }\",\"operationName\":\"Ping\"}",
+      "expectedError": null
+    },
+    {
+      "name": "variables 键序：多键对象按字节序规范化，输入顺序不影响产出",
+      "graphql": {
+        "query": "{ ping }",
+        "variables": "{\"b\":2,\"a\":1}"
+      },
+      "vars": [],
+      "expectedPayload": {
+        "query": "{ ping }",
+        "variables": {
+          "a": 1,
+          "b": 2
+        }
+      },
+      "expectedMissing": [],
+      "expectedBody": "{\"query\":\"{ ping }\",\"variables\":{\"a\":1,\"b\":2}}",
+      "expectedError": null
+    },
+    {
+      "name": "variables 不是对象：数组不是合法 variables，组装失败",
+      "graphql": {
+        "query": "{ ping }",
+        "variables": "[1,2]"
+      },
+      "vars": [],
+      "expectedPayload": null,
+      "expectedMissing": [],
+      "expectedBody": null,
+      "expectedError": "GraphQL variables 必须是 JSON 对象"
+    },
+    {
+      "name": "query 只有空白：组装失败，不发没有查询的请求",
+      "graphql": {
+        "query": "   "
+      },
+      "vars": [],
+      "expectedPayload": null,
+      "expectedMissing": [],
+      "expectedBody": null,
+      "expectedError": "GraphQL 查询为空"
+    },
+    {
+      "name": "operationName 只有空白：payload 不带 operationName 键",
+      "graphql": {
+        "query": "{ ping }",
+        "operationName": "   "
+      },
+      "vars": [],
+      "expectedPayload": {
+        "query": "{ ping }"
+      },
+      "expectedMissing": [],
+      "expectedBody": "{\"query\":\"{ ping }\"}",
+      "expectedError": null
     }
   ]
 }

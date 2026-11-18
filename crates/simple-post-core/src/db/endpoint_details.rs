@@ -227,8 +227,11 @@ pub fn update(
         });
     }
     if let Some(p) = &patch.protocol {
+        // `Some(None)` = 显式 `null`，协议回到默认值（不是「不动」）。协议总有一个值，
+        // 故这里写的是默认值而不是 SQL NULL。
+        let value = p.unwrap_or_default();
         sets.push(format!("protocol = ?{}", binds.len() + 1));
-        binds.push(rusqlite::types::Value::Text(p.as_str().to_string()));
+        binds.push(rusqlite::types::Value::Text(value.as_str().to_string()));
     }
     if let Some(g) = &patch.graphql {
         sets.push(format!("graphql_json = ?{}", binds.len() + 1));

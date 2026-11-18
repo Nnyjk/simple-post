@@ -24,6 +24,7 @@ use tokio_tungstenite::Connector;
 
 use crate::domain::TlsSettings;
 use crate::error::AppError;
+use crate::http_executor::{check_url, OutboundPolicy, UrlVerdict};
 
 /// 建连超时。与 `http_executor` 的总超时不是一回事：WS 建连之后要一直开着。
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -100,8 +101,16 @@ pub fn connect(
 ) {
     let (tx, rx) = mpsc::unbounded_channel();
     let own = tx.clone();
-    // 同 id 的旧会话先让位：渲染层重连时沿用同一个 id，旧任务会在下一个分支里收尾。
-    sessions_lock().insert(id.clone(), tx);
+    // 同 id 的旧会话先让位：渲染层重连时沿用同一个 id。旧任务自己握着 `own` 一份强引用，
+    // 光把注册表换成新的不会让它的 `recv()` 变成 `None`，故必须显式投一条 `Close`——旧任务
+    // 收到后发关闭帧、报一条 `Closed` 再收尾。它的 `finish` 有 `same_channel` 兜着，摘不掉
+    // 刚登记的这条。
+    if let Some(previous) = sessions_lock().insert(id.clone(), tx) {
+        let _ = previous.send(Command::Close(
+            Some(1000),
+            "会话已被同一 id 的新连接取代".into(),
+        ));
+    }
     tokio::spawn(run_session(
         SessionSpec {
             id,
@@ -124,7 +133,16 @@ pub fn send(
     base64: Option<&str>,
 ) -> Result<(), AppError> {
     let command = match kind {
-        "text" => Command::Text(data.unwrap_or_default().to_string()),
+        "text" => {
+            // 文本帧只能走 `data`：给了 `base64` 说明调用方把两种载荷混在一起了，静默发一个
+            // 空文本帧会让面板显示「发出去了」而服务端什么都没收到。
+            if base64.is_some_and(|s| !s.trim().is_empty()) {
+                return Err(AppError::Validation(
+                    "kind=text 时只给 data；base64 是二进制帧的字段".into(),
+                ));
+            }
+            Command::Text(data.unwrap_or_default().to_string())
+        }
         "binary" => {
             let raw = base64
                 .filter(|s| !s.trim().is_empty())
@@ -193,6 +211,20 @@ async fn run_session(
             state: "connecting".into(),
         },
     ) {
+        finish(&id, &own);
+        return;
+    }
+
+    // 与 SSE 走同一条出站策略：WS 也不能被当成打到内网（含 169.254.169.254 的云元数据）的
+    // 通道。必须赶在拨号之前；此时 `connecting` 已经报过，故这里只报错、不补 `closed`。
+    if let UrlVerdict::Refused(reason) = check_ws_url(&url, OutboundPolicy::from_env()) {
+        emit(
+            &mut sink,
+            WsEvent::Error {
+                kind: "protocol".into(),
+                message: reason,
+            },
+        );
         finish(&id, &own);
         return;
     }
@@ -369,9 +401,12 @@ async fn run_session(
                         }
                     }
                     Some(Ok(_)) => {}
+                    // 读侧断了：`Error` 已经让面板显示「连接失败」，再补一条 `Closed` 会被
+                    // `wsClosed` 覆盖成「未连接」，与建连失败的显示不一致。故就地收尾。
                     Some(Err(e)) => {
                         emit(&mut sink, WsEvent::Error { kind: "network".into(), message: e.to_string() });
-                        break;
+                        finish(&id, &own);
+                        return;
                     }
                     None => break,
                 }
@@ -379,6 +414,8 @@ async fn run_session(
         }
     }
 
+    // 走到这里只有正常收尾：对端发了 `Close`（已经备好事件）、eof，或写端坏了。读侧错误在
+    // 上面就地 return 了，不会再被这条兜底盖掉。
     emit(
         &mut sink,
         close_event.unwrap_or(WsEvent::Closed {
@@ -396,6 +433,31 @@ fn finish(id: &str, own: &mpsc::UnboundedSender<Command>) {
     // 只有仍是自己那条时才移除：重连沿用同一个 id，旧任务的收尾不能把新会话删掉。
     if map.get(id).is_some_and(|current| current.same_channel(own)) {
         map.remove(id);
+    }
+}
+
+/// 与 SSE / 普通发送同一条出站判定，只是 WS 的 scheme 不同。
+///
+/// [`check_url`] 的入口是 HTTP，只认 `http`/`https`；换成等价的那一对再过它，两条路对
+/// 「能连到哪」就不会各说各话。拒绝理由里再换回调用方给的 URL，面板显示的是他真正填的那条。
+fn check_ws_url(url: &str, policy: OutboundPolicy) -> UrlVerdict {
+    let probe = http_probe(url);
+    match check_url(&probe, policy) {
+        UrlVerdict::Refused(reason) => UrlVerdict::Refused(reason.replace(&probe, url)),
+        UrlVerdict::Allowed => UrlVerdict::Allowed,
+    }
+}
+
+/// 把 `ws`/`wss` 换成 `http`/`https`，其余原样。scheme 大小写不敏感（RFC 3986 3.1），故按
+/// 小写形态认前缀，切片仍用原串——前缀是 ASCII，长度不受大小写影响。
+fn http_probe(url: &str) -> String {
+    let lower = url.to_ascii_lowercase();
+    if lower.starts_with("ws://") {
+        format!("http://{}", &url["ws://".len()..])
+    } else if lower.starts_with("wss://") {
+        format!("https://{}", &url["wss://".len()..])
+    } else {
+        url.to_string()
     }
 }
 

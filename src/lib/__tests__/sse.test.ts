@@ -68,4 +68,11 @@ describe('SSE 解析', () => {
     assert.deepEqual(parser.push('data: tail'), []);
     assert.deepEqual(parser.flush(), [{ event: 'message', id: '', data: 'tail' }]);
   });
+
+  it('流以孤立 CR 结尾：CR 是被截断的 CRLF 前半，不当数据', () => {
+    const parser = createSseParser();
+    // `push` 留着末尾的 CR 等下一段；流到这里就断了，下一半永远不会来。
+    assert.deepEqual(parser.push('data: tail\r'), []);
+    assert.deepEqual(parser.flush(), [{ event: 'message', id: '', data: 'tail' }]);
+  });
 });

@@ -159,6 +159,13 @@ pub struct IrEndpoint {
     pub headers: Vec<KeyValue>,
     #[serde(default)]
     pub body: RequestBody,
+    /// GraphQL 投影拼好的、真正会发出去的正文。
+    ///
+    /// 只有 GraphQL 投影填它：`body.content` 是 OpenAPI 的 schema 叙述，而这份是线上
+    /// 载荷的实例值，导出时落在 media type 的 `example` 里。导入的 IR 没有这个概念，
+    /// 故该字段恒为 `None`；比对身份（`fingerprint`）也不看它。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body_example: Option<String>,
     #[serde(default)]
     pub auth: AuthConfig,
     /// 这个接口会回什么的文档定义。与 `body.schema` 对称，同样只为文档存在。

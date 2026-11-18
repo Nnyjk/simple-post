@@ -255,7 +255,7 @@ fn project_endpoint(
     // 故跳过并说一声。GraphQL 只是 HTTP 之上的组装规则，照常按 POST 导出。
     if !matches!(d.protocol, RequestProtocol::Http | RequestProtocol::GraphQl) {
         diagnostics.push(
-            Diagnostic::info(
+            Diagnostic::warn(
                 format!("/nodes/{}", node.id),
                 format!(
                     "接口「{}」的传输协议是 {}，导出格式里没有会话式请求，已跳过",
@@ -267,9 +267,9 @@ fn project_endpoint(
         );
         return None;
     }
-    let (method, headers, body) = match d.protocol {
+    let (method, headers, body, body_example) = match d.protocol {
         RequestProtocol::GraphQl => graphql_projection(d, node, diagnostics),
-        _ => (d.method.clone(), d.headers.clone(), d.body.clone()),
+        _ => (d.method.clone(), d.headers.clone(), d.body.clone(), None),
     };
     Some(IrEndpoint {
         key: node.id.clone(),
@@ -283,6 +283,7 @@ fn project_endpoint(
         path_params: d.path_params.clone(),
         headers,
         body,
+        body_example,
         auth: d.auth.clone(),
         responses: d.responses.clone(),
         docs: d.docs.clone(),
@@ -305,9 +306,16 @@ fn graphql_projection(
     d: &EndpointDetail,
     node: &ResourceNode,
     diagnostics: &mut Vec<Diagnostic>,
-) -> (HttpMethod, Vec<KeyValue>, RequestBody) {
+) -> (HttpMethod, Vec<KeyValue>, RequestBody, Option<String>) {
     let config = d.graphql.as_ref();
     let query = config.map(|c| c.query.as_str()).unwrap_or_default();
+    let empty_query = query.trim().is_empty();
+    if empty_query {
+        diagnostics.push(Diagnostic::warn(
+            format!("/nodes/{}/graphql/query", node.id),
+            "GraphQL 端点的 query 是空的：导出文档里这条请求没有可发送的查询",
+        ));
+    }
     // 手工拼正文：variables 要保留它写入时的键序与空白（`serde_json::Value` 会排序），
     // 而这里每一个值都已经校验过能解析，故拼出来仍是一份合法 JSON。
     let mut fields = vec![format!(
@@ -351,12 +359,26 @@ fn graphql_projection(
     }
 
     let content = format!("{{{}}}", fields.join(","));
+    // 这里不能再沿用 `d.body.schema`：那是切换协议前那份 http 载荷的定义，GraphQL
+    // 的正文跟它没有关系。留着它会让文档说「这个请求体是那个形状」，而实际发出去的
+    // 是 query / variables。
+    if d.body.schema.is_some() {
+        diagnostics.push(Diagnostic::info(
+            format!("/nodes/{}/body/schema", node.id),
+            "GraphQL 端点的 body.schema 是切换协议前那份 HTTP 载荷的定义，导出时没有带上",
+        ));
+    }
+    let body_example = if empty_query {
+        None
+    } else {
+        Some(content.clone())
+    };
     let body = RequestBody {
         mode: BodyMode::Json,
         content,
-        schema: d.body.schema.clone(),
+        schema: None,
     };
-    (HttpMethod::Post, headers, body)
+    (HttpMethod::Post, headers, body, body_example)
 }
 
 /// 这个模块在选定环境下的那一格。**不回退**：格子缺项即「该模块没有地址」。

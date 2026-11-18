@@ -25,8 +25,8 @@ pub const BODY_MODE_VALUES: &[&str] =
 /// 线上接受的 `auth_type` 取值，对应 [`AuthType`] 的小写变体名。
 pub const AUTH_TYPE_VALUES: &[&str] = &["none", "bearer", "basic", "apikey", "oauth2"];
 
-/// 线上接受的 `protocol` 取值，与 [`RequestProtocol`] 的变体一一对应。
-pub const PROTOCOL_VALUES: &[&str] = &["http", "graphql", "sse", "websocket"];
+/// 线上接受的 `protocol` 取值，直接取自 [`RequestProtocol::VALUES`]。
+pub const PROTOCOL_VALUES: &[&str] = &RequestProtocol::VALUES;
 
 /// 解析 `protocol`。缺省是 `http`；未知取值报错并列出全部合法取值。
 pub fn parse_protocol(raw: Option<&str>) -> Result<RequestProtocol, AppError> {
@@ -45,7 +45,7 @@ pub fn parse_protocol(raw: Option<&str>) -> Result<RequestProtocol, AppError> {
 /// agent 手写的 GraphQL 请求定义。字段与 [`GraphQlRequest`] 同名，`query` 必填由
 /// [`coerce_graphql`] 判定而不是这里 —— 缺省的空串与「没写」在这里长得一样。
 #[derive(Debug, Clone, Default, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct GraphQlRequestInput {
     #[serde(default)]
     pub query: String,

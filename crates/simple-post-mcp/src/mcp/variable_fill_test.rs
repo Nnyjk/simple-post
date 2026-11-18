@@ -3,6 +3,7 @@ use simple_post_core::domain::{
     ApiKeyAuth, ApiKeyLocation, AuthConfig, AuthType, BasicAuth, BodyMode, GraphQlRequest,
     HttpMethod, KeyValue, RequestBody, RequestProtocol,
 };
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
@@ -81,14 +82,14 @@ fn validate_endpoint_passes_for_well_formed_endpoint() {
         BodyMode::None,
         "",
     );
-    let issues = validate(&endpoint, &endpoint.url);
+    let issues = validate(&endpoint, &endpoint.url, &HashMap::new());
     assert!(issues.is_empty(), "expected no issues, got {issues:?}");
 }
 
 #[test]
 fn validate_endpoint_flags_empty_url() {
     let endpoint = ep("", AuthConfig::default(), BodyMode::None, "");
-    assert!(!validate(&endpoint, &endpoint.url).is_empty());
+    assert!(!validate(&endpoint, &endpoint.url, &HashMap::new()).is_empty());
 }
 
 #[test]
@@ -99,7 +100,7 @@ fn validate_endpoint_flags_missing_bearer() {
         ..Default::default()
     };
     let endpoint = ep("/x", auth, BodyMode::None, "");
-    let issues = validate(&endpoint, &endpoint.url);
+    let issues = validate(&endpoint, &endpoint.url, &HashMap::new());
     assert!(issues.iter().any(|i| i["field"] == "auth.bearer"));
 }
 
@@ -114,7 +115,7 @@ fn validate_endpoint_flags_missing_basic() {
         ..Default::default()
     };
     let endpoint = ep("/x", auth, BodyMode::None, "");
-    let issues = validate(&endpoint, &endpoint.url);
+    let issues = validate(&endpoint, &endpoint.url, &HashMap::new());
     assert!(issues.iter().any(|i| i["field"] == "auth.basic.username"));
     assert!(issues.iter().any(|i| i["field"] == "auth.basic.password"));
 }
@@ -131,7 +132,7 @@ fn validate_endpoint_flags_missing_apikey() {
         ..Default::default()
     };
     let endpoint = ep("/x", auth, BodyMode::None, "");
-    let issues = validate(&endpoint, &endpoint.url);
+    let issues = validate(&endpoint, &endpoint.url, &HashMap::new());
     assert!(issues.iter().any(|i| i["field"] == "auth.apikey.key"));
     assert!(issues.iter().any(|i| i["field"] == "auth.apikey.value"));
 }
@@ -139,7 +140,7 @@ fn validate_endpoint_flags_missing_apikey() {
 #[test]
 fn validate_endpoint_flags_empty_body_when_required() {
     let endpoint = ep("/x", AuthConfig::default(), BodyMode::Json, "");
-    let issues = validate(&endpoint, &endpoint.url);
+    let issues = validate(&endpoint, &endpoint.url, &HashMap::new());
     assert!(issues.iter().any(|i| i["field"] == "body.content"));
 }
 
@@ -155,7 +156,7 @@ fn validate_endpoint_flags_a_schema_written_into_the_payload_slot() {
         BodyMode::Json,
         "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"}}}",
     );
-    let issues = validate(&endpoint, &endpoint.url);
+    let issues = validate(&endpoint, &endpoint.url, &HashMap::new());
     assert!(
         issues.iter().any(|i| i["field"] == "body.content"
             && i["message"].as_str().unwrap().contains("JSON Schema")),
@@ -164,7 +165,7 @@ fn validate_endpoint_flags_a_schema_written_into_the_payload_slot() {
 
     // 填了 schema 就不算写反 —— 那时这份内容是有意选定的。
     endpoint.body.schema = Some("{\"type\":\"object\"}".into());
-    let issues = validate(&endpoint, &endpoint.url);
+    let issues = validate(&endpoint, &endpoint.url, &HashMap::new());
     assert!(
         !issues
             .iter()
@@ -178,7 +179,7 @@ fn validate_endpoint_flags_a_schema_written_into_the_payload_slot() {
 #[test]
 fn validate_endpoint_flags_a_path_parameter_without_a_value() {
     let mut endpoint = ep("/users/{id}", AuthConfig::default(), BodyMode::None, "");
-    let issues = validate(&endpoint, &endpoint.url);
+    let issues = validate(&endpoint, &endpoint.url, &HashMap::new());
     assert!(
         issues.iter().any(|i| i["field"] == "pathParams.id"),
         "the missing path parameter must be reported: {issues:?}"
@@ -192,7 +193,7 @@ fn validate_endpoint_flags_a_path_parameter_without_a_value() {
         enabled: true,
         description: None,
     }];
-    let issues = validate(&endpoint, &endpoint.url);
+    let issues = validate(&endpoint, &endpoint.url, &HashMap::new());
     assert!(
         !issues.iter().any(|i| i["field"] == "pathParams.id"),
         "a filled path parameter is not a defect: {issues:?}"
@@ -207,7 +208,11 @@ fn validate_endpoint_flags_a_path_parameter_without_a_value() {
 #[test]
 fn validate_endpoint_flags_a_path_parameter_that_lives_in_the_base_url() {
     let endpoint = ep("/users", AuthConfig::default(), BodyMode::None, "");
-    let issues = validate(&endpoint, "https://api.example.com/{version}/users");
+    let issues = validate(
+        &endpoint,
+        "https://api.example.com/{version}/users",
+        &HashMap::new(),
+    );
     assert!(
         issues.iter().any(|i| i["field"] == "pathParams.version"),
         "the path parameter in the base url must be reported: {issues:?}"
@@ -219,7 +224,7 @@ fn validate_endpoint_flags_a_path_parameter_that_lives_in_the_base_url() {
 fn validate_reports_protocol_specific_problems() {
     let mut endpoint = ep("/graphql", AuthConfig::default(), BodyMode::None, "");
     endpoint.protocol = RequestProtocol::Sse;
-    let issues = validate(&endpoint, "https://h.test/graphql");
+    let issues = validate(&endpoint, "https://h.test/graphql", &HashMap::new());
     assert!(
         issues.iter().any(|i| i["field"] == "protocol"),
         "an SSE endpoint cannot be sent by MCP: {issues:?}"
@@ -231,7 +236,7 @@ fn validate_reports_protocol_specific_problems() {
         variables: "[]".into(),
         operation_name: None,
     });
-    let issues = validate(&endpoint, "https://h.test/graphql");
+    let issues = validate(&endpoint, "https://h.test/graphql", &HashMap::new());
     assert!(
         issues.iter().any(|i| i["field"] == "graphql.query"),
         "a blank query is a defect: {issues:?}"
@@ -246,11 +251,31 @@ fn validate_reports_protocol_specific_problems() {
         variables: "{\"b\":1,\"a\":2}".into(),
         operation_name: None,
     });
-    let issues = validate(&endpoint, "https://h.test/graphql");
+    let issues = validate(&endpoint, "https://h.test/graphql", &HashMap::new());
     assert!(
         !issues.iter().any(|i| i["field"] == "protocol"
             || i["field"] == "graphql.query"
             || i["field"] == "graphql.variables"),
         "a complete GraphQL config has no protocol defects: {issues:?}"
+    );
+
+    // 校验与发送同源：variables 里的 `{{var}}` 先替换再解析。有定义时
+    // `{"id": {{id}}}` 是合法 JSON，不该被误判；没有定义时仍是解析失败。
+    endpoint.graphql = Some(GraphQlRequest {
+        query: "{ ping }".into(),
+        variables: "{\"id\": {{id}}}".into(),
+        operation_name: None,
+    });
+    let vars = HashMap::from([("id".to_string(), "42".to_string())]);
+    let issues = validate(&endpoint, "https://h.test/graphql", &vars);
+    assert!(
+        !issues.iter().any(|i| i["field"] == "graphql.variables"),
+        "替换后的 variables 是合法对象：{issues:?}"
+    );
+
+    let issues = validate(&endpoint, "https://h.test/graphql", &HashMap::new());
+    assert!(
+        issues.iter().any(|i| i["field"] == "graphql.variables"),
+        "没有可替换的值时仍要报解析失败：{issues:?}"
     );
 }

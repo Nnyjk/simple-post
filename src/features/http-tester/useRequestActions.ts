@@ -4,7 +4,7 @@
  */
 import { useCallback, type RefObject } from 'react';
 import { sendPreparedRequest } from '@/lib/http';
-import { preparedToCurl, type PreparedRequest } from '@/lib/http-build';
+import { preparedToCurl, type PreparedRequest, type RequestProblem } from '@/lib/http-build';
 import { draftToPatch } from '@/stores/slices/crud-helpers';
 import { useAppStore } from '@/stores/app-store';
 import type { EndpointDraft, RequestSettings } from '@/stores/store-types';
@@ -53,6 +53,7 @@ export function useRequestActions({
   tlsOverride,
   runValidation,
   onPathParamGate,
+  onRequestProblems,
   setRequestPending,
   setLastResponse,
   setLastScriptOutcome,
@@ -98,6 +99,12 @@ export function useRequestActions({
    * 收到空名单 = 闸门开了。界面据此显示提示并切到路径参数那一页。
    */
   onPathParamGate: (missing: string[]) => void;
+  /**
+   * 组装期问题（`PreparedRequest.problems`）的出口。校验期看不到它们：占位符在校验时一律
+   * 放行，`{"id": {{id}}}` + `id=abc` 这种替换后才坏掉的情况只有组装结果知道。收到一条就
+   * 说明这一发已经停了，界面据此把话显示到既有错误面并切到出问题的页签。
+   */
+  onRequestProblems: (problem: RequestProblem) => void;
   /**
    * 标记某个标签上有没有在途请求。传标签 id 而不传接口 id：在途标记与响应是同一份
    * 状态（挂在标签上），两处混用会让「发出去的那次」与「标记在途的那次」不是同一个
@@ -163,6 +170,15 @@ export function useRequestActions({
         const { values } = await resolveDynamicVariables(dynamicNames, activeProjectId);
         request = prepareWithDynamic(values);
       }
+      // 组装期问题：替换**之后**的真实文本坏了（`variables: {"id": {{id}}}` + `id=abc`），
+      // 校验期看到的是放行占位符的模板，挡不住。这一步在动态变量重组装之后——重组装会重算
+      // `problems`，之前那份不算数。`body` 为 null 时 `fetch` 不设 `init.body`，不拦就会发出
+      // 一个没有 body 的 POST。
+      const problem = request.problems[0];
+      if (problem) {
+        onRequestProblems(problem);
+        return;
+      }
       // 路径参数缺值时这里不发出去。这一步在动态变量解析**之后**：路径参数的值可能就是一个
       // 动态变量，它取不到值时这个路径参数同样算「还没准备好」。判断与 SSE / WS 建连共用
       // `pathParamsReady`。
@@ -221,6 +237,7 @@ export function useRequestActions({
     runValidation,
     inFlightRef,
     onPathParamGate,
+    onRequestProblems,
     prepared,
     prepareWithDynamic,
     protocol,

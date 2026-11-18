@@ -254,7 +254,7 @@ fn apply_endpoint_patch(
         tls: None,
         // 规格没点名协议/GraphQL 配置时不动它们：`reuse` 与 `update` 的差别只在
         // 「点了名的字段」，不是「把没写的字段重置成默认值」。
-        protocol: def.protocol.as_ref().map(|_| protocol),
+        protocol: def.protocol.as_ref().map(|_| Some(protocol)),
         graphql: def.graphql.as_ref().map(|_| graphql),
         ..Default::default()
     };

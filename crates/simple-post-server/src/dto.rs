@@ -70,6 +70,33 @@ pub struct CreateEndpointDetailOpts {
     pub tls: Option<TlsSettings>,
     /// 这个接口会回什么。缺席 = 没写定义。只是文档，不上线。
     pub responses: Option<Vec<ResponseDefinition>>,
+    /// 传输协议。缺席 = `http`；未知取值在反序列化时报错，不被静默忽略。
+    #[serde(default, deserialize_with = "deserialize_protocol")]
+    pub protocol: Option<RequestProtocol>,
+    /// GraphQL 请求定义。只有 `protocol = graphql` 时才上线；空 query 在这里就被拒绝。
+    #[serde(default, deserialize_with = "deserialize_graphql")]
+    pub graphql: Option<GraphQlRequest>,
+}
+
+/// `protocol` 走 core 的解析器：REST 与 MCP 对同一个字符串给出同一个结论。
+fn deserialize_protocol<'de, D>(deserializer: D) -> Result<Option<RequestProtocol>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw = Option::<String>::deserialize(deserializer)?;
+    simple_post_core::spec::input::parse_protocol(raw.as_deref())
+        .map(Some)
+        .map_err(serde::de::Error::custom)
+}
+
+/// GraphQL 配置走 core 的 `coerce_graphql`：空 query 被拒绝，而不是建出一个发不出去的端点。
+fn deserialize_graphql<'de, D>(deserializer: D) -> Result<Option<GraphQlRequest>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let input =
+        Option::<simple_post_core::spec::input::GraphQlRequestInput>::deserialize(deserializer)?;
+    simple_post_core::spec::input::coerce_graphql(input).map_err(serde::de::Error::custom)
 }
 
 impl CreateEndpointDetailOpts {
@@ -98,10 +125,10 @@ impl CreateEndpointDetailOpts {
             pre_request_script: self.pre_request_script,
             test_script: self.test_script,
             tls: self.tls,
-            // `CreateEndpointOpts` 是桌面 `nodes_create` 的入参：协议默认 HTTP，
-            // GraphQL 配置走端点详情补丁，不在这里。
-            protocol: Default::default(),
-            graphql: None,
+            // 协议与 GraphQL 配置走同一个入口：`POST /api/nodes` 带上它们时不能再被
+            // 静默丢掉（此前这里写死默认值，REST 建出来的端点永远是 http）。
+            protocol: self.protocol.unwrap_or_default(),
+            graphql: self.graphql,
         }
     }
 }

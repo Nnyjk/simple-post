@@ -24,6 +24,7 @@ const REQUEST: PreparedRequest = {
   missingVars: [],
   vars: { tenant: 'acme' },
   missingPathParams: [],
+  problems: [],
 };
 
 const OAUTH2: AuthConfig = {

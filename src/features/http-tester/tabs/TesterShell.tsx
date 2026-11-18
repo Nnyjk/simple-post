@@ -139,11 +139,16 @@ export function TesterShell({
   envName: string | undefined;
   /** 变量池：取 OAuth2 token 时送给后端，让它替换配置里那四个字段的 `{{var}}`。 */
   vars: Record<string, string>;
-  /** WebSocket 面板：协议是 websocket 时它替换 URL 栏与页签 / 响应区。 */
+  /**
+   * WebSocket 面板：协议是 websocket 时它替换「响应页」的内容（地址、连接与帧都在那里），
+   * URL 栏因此隐藏；其它页签照旧是 `RequestTabPanels`，鉴权 / TLS / 路径参数仍可编辑。
+   */
   wsSurface?: ReactNode;
   /** SSE 面板：协议是 sse 时它替换「响应页」的内容，URL 栏与其它页签仍是 HTTP 那一套。 */
   responseSurface?: ReactNode;
 }) {
+  // 响应页上要显示的那块面板：WS 优先（协议互斥，两者不会同时给）。
+  const responsePanel = tab === 'response' ? (wsSurface ?? responseSurface) : null;
   return (
     <section className="flex h-full min-w-0 flex-1 flex-col">
       {/* 面包屑 —— 与设置面板的 `设置 › 连接` 同一写法，在一屏内回答「我在树的哪里」。
@@ -165,7 +170,8 @@ export function TesterShell({
       />
 
       {/* URL 栏：方法、地址来源选择器、地址输入框与发送 / 保存 / 复制 cURL。
-          WebSocket 面板自带地址与 Headers 行，故这一栏不出现。 */}
+          WebSocket 面板自带地址输入与连接按钮（在响应页），故这一栏不出现，免得同一条
+          地址有两个输入框；切到其它页签时也仍由面板那一份负责，地址不会丢。 */}
       {!wsSurface && (
         <RequestUrlBar
           protocol={protocol}
@@ -228,63 +234,59 @@ export function TesterShell({
         </div>
       )}
 
-      {/* WebSocket 把整页交给它自己的面板：帧不属于「请求 / 响应」任何一个页签。 */}
-      {wsSurface}
-
       {/* 页签条 —— 与下方面板相连：本行独占那条分隔线（条内不再有），激活标签以面板底色
           填充自己，盖住分隔线并与之圆角相接。`bg-card/30` 与上方 URL 栏一致，
-          `pt-1.5` 不配 `pb`，使条的下沿与分隔线齐平。 */}
-      {!wsSurface && (
-        <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card/30 px-4 pt-1.5">
-          <Tabs
-            variant="connected"
-            joinStripClass="bg-card/30"
-            items={tabItems}
-            value={tab}
-            onChange={(id) => onTabChange(id as TesterTabId)}
+          `pt-1.5` 不配 `pb`，使条的下沿与分隔线齐平。WS 协议下也保留这条：帧挂在「响应」
+          页，Auth / TLS / 路径参数仍是同一份请求定义，必须点得到。 */}
+      <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card/30 px-4 pt-1.5">
+        <Tabs
+          variant="connected"
+          joinStripClass="bg-card/30"
+          items={tabItems}
+          value={tab}
+          onChange={(id) => onTabChange(id as TesterTabId)}
+        />
+        <div className="ml-auto text-nano text-muted-foreground">
+          <span className="kbd">Ctrl</span> + <span className="kbd">Enter</span> 发送
+        </div>
+      </div>
+
+      {/* 页签内容区。WS / SSE 只替换「响应页」的内容 —— 事件流与帧不是响应定义编辑器该
+          显示的东西，而 Params / Headers / Body / Auth / TLS / 路径参数这些页仍要能编辑，
+          因为两种协议都复用 HTTP 的请求定义。切回 HTTP 时这个位置回到 `RequestTabPanels`
+          的响应页，定义数据没动。 */}
+      {responsePanel !== null ? (
+        <div className="min-h-0 flex-1">{responsePanel}</div>
+      ) : (
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <RequestTabPanels
+            tab={tab}
+            graphql={graphql}
+            graphqlTools={graphqlTools}
+            params={effective.params}
+            pathParams={effective.pathParams}
+            url={pathParamUrl}
+            headers={effective.headers}
+            body={effective.body}
+            auth={effective.auth}
+            docs={effective.docs}
+            responses={effective.responses}
+            preRequestScript={effective.preRequestScript}
+            testScript={effective.testScript}
+            // 端点自己那份 HTTPS 出站设置（`null` = 继承全局）与全局默认那份。
+            tls={effective.tls}
+            globalTls={globalTls}
+            headerSuggestions={headerSuggestions}
+            validationError={validationError}
+            pathParamError={pathParamError}
+            varEntries={varEntries}
+            envName={envName}
+            vars={vars}
+            patchDraft={patchDraft}
+            onFormatResult={onFormatResult}
           />
-          <div className="ml-auto text-nano text-muted-foreground">
-            <span className="kbd">Ctrl</span> + <span className="kbd">Enter</span> 发送
-          </div>
         </div>
       )}
-
-      {/* 页签内容区。SSE 只替换「响应页」的内容 —— 事件流不是响应定义编辑器该显示的东西，
-          而 Params / Headers / Body / Auth / TLS / 路径参数这些页仍要能编辑，因为 SSE 复用
-          HTTP 的请求流程。切回 HTTP 时这个位置回到 `RequestTabPanels` 的响应页，定义数据没动。 */}
-      {!wsSurface &&
-        (tab === 'response' && responseSurface ? (
-          <div className="min-h-0 flex-1">{responseSurface}</div>
-        ) : (
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            <RequestTabPanels
-              tab={tab}
-              graphql={graphql}
-              graphqlTools={graphqlTools}
-              params={effective.params}
-              pathParams={effective.pathParams}
-              url={pathParamUrl}
-              headers={effective.headers}
-              body={effective.body}
-              auth={effective.auth}
-              docs={effective.docs}
-              responses={effective.responses}
-              preRequestScript={effective.preRequestScript}
-              testScript={effective.testScript}
-              // 端点自己那份 HTTPS 出站设置（`null` = 继承全局）与全局默认那份。
-              tls={effective.tls}
-              globalTls={globalTls}
-              headerSuggestions={headerSuggestions}
-              validationError={validationError}
-              pathParamError={pathParamError}
-              varEntries={varEntries}
-              envName={envName}
-              vars={vars}
-              patchDraft={patchDraft}
-              onFormatResult={onFormatResult}
-            />
-          </div>
-        ))}
     </section>
   );
 }

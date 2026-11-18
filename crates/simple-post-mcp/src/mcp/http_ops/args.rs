@@ -50,10 +50,13 @@ pub(super) struct RunRequestArgs {
     pub(super) follow_redirects: Option<bool>,
     #[serde(default)]
     pub(super) max_response_size_kb: Option<u64>,
-    /// 传输协议。SSE / WebSocket 是会话式传输，这个工具发不出去；GraphQL 照原样发，
-    /// body 由调用方自己写成 GraphQL 载荷。
+    /// 传输协议，默认 `http`。SSE / WebSocket 是会话式传输，这个工具发不出去；
+    /// `graphql` 会把请求组装成 POST 的 GraphQL 载荷，配置写在 `graphql` 里。
     #[serde(default)]
     pub(super) protocol: Option<String>,
+    /// GraphQL 请求定义；只在 `protocol` 为 `graphql` 时使用。
+    #[serde(default)]
+    pub(super) graphql: Option<simple_post_core::spec::input::GraphQlRequestInput>,
 }
 
 /// `api_call_endpoint` 的入参。

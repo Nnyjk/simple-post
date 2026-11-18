@@ -16,6 +16,7 @@ export {
   type PrepareRequestInput,
   type PreparedRequest,
 } from './http-build/types';
+export type { RequestProblem } from './request-validation';
 export { prepareRequest } from './http-build/prepare';
 export { buildFetchInit } from './http-build/fetch';
 export { buildCurlCommand, preparedToCurl } from './http-build/curl';

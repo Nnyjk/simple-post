@@ -34,6 +34,12 @@ struct Case {
     expected_payload: Value,
     #[serde(rename = "expectedMissing")]
     expected_missing: Vec<String>,
+    /// 组装成功时 `PreparedRequest.body` 的**精确串**；失败为 `null`。
+    #[serde(rename = "expectedBody")]
+    expected_body: Option<String>,
+    /// 失败时问题清单里的一条；成功为 `null`。按子串比较。
+    #[serde(rename = "expectedError")]
+    expected_error: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -52,8 +58,13 @@ struct GraphQlFixture {
 struct Var {
     name: String,
     value: String,
-    #[serde(default)]
+    /// TS 侧只有显式 `false` 才停用；缺省必须是启用，否则同一份样本在两侧含义不同。
+    #[serde(default = "default_enabled")]
     enabled: bool,
+}
+
+fn default_enabled() -> bool {
+    true
 }
 
 #[test]
@@ -66,7 +77,7 @@ fn every_graphql_case_builds_the_same_payload_in_rust() {
     );
     assert_eq!(
         fixture.cases.len(),
-        6,
+        10,
         "用例条数变了：键名漂移会让这条测试静默空转"
     );
 
@@ -82,22 +93,58 @@ fn every_graphql_case_builds_the_same_payload_in_rust() {
         };
         let mut missing = Vec::new();
         let mut seen = HashMap::new();
-        let payload = match graphql_payload(Some(&config), &vars, &mut missing, &mut seen) {
-            Ok(payload) => payload,
-            Err(err) => panic!("用例「{}」组装失败：{err}", case.name),
-        };
-        let actual: Value = serde_json::from_str(&payload).unwrap_or_else(|e| {
-            panic!("用例「{}」的 payload 不是 JSON：{e}\n{payload}", case.name)
-        });
-        assert_eq!(
-            actual, case.expected_payload,
-            "用例「{}」的 payload 与样本不一致",
-            case.name
-        );
+        match graphql_payload(Some(&config), &vars, &mut missing, &mut seen) {
+            Ok(payload) => {
+                assert!(
+                    case.expected_error.is_none(),
+                    "用例「{}」应当失败（{}），实际却组装成功：{payload}",
+                    case.name,
+                    case.expected_error.as_deref().unwrap_or_default()
+                );
+                assert_eq!(
+                    Some(&payload),
+                    case.expected_body.as_ref(),
+                    "用例「{}」的正文必须逐字节相同（键序也算）",
+                    case.name
+                );
+                let actual: Value = serde_json::from_str(&payload).unwrap_or_else(|e| {
+                    panic!("用例「{}」的 payload 不是 JSON：{e}\n{payload}", case.name)
+                });
+                assert_eq!(
+                    actual, case.expected_payload,
+                    "用例「{}」的 payload 与样本不一致",
+                    case.name
+                );
+            }
+            Err(err) => {
+                let message = format!("{err}");
+                let expected = case.expected_error.as_deref().unwrap_or_else(|| {
+                    panic!("用例「{}」应当成功，实际失败：{message}", case.name)
+                });
+                assert!(
+                    message.contains(expected),
+                    "用例「{}」的错误与样本不一致：{message}",
+                    case.name
+                );
+                assert!(
+                    case.expected_body.is_none(),
+                    "用例「{}」失败时不该有期望正文",
+                    case.name
+                );
+                assert!(
+                    case.expected_payload.is_null(),
+                    "用例「{}」失败时 expectedPayload 必须是 null",
+                    case.name
+                );
+            }
+        }
 
+        // 两侧都排：只排 actual 会让「样本自己没排」永远抓不到。
+        let mut expected_missing = case.expected_missing.clone();
+        expected_missing.sort();
         missing.sort();
         assert_eq!(
-            missing, case.expected_missing,
+            missing, expected_missing,
             "用例「{}」的缺失变量与样本不一致",
             case.name
         );

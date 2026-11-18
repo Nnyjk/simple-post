@@ -32,8 +32,13 @@ interface GraphqlParityCase {
   name: string;
   graphql: SampleGraphql;
   vars: SampleVar[];
-  expectedPayload: Record<string, unknown>;
+  /** Rust 侧读取：组装成功时是 payload 的语义（键序不参与比较）。 */
+  expectedPayload: Record<string, unknown> | null;
   expectedMissing: string[];
+  /** 桌面端读取：`PreparedRequest.body` 的精确串；组装失败时为 null。 */
+  expectedBody: string | null;
+  /** 桌面端读取：问题清单里的一条（子串比较）；组装成功时为 null。 */
+  expectedError: string | null;
 }
 
 interface GraphqlParityFixture {
@@ -41,7 +46,15 @@ interface GraphqlParityFixture {
 }
 
 /** 用例允许出现的键；多一个就说明样本换了形状而读取器没跟上。 */
-const CASE_KEYS = ['name', 'graphql', 'vars', 'expectedPayload', 'expectedMissing'];
+const CASE_KEYS = [
+  'name',
+  'graphql',
+  'vars',
+  'expectedPayload',
+  'expectedMissing',
+  'expectedBody',
+  'expectedError',
+];
 
 const FIXTURE: GraphqlParityFixture = JSON.parse(
   readFileSync(new URL('../../../fixtures/graphql-parity.json', import.meta.url), 'utf8'),
@@ -66,9 +79,9 @@ function envOf(vars: SampleVar[]): Environment {
 }
 
 describe('GraphQL 组装与 Rust 的 graphql_payload 产出一致', () => {
-  it('样本里恰好有 6 条用例', () => {
+  it('样本里恰好有 10 条用例', () => {
     // 条数写死：键名漂了或样本被改小时，这条必须变红，否则下面的循环一条都走不到。
-    assert.equal(FIXTURE.cases.length, 6, '用例条数变了：键名漂了或样本被改小了');
+    assert.equal(FIXTURE.cases.length, 10, '用例条数变了：键名漂了或样本被改小了');
   });
 
   for (const testCase of FIXTURE.cases) {
@@ -97,19 +110,39 @@ describe('GraphQL 组装与 Rust 的 graphql_payload 产出一致', () => {
         env: envOf(testCase.vars),
       });
 
-      assert.notEqual(prepared.body, null, `${testCase.name}：组装失败`);
-      assert.deepEqual(
-        JSON.parse(prepared.body ?? '') as Record<string, unknown>,
-        testCase.expectedPayload,
-        `${testCase.name}：payload 与样本不同`,
-      );
+      // body 按**精确串**比较：键序、空白、数字形态都是契约的一部分——语义比较会让
+      // `{"b":2,"a":1}` 这种乱序（或一串空格）照样通过，而那正是两侧最容易漂的地方。
+      assert.equal(prepared.body, testCase.expectedBody, `${testCase.name}：body 与样本不同`);
 
-      // 缺失变量比的是名字集合：两侧收集次序各自是本地的。
-      assert.deepEqual(
-        [...prepared.missingVars].sort(),
-        [...testCase.expectedMissing].sort(),
-        `${testCase.name}：缺失变量与样本不同`,
-      );
+      // 组装失败时必须留下能发出去的那条话；成功时不能有残留问题，否则发送入口会静默拦下。
+      if (testCase.expectedError === null) {
+        assert.deepEqual(prepared.problems, [], `${testCase.name}：不该有组装问题`);
+      } else {
+        assert.ok(
+          prepared.problems.some((it) => it.message.includes(testCase.expectedError ?? '')),
+          `${testCase.name}：problems 里没有「${testCase.expectedError}」（实际：${JSON.stringify(prepared.problems)}）`,
+        );
+      }
+
+      // 样本自洽：精确串解析回来必须等于 Rust 侧读的语义那一份。
+      if (testCase.expectedBody !== null) {
+        assert.deepEqual(
+          JSON.parse(testCase.expectedBody) as Record<string, unknown>,
+          testCase.expectedPayload,
+          `${testCase.name}：expectedBody 与 expectedPayload 不一致`,
+        );
+      }
+
+      // 缺失变量比的是名字集合：两侧收集次序各自是本地的。组装失败时不比：那时
+      // `missingVars` 里装的是问题本身（见 `prepare.ts` 的合并），而样本里的
+      // `expectedMissing` 仍是「替换没找到的定义」，两侧语义不同。
+      if (testCase.expectedError === null) {
+        assert.deepEqual(
+          [...prepared.missingVars].sort(),
+          [...testCase.expectedMissing].sort(),
+          `${testCase.name}：缺失变量与样本不同`,
+        );
+      }
     });
   }
 });

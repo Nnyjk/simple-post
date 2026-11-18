@@ -207,6 +207,7 @@ fn settings_override_extracts_values() {
         follow_redirects: None,
         max_response_size_kb: None,
         protocol: None,
+        graphql: None,
     };
     let (t, r, m) = extract_settings(&args.settings_override, &args);
     assert_eq!(t, Some(5000));

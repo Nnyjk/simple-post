@@ -147,14 +147,20 @@ export function GraphQlPanel({
                   key={`${index}-${entry.query}`}
                   type="button"
                   className="block w-full cursor-pointer border-b border-border/60 px-3 py-1.5 text-left font-mono text-xs last:border-b-0 hover:bg-overlay-hover"
-                  title={entry.query}
+                  title={`已解析：{{var}} 已替换为当时的明文，回填得到的是那次发出的请求\n\n${entry.query}`}
                   onClick={() => {
                     onPickHistory(entry);
                     setHistoryOpen(false);
                   }}
                   data-testid="graphql-history-item"
                 >
-                  {firstLine(entry.query)}
+                  <span className="flex items-center gap-2">
+                    <span className="min-w-0 flex-1 truncate">{firstLine(entry.query)}</span>
+                    {/* 历史来自已解析的请求快照：标明它，免得用户以为取回的是带 `{{var}}` 的模板。 */}
+                    <span className="shrink-0 rounded bg-warning/20 px-1 text-nano text-warning-foreground">
+                      已解析
+                    </span>
+                  </span>
                 </button>
               ))}
             </div>

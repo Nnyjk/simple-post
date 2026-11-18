@@ -229,6 +229,44 @@ async fn a_character_split_across_chunks_is_decoded_once() {
 }
 
 #[tokio::test]
+async fn a_cap_cutting_a_multibyte_character_drops_the_half_without_a_replacement_char() {
+    // 上限 1 KB，块是 1023 个 x 加一个「中」（E4 B8 AD）：切点正好落在「中」的第一个字节
+    // 之后。半截字节属于被截掉的那一半，直接丢——吐成 U+FFFD 等于凭空造了一个字符。
+    let mut body = vec![b'x'; 1023];
+    body.extend_from_slice("中".as_bytes());
+    let port = spawn_sse_server(vec![body], Duration::from_millis(10)).await;
+    let (events, sink) = collector();
+    run(input(port, 5_000, 1), sink).await;
+
+    let events = events.lock().unwrap();
+    let text: String = events
+        .iter()
+        .filter_map(|e| match e {
+            StreamEvent::Chunk { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(text, "x".repeat(1023));
+    assert!(
+        !text.contains('\u{FFFD}'),
+        "截断的残留应当直接丢，got {text:?}"
+    );
+    match events.last().unwrap() {
+        StreamEvent::End {
+            size_bytes,
+            truncated,
+            reason,
+            ..
+        } => {
+            assert_eq!(*size_bytes, 1024);
+            assert!(*truncated);
+            assert_eq!(reason, "eof");
+        }
+        other => panic!("最后一个事件应当是 end(truncated)，got {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn an_invalid_url_is_reported_as_a_network_error_without_dialing() {
     let mut req = input(1, 1_000, 0);
     req.url = "ftp://example.test/file".into();

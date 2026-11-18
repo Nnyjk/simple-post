@@ -24,9 +24,7 @@ use simple_post_core::error::AppError;
 
 use super::args::RunCollectionArgs;
 use super::dynamic::resolve_dynamic_values;
-use super::input::{
-    extract_endpoint_settings, format_method, parse_tls_settings, resolve_tls_override,
-};
+use super::input::{extract_endpoint_settings, parse_tls_settings, resolve_tls_override};
 use super::send::{execute_resolved, resolve_settings};
 
 /// 一条端点的失败分两个域，报告里的分类也按这两个域分。
@@ -312,7 +310,6 @@ async fn run_one(
 
     let executed = execute_resolved(
         state,
-        &format_method(&detail.method),
         resolved,
         env,
         // 端点 id：后端据此装配脚本链（祖先集合的两段 + 端点自己的两段）。

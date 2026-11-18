@@ -9,9 +9,11 @@
  *   而不是每敲一个字符就发现一次。
  * - **只管格式**：两条规则——`json` 模式的 body 必须能解析；`graphql` 协议下查询非空、
  *   variables 为空或是 JSON **对象**——**模板里的 `{{name}}` 占位符除外**，那不是「坏了」，
- *   只是还没替换（见下面的 `substitutesForValidation`）。空内容、参数/header 的 key 是否合理、
- *   URL 形状都刻意不在这里查：那些该由后端回答，擅自发明用户没要求的阻塞规则会让校验器与
- *   使用者对立。
+ *   只是还没替换（见下面的 `substitutesForValidation`）。GraphQL 的 variables 含占位符时
+ *   连形状都不判：它可能整段引用一行 variables 或落在值位置，替换后是否成立只有组装期知道，
+ *   那种问题由 `PreparedRequest.problems` 裁决，发送前同样拦下。空内容、参数/header 的 key
+ *   是否合理、URL 形状都刻意不在这里查：那些该由后端回答，擅自发明用户没要求的阻塞规则会让
+ *   校验器与使用者对立。
  */
 import type { GraphQlRequest, RequestBody, RequestProtocol } from '@/types/domain';
 import { graphqlProblems } from './graphql';
@@ -21,8 +23,11 @@ import { graphqlProblems } from './graphql';
  *
  * `tab` 让调用方能把问题*显示*出来，而不是默默什么都不做：用户坐在 Params 页时把错误
  * 钉在 body 编辑器里，正是整个特性要消除的那种不可见。
+ *
+ * 同一个形状也出现在 `PreparedRequest.problems` 上：那里装的是**组装期**才发现的问题
+ * （替换后的 GraphQL variables 坏了等）。校验与组装各有一双眼睛，发送前两处都必须为空。
  */
-interface ValidationIssue {
+export interface RequestProblem {
   /** 占有问题内容的那个 HTTP 页签。 */
   tab: 'body' | 'graphql';
   /** 一行，已经按展示措辞写好（不带字段名前缀）。 */
@@ -65,7 +70,7 @@ function substitutesForValidation(content: string): string[] {
  * 调用方把 `null` 当作「清掉钉住的错误」，所以一次通过与一次失败同样有意义——
  * 它才是让徽标消失的那一次。
  */
-export function validateRequest(input: RequestValidationInput): ValidationIssue | null {
+export function validateRequest(input: RequestValidationInput): RequestProblem | null {
   // GraphQL 的 body 由查询与 variables 组装，端点自己的 body 设置不参与，故两者的校验互斥。
   if (input.protocol === 'graphql') {
     const problem = graphqlProblems(input.graphql)[0];

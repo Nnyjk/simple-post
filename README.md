@@ -66,9 +66,9 @@ Simple Post 是一个 Windows 10/11 上的桌面 API 调试工具。接口树、
 一个接口的协议写在端点属性里（`http` / `graphql` / `sse` / `websocket`）。四种协议共用同一条请求装配路径：
 
 - **共用**：URL、查询参数、请求头、鉴权、`{{变量}}` 替换与连接选项（超时、跟随重定向、最大响应体积、HTTPS 出站）都是同一套规则。GraphQL 与 SSE 走 HTTP 发送链路；SSE 与普通 HTTP 共用响应历史与请求快照。
-- **GraphQL**：固定用 `POST`，请求体由 query、variables 与 operationName 组装，query 与 variables 都做 `{{变量}}` 替换。编辑器支持从服务端点拉 introspection 后按上下文补全（字段、参数、`... on`、变量类型）；查询历史来自本接口的响应历史，不额外存储。服务端关掉 introspection 时补全不可用，请求本身不受影响。
+- **GraphQL**：固定用 `POST`，请求体由 query、variables 与 operationName 组装，query 与 variables 都做 `{{变量}}` 替换。编辑器支持从服务端点拉 introspection 后按上下文补全（字段、参数、`... on`、变量类型）；查询历史来自本接口的响应历史，不额外存储。服务端关掉 introspection 时补全不可用，请求本身不受影响。导出 OpenAPI 时，这条端点的 requestBody media 带 `example`——按这条端点的 query、variables 与 operationName 组装的正文，`{{变量}}` 原样保留（导出的是模板本身，不是某一次替换后的结果）；HTTP 端点不带 `example`。
 - **SSE**：响应按 `text/event-stream` 逐事件展示，只替换「响应」页的内容，参数、请求头、鉴权页照常可用。「停止」会先请求服务端收尾（约定事件 `end`），拿到收尾事件后写历史。超时语义与 HTTP 一致，另外「块间空闲超时」也算超时。
-- **WebSocket**：独立连接面板，地址、请求头、子协议各自一格，状态从「连接中」到「已连接」再到「断开」，可配自动重连，收发帧按历史列出。它不发请求脚本；Bearer、Basic、API key 会换算进握手请求头，OAuth2 在握手前取 token。TLS 与 HTTP 是同一套设置，WSS 同样支持自定义 CA 与客户端证书。MCP 只能发 HTTP 与 GraphQL，SSE/WebSocket 端点会被拒绝。
+- **WebSocket**：独立连接面板，地址、请求头、子协议各自一格，状态从「连接中」到「已连接」再到「断开」，可配自动重连，收发帧按历史列出。它不发请求脚本；Bearer、Basic、API key 会换算进握手请求头，OAuth2 在握手前取 token。TLS 与 HTTP 是同一套设置，WSS 同样支持自定义 CA 与客户端证书。页签条与参数、请求头、正文、鉴权、TLS、路径参数页仍可编辑，只有「响应」页换成帧面板。MCP 只能发 HTTP 与 GraphQL，SSE/WebSocket 端点会被拒绝。
 
 ## MCP Server
 
@@ -207,7 +207,7 @@ curl http://localhost:4173/api/healthz
 | `SP_RUST_LOG` | `RUST_LOG` | `info` | tracing 的日志过滤级别。 |
 | `SP_UPDATE_COMMAND` | `SIMPLE_POST_UPDATE_COMMAND` | 空 | 更新对话框「立即执行更新」执行的那条命令。留空即不可就地更新；要与 `SP_WEB_PASSWORD`（口令模式）同时成立才生效。命令由容器内的 bash 执行，只能用 bash 与 coreutils 的能力。 |
 | `SP_PUBLIC_BASE_PATH` | `SIMPLE_POST_PUBLIC_BASE_PATH` | 空 | 反向代理前缀，必须以 `/` 开头。 |
-| 无 | `SIMPLE_POST_BLOCK_PRIVATE_NET` | `0` | 置为 `1` 后，`/api/http/send` 拒绝回环、私网与链路本地地址（含云厂商 metadata）。这一项没有对应的 `SP_*` 变量，要在 compose 的 `environment` 里直接写。 |
+| 无 | `SIMPLE_POST_BLOCK_PRIVATE_NET` | `0` | 置为 `1` 后，`/api/http/send`、`/api/http/stream` 与 `/api/ws/sessions` 都拒绝回环、私网与链路本地地址（含云厂商 metadata）；WebSocket 的 `ws://` / `wss://` 先映射成 `http://` / `https://` 再走同一个检查。这一项没有对应的 `SP_*` 变量，要在 compose 的 `environment` 里直接写。 |
 
 `SP_PUBLIC_BASE_PATH` 在两个 compose 文件里都是注释掉的状态，只写进 `.env` 不生效，还要自己把那两行打开。
 
@@ -322,7 +322,7 @@ sp.example.com {
 - **`SIMPLE_POST_WEB_PASSWORD` 必须设置。** 口令为空时鉴权中间件不生效，`/api/*` 与 `/mcp` 对所有能连到该端口的调用方开放。容器监听 `0.0.0.0`，因此这个口令是唯一的访问控制。
 - **不要把口令写成空串。** 服务端判断的是这个环境变量有没有被设置，不是值是不是空：未设置时不鉴权，写成 `""` 则变成鉴权开启且要求一个空的口令，结果是所有 `/api/*` 返回 401。
 - 健康检查 `/api/healthz`、`/mcp/healthz`、`/healthz` 始终免认证；`/assets/*` 与单页应用外壳同样免认证——浏览器无法给 `<script type="module">` 附加 `Authorization` 头，对它们鉴权会让带口令的部署无法打开页面。
-- **只有一条出站通道**：`POST /api/http/send`。请求体里的 URL 完全由调用方给出，服务端就是这条通道的代理。出站策略由 `core::http_executor::OutboundPolicy` 把关，它只放行 `http` 与 `https` 两种 scheme。默认不拦截私网地址，桌面端用户经常要访问 `localhost:3000`；公网或共享部署请设置 `SIMPLE_POST_BLOCK_PRIVATE_NET=1`，额外拒绝回环、私网、链路本地（含云厂商 metadata `169.254.169.254`）与 CGNAT 网段（`100.64.0.0/10`）。服务端不注册节点级的 `POST /api/nodes/{id}/send`，注册了它就多出一条不受管辖的出站通道。
+- **出站通道只有三条，且同受一条策略管辖**：`POST /api/http/send`、`POST /api/http/stream`（SSE）与 `POST /api/ws/sessions`（WebSocket）。请求体里的 URL 完全由调用方给出，服务端就是这几条通道的代理。出站策略由 `core::http_executor::OutboundPolicy` 把关，它只放行 `http` 与 `https` 两种 scheme；WebSocket 的 `ws://` / `wss://` 先映射成 `http://` / `https://` 再走同一个检查，被拒时回一条 `kind: "protocol"` 的错误、不建连。默认不拦截私网地址，桌面端用户经常要访问 `localhost:3000`；公网或共享部署请设置 `SIMPLE_POST_BLOCK_PRIVATE_NET=1`，额外拒绝回环、私网、链路本地（含云厂商 metadata `169.254.169.254`）与 CGNAT 网段（`100.64.0.0/10`）。服务端不注册节点级的 `POST /api/nodes/{id}/send`，注册了它就多出一条不受管辖的出站通道。
 
 ## 版本更新
 

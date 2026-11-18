@@ -227,7 +227,20 @@ async fn tool_api_validate_endpoint(
         crate::variable_fill::resolve_base_url(&endpoint, env.as_ref(), module_id.as_deref());
     let joined = crate::variable_fill::join_base_url(&resolved.base_url, &endpoint.url);
 
-    let issues = validate(&endpoint, &joined);
+    // 变量校验必须和发送侧看同一份文本：`{"id": {{id}}}` 里的占位符在发送前会被替换，
+    // 拿原始串判 JSON 合法性只会把合法模板判成坏端点。
+    let empty_vars = std::collections::HashMap::new();
+    let (env_vars, disabled) = match env.as_ref() {
+        Some(e) => (&e.variables, e.disabled_variables.as_slice()),
+        None => (&empty_vars, &[][..]),
+    };
+    let vars = simple_post_core::dynamic::merge_pool(
+        env_vars,
+        disabled,
+        &std::collections::HashMap::new(),
+    );
+
+    let issues = validate(&endpoint, &joined, &vars);
     let ok = issues.is_empty();
     Ok(CallToolResult::json(json!({
         "ok": ok,
@@ -256,7 +269,11 @@ fn endpoint_project_id(pool: &simple_post_core::db::DbPool, node_id: &str) -> St
 /// `url` 是**拼接后**的 URL（base URL + 端点自己的路径），路径占位符从它里面取：
 /// base URL 里也可能有 `{version}` 这样的占位符，而发送那侧是在拼接后的 URL 上做
 /// 替换，只看端点自己的 URL 会漏掉它。
-fn validate(endpoint: &EndpointDetail, url: &str) -> Vec<Value> {
+fn validate(
+    endpoint: &EndpointDetail,
+    url: &str,
+    vars: &std::collections::HashMap<String, String>,
+) -> Vec<Value> {
     use simple_post_core::domain::{AuthType, BodyMode, RequestProtocol, ResponseProblemKind};
     let mut issues = Vec::new();
 
@@ -459,13 +476,18 @@ fn validate(endpoint: &EndpointDetail, url: &str) -> Vec<Value> {
                 "message": "protocol=graphql requires a graphql config with a query"
             })),
             Some(config) => {
-                if config.query.trim().is_empty() {
+                // 与发送侧同源：先做 `{{var}}` 替换，再判 query 是否为空、variables 是不是
+                // JSON 对象。未替换的模板在这里会被误判（`{"id": {{id}}}` 不是 JSON）。
+                let query = crate::variable_fill::resolve_template(&config.query, vars).resolved;
+                if query.trim().is_empty() {
                     issues.push(json!({
                         "field": "graphql.query",
                         "message": "required for a GraphQL endpoint"
                     }));
                 }
-                let variables = config.variables.trim();
+                let variables_raw =
+                    crate::variable_fill::resolve_template(&config.variables, vars).resolved;
+                let variables = variables_raw.trim();
                 if !variables.is_empty() {
                     match serde_json::from_str::<serde_json::Value>(variables) {
                         Ok(serde_json::Value::Object(_)) => {}

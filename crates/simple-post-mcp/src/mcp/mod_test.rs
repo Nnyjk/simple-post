@@ -121,10 +121,10 @@ fn every_capability_row_names_a_registered_tool() {
 /// 不属于这里：工具描述只说「这个参数是什么」，长篇的规则与例子放指南里。
 ///
 /// **上限量的是字节**：载荷里含中文描述，`String::len()` 按 UTF-8 字节算，故同一份
-/// 载荷是 45 054 字符、45 116 字节。上限 **45 200 字节**。超限时把长说明移到
-/// `simple-post://spec-authoring`，不要扩大工具描述。
+/// 载荷是 48 324 字节 / 48 条工具（`report_the_tools_list_size` 实测，上限 49 152）。
+/// 超限时把长说明移到 `simple-post://spec-authoring`，不要扩大工具描述。
 /// 「字符数 ÷ 3」会把字节高估六成，故量的口径只能是字节；上一版（43 952 字节）用真实
-/// 分词器量得 9 413 tokens，这一版换了新字段，没有再分词，故这里只写字节数——要一个
+/// 分词器量得 9 413 tokens，此后换了新字段，没有再分词，故这里只写字节数——要一个
 /// token 数字就重新量一次，不要按旧比例推算。
 ///
 /// **上限对应哪几段契约。** 清单里有五段说明是地址配置、批量运行与调用历史带来的：
@@ -147,7 +147,7 @@ fn every_capability_row_names_a_registered_tool() {
 /// `body_mode` 已经说过的分帧细节从 `body_content` 的说明里删掉（那些细节指南里也有一份），
 /// 净增 1 164 字节，故上限从 44 050 提到 45 200，新的测量值是 45 116 字节。
 ///
-/// **余量**：当前载荷 45 116 字节，距上限 45 200 字节还有 84 字节。
+/// **余量**：当前载荷 48 324 字节，距上限 49 152 字节还有 828 字节。
 ///
 /// **这份清单现在装了什么。** 48 条描述符里没有一条携带「服务 id」字段：地址住在
 /// （环境 × 模块）一格里，`env_set_baseurl` 按 `env_id` + `module_id` 写那一格。
@@ -159,6 +159,10 @@ fn every_capability_row_names_a_registered_tool() {
 // 2026-11-17：issue #12 把 `protocol` 与 `graphql` 契约加进 `endpoint_create`、
 // `endpoint_update` 与 `spec_upsert`（含 patch 的三态说明），紧凑载荷涨到 47 658 字节
 // （48 项工具，`report_the_tools_list_size` 实测）；上限随之上调到 48 KiB。
+// 2026-11-18：`api_run_request` 补上 `protocol`（四值枚举）与 `graphql`（query /
+// variables / operationName）的 schema，让之前被写死丢弃的协议真正可传；这一段的
+// schema + 说明把紧凑载荷再顶大 666 字节，到 48 324 字节 / 48 项，仍在 49 152 以内，
+// 故上限不再动。
 const TOOLS_LIST_BUDGET_BYTES: usize = 49_152;
 
 #[test]

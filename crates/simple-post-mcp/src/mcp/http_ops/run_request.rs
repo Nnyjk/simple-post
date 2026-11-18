@@ -13,8 +13,7 @@ use simple_post_core::error::AppError;
 use super::args::RunRequestArgs;
 use super::dynamic::resolve_dynamic_values;
 use super::input::{
-    extract_settings, flatten_key_values, format_method, parse_auth, parse_body_mode,
-    resolve_tls_override,
+    extract_settings, flatten_key_values, parse_auth, parse_body_mode, resolve_tls_override,
 };
 use super::project::project_for;
 use super::send::{resolve_settings, send_resolved};
@@ -23,30 +22,27 @@ pub(super) async fn tool_api_run_request(
     state: &AppState,
     args: Value,
 ) -> Result<CallToolResult, AppError> {
-    let a: RunRequestArgs = serde_json::from_value(args)
+    let mut a: RunRequestArgs = serde_json::from_value(args)
         .map_err(|e| AppError::Validation(format!("api_run_request args: {e}")))?;
     if a.url.trim().is_empty() {
         return Err(AppError::Validation("url must not be empty".into()));
     }
-    if let Some(protocol) = a
-        .protocol
-        .as_deref()
-        .map(str::trim)
-        .filter(|p| !p.is_empty())
-    {
-        match protocol.to_ascii_lowercase().as_str() {
-            "http" | "graphql" => {}
-            "sse" | "websocket" => {
-                return Err(AppError::Validation(format!(
-                    "SSE / WebSocket 端点需要在应用内打开连接，MCP 只能发送 HTTP 与 GraphQL（该端点协议是 {protocol}）"
-                )));
-            }
-            other => {
-                return Err(AppError::Validation(format!(
-                    "未知的 protocol {other:?}；可选 http / graphql"
-                )));
-            }
-        }
+    let protocol = simple_post_core::spec::input::parse_protocol(a.protocol.as_deref())?;
+    if matches!(
+        protocol,
+        simple_post_core::domain::RequestProtocol::Sse
+            | simple_post_core::domain::RequestProtocol::WebSocket
+    ) {
+        return Err(AppError::Validation(format!(
+            "SSE / WebSocket 端点需要在应用内打开连接，MCP 只能发送 HTTP 与 GraphQL（该端点协议是 {}）",
+            protocol.as_str()
+        )));
+    }
+    let graphql = simple_post_core::spec::input::coerce_graphql(a.graphql.take())?;
+    if graphql.is_some() && protocol != simple_post_core::domain::RequestProtocol::GraphQl {
+        return Err(AppError::Validation(
+            "graphql 只能与 protocol=\"graphql\" 一起使用".into(),
+        ));
     }
 
     let method = simple_post_core::domain::parse_http_method(&a.method)?;
@@ -119,8 +115,8 @@ pub(super) async fn tool_api_run_request(
         // 临时请求没有端点，故它没有「端点自带的那份」HTTPS 设置。
         tls: None,
         responses: vec![],
-        protocol: Default::default(),
-        graphql: None,
+        protocol,
+        graphql,
     };
 
     let overrides = crate::variable_fill::EndpointOverrides {
@@ -147,14 +143,5 @@ pub(super) async fn tool_api_run_request(
     // 继承全局默认。
     let tls_override = resolve_tls_override(a.settings_override.as_ref(), None)?;
 
-    send_resolved(
-        state,
-        &format_method(&method),
-        resolved,
-        env.as_ref(),
-        None,
-        settings,
-        tls_override,
-    )
-    .await
+    send_resolved(state, resolved, env.as_ref(), None, settings, tls_override).await
 }

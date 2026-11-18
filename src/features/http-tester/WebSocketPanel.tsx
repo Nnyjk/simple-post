@@ -103,6 +103,13 @@ export function WebSocketPanel({
 
   const connect = () => {
     setSendError(null);
+    // 组装期才发现的问题（`validateRequest` 看到的是替换前的模板，占位符照例放行）：
+    // 带着坏掉的描述去握手只会换回一个与真实原因无关的失败，故与 HTTP 发送一样先拦下。
+    const problem = prepared.problems[0];
+    if (problem) {
+      setSendError(problem.message);
+      return;
+    }
     // 与 HTTP 发送、SSE 建连同一道路径参数闸门：带着 `{id}` 去握手，服务端只会回 404。
     if (!pathParamsReady(prepared, onPathParamsMissing)) return;
     void startWs(tabId, {
@@ -159,7 +166,13 @@ export function WebSocketPanel({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-3 py-2">
-        <ProtocolPicker value={protocol} onChange={onProtocolChange} />
+        {/* 协议选择器只住在 `RequestUrlBar` 里，而 WS 下那整栏被面板取代 —— 不带一个进来，
+            用户切到 websocket 就再也回不去（端点仍存着 websocket）。宽度与 URL 栏那份对齐。 */}
+        <ProtocolPicker
+          value={protocol}
+          onChange={onProtocolChange}
+          className="w-[7.5rem] shrink-0"
+        />
         <div className="min-w-0 flex-1">
           <VarHintInput
             value={url}
@@ -188,7 +201,9 @@ export function WebSocketPanel({
             size="sm"
             className="h-8 gap-1"
             onClick={connect}
-            disabled={blocked || pathBlocked}
+            // 缺变量不拦：与 HTTP / SSE 一致照发，未替换的 `{{var}}` 原样交给服务端
+            // （面板上有提示）。只有路径参数缺值需要拦 —— 带着 `{id}` 握手只会 404。
+            disabled={pathBlocked}
           >
             <Plug className="h-3.5 w-3.5" />
             连接
@@ -220,8 +235,8 @@ export function WebSocketPanel({
       </div>
 
       {blocked && (
-        <p className="shrink-0 border-b border-border px-3 py-1.5 text-xs text-destructive">
-          有未替换的变量：{prepared.missingVars.join('、')}
+        <p className="shrink-0 border-b border-border px-3 py-1.5 text-xs text-warning-foreground">
+          有未替换的变量：{prepared.missingVars.join('、')}（仍会按原样连接，与 HTTP 一致）
         </p>
       )}
 
@@ -329,10 +344,14 @@ export function WebSocketPanel({
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey && open) {
-                    e.preventDefault();
-                    void send('text', text);
-                  }
+                  if (e.key !== 'Enter' || e.shiftKey || !open) return;
+                  // IME 守卫：组合输入期间（中文拼音等）浏览器照样为 Enter 派发 keydown，
+                  // 不跳过就会在候选窗上屏的同时把半个词条发出去。与 `App.tsx` 的全局
+                  // 快捷键同一组判断：合成事件的 `isComposing` 挂在 `nativeEvent` 上，
+                  // 老浏览器回落到 keyCode 229（`e.isComposing` 在 React 合成事件上没有）。
+                  if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+                  e.preventDefault();
+                  void send('text', text);
                 }}
                 placeholder={open ? '要发送的文本帧，Enter 发送' : '连接后可发送'}
                 disabled={!open}

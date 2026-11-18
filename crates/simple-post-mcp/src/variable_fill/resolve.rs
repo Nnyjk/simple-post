@@ -187,13 +187,9 @@ pub fn resolve_endpoint_with(
     // 按模式各走各的规则：`json` / `xml` / `raw` 整段替换，`form` 与 `multipart` 逐个字段
     // 替换（整段替换会把替换出来的引号塞进那段 JSON 文本里，于是整份内容解析不出来），
     // `binary` 不替换（文件字节不是模板）。规则住在 `simple_post_core::body`，与渲染进程侧同一套。
-    let resolved_body = simple_post_core::body::resolve_body(&eff_body, &vars);
-    for m in resolved_body.missing {
-        record_missing(&mut missing, &mut seen, m);
-    }
-    let body = resolved_body.text;
-    let body_base64 = resolved_body.base64;
-
+    //
+    // GraphQL 不走这里：它的正文只由 query / variables 组装，存着的 http 载荷整份无关，
+    // 故也不该把那份载荷的缺失变量记进报告（TS 的 `prepare.ts` 同样给 `missing: []`）。
     // ---- GraphQL：HTTP 之上的语义层 ---------------------------------------
     // 协议是 graphql 时整份请求体由 query / variables 组装，故这一步覆盖 body 与
     // method；URL、headers、auth 仍由上文的 HTTP 规则产出。它不是一种 body mode，
@@ -208,7 +204,15 @@ pub fn resolve_endpoint_with(
             simple_post_core::domain::BodyMode::Json,
         )
     } else {
-        (body, body_base64, eff_body.mode.clone())
+        let resolved_body = simple_post_core::body::resolve_body(&eff_body, &vars);
+        for m in resolved_body.missing {
+            record_missing(&mut missing, &mut seen, m);
+        }
+        (
+            resolved_body.text,
+            resolved_body.base64,
+            eff_body.mode.clone(),
+        )
     };
     if graphql {
         eff_method = simple_post_core::domain::HttpMethod::Post;
@@ -288,6 +292,11 @@ pub(super) fn graphql_payload(
             missing.push(m);
         }
     }
+    if query.resolved.trim().is_empty() {
+        return Err(AppError::Validation(
+            "GraphQL 查询为空：这个端点没有可发送的查询".into(),
+        ));
+    }
 
     let variables_raw = resolve_template(&config.variables, vars);
     for m in variables_raw.missing {
@@ -307,7 +316,7 @@ pub(super) fn graphql_payload(
         })?;
         if !value.is_object() {
             return Err(AppError::Validation(
-                "GraphQL variables 解析失败：variables 必须是 JSON 对象".into(),
+                "GraphQL variables 必须是 JSON 对象".into(),
             ));
         }
         Some(value)

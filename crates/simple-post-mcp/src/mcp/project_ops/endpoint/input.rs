@@ -144,9 +144,9 @@ pub(in crate::mcp::project_ops) fn tls_settings_patch_schema() -> serde_json::Va
 // 传输协议的 JSON Schema
 // =========================================================================
 
-/// `protocol` 的线上取值。四个值一一对应 `RequestProtocol`。
+/// `protocol` 的线上取值。四个值直接取自 `RequestProtocol::VALUES`，不再抄一遍。
 pub(in crate::mcp::project_ops) const PROTOCOL_VALUES: [&str; 4] =
-    ["http", "graphql", "sse", "websocket"];
+    simple_post_core::domain::RequestProtocol::VALUES;
 
 /// 端点的传输协议，`endpoint_create` / `endpoint_update` / `spec_upsert` 共用。
 pub(in crate::mcp::project_ops) fn protocol_schema() -> serde_json::Value {
@@ -161,7 +161,7 @@ pub(in crate::mcp::project_ops) fn protocol_schema() -> serde_json::Value {
 pub(in crate::mcp::project_ops) fn protocol_patch_schema() -> serde_json::Value {
     json!({
         "type": ["string", "null"],
-        "enum": ["http", "graphql", "sse", "websocket", null],
+        "enum": [PROTOCOL_VALUES[0], PROTOCOL_VALUES[1], PROTOCOL_VALUES[2], PROTOCOL_VALUES[3], null],
         "description": "Transport protocol. null returns to the default http. sse and websocket endpoints cannot be called by MCP."
     })
 }

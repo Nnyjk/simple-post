@@ -147,6 +147,18 @@ fn endpoint_update_schema_documents_every_patchable_field() {
         patch_props["auth"]["properties"]["kind"]["enum"],
         serde_json::json!(AUTH_TYPE_VALUES)
     );
+    // 协议取值只有一份来源：`RequestProtocol::VALUES`。schema 抄错一个字符串就是
+    // 「文档说能写、写入时被拒」。
+    assert_eq!(
+        patch_props["protocol"]["enum"],
+        serde_json::json!([
+            simple_post_core::domain::RequestProtocol::VALUES[0],
+            simple_post_core::domain::RequestProtocol::VALUES[1],
+            simple_post_core::domain::RequestProtocol::VALUES[2],
+            simple_post_core::domain::RequestProtocol::VALUES[3],
+            serde_json::Value::Null,
+        ])
+    );
     // oauth2 的载荷必须登记进 schema。`auth` 上有 `additionalProperties: false`，
     // 漏掉它不是「宽松一点」，而是 agent 根本传不进来——一个看着正常却永远收不到
     // 配置的端点。
