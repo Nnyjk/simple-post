@@ -129,6 +129,7 @@ describe('响应的页签徽标', () => {
     auth: false,
     script: false,
     tls: false,
+    graphql: false,
   };
 
   it('徽标显示定义条数，「响应」排在 Docs 与脚本之间', () => {
@@ -147,5 +148,21 @@ describe('响应的页签徽标', () => {
   it('没有定义时不挂徽标', () => {
     const items = buildTabItems({ ...state, response: 0 });
     assert.equal(items.find((i) => i.id === 'response')?.badge, null);
+  });
+
+  it('GraphQL 模式下 GraphQL 页签占据 Body 的位置', () => {
+    const items = buildTabItems({ ...state, response: 0, graphql: true }, true);
+    const ids = items.map((i) => i.id);
+    assert.equal(ids.includes('body'), false);
+    assert.equal(ids.indexOf('graphql'), 3);
+    assert.equal(items.find((i) => i.id === 'graphql')?.label, 'GraphQL');
+  });
+
+  it('非 GraphQL 模式不出现 GraphQL 页签', () => {
+    const items = buildTabItems({ ...state, response: 0 }, false);
+    assert.deepEqual(
+      items.map((i) => i.id),
+      ['params', 'path', 'headers', 'body', 'auth', 'docs', 'response', 'script', 'tls'],
+    );
   });
 });

@@ -2,7 +2,8 @@ use super::*;
 use crate::db;
 use crate::db::nodes;
 use crate::domain::{
-    AuthType, HttpMethod, Project, RequestBody, ResourceNode, ResourceNodeType, TlsSettings,
+    AuthType, GraphQlRequest, HttpMethod, Project, RequestBody, RequestProtocol, ResourceNode,
+    ResourceNodeType, TlsSettings,
 };
 use std::path::PathBuf;
 
@@ -79,6 +80,8 @@ fn detail(node_id: &str) -> EndpointDetail {
         test_script: None,
         tls: None,
         responses: vec![],
+        protocol: Default::default(),
+        graphql: None,
     }
 }
 
@@ -546,4 +549,159 @@ fn the_endpoints_own_https_settings_survive_a_reload_of_several_rows() {
     assert_eq!(e2.tls.as_ref(), Some(&endpoint_tls()));
     let e1 = got.iter().find(|d| d.node_id == "e1").unwrap();
     assert!(e1.tls.is_none(), "没配过的端点仍应是 None");
+}
+
+// -------------------------------------------------------------------------
+// 传输协议与 GraphQL 配置。
+// -------------------------------------------------------------------------
+
+fn graphql() -> GraphQlRequest {
+    GraphQlRequest {
+        query: "query Node($id: ID!) { node(id: $id) { id } }".into(),
+        variables: r#"{"id":"n1"}"#.into(),
+        operation_name: Some("Node".into()),
+    }
+}
+
+#[test]
+fn the_protocol_and_graphql_config_survive_a_round_trip() {
+    let (pool, _dir) = fresh_pool();
+    let mut d = detail("e4");
+    d.protocol = RequestProtocol::GraphQl;
+    d.graphql = Some(graphql());
+    db::with_tx(&pool, |c| {
+        nodes::create(
+            c,
+            &node("e4", ResourceNodeType::Endpoint, Some("c1"), 3),
+            Some(&d),
+        )
+    })
+    .unwrap();
+
+    let got = db::with_conn(&pool, |c| get(c, "e4")).unwrap();
+    assert_eq!(got.protocol, RequestProtocol::GraphQl);
+    assert_eq!(got.graphql.as_ref(), Some(&graphql()));
+
+    // `list_by_root` 走另一条 SQL（带 `e.` 别名的 join），列顺序写错时这里才会红。
+    let listed = db::with_conn(&pool, |c| list_by_root(c, "p1")).unwrap();
+    let e4 = listed.iter().find(|d| d.node_id == "e4").unwrap();
+    assert_eq!(e4.protocol, RequestProtocol::GraphQl);
+    assert_eq!(e4.graphql.as_ref(), Some(&graphql()));
+}
+
+#[test]
+fn an_endpoint_without_graphql_config_stores_null_not_an_empty_object() {
+    let (pool, _dir) = fresh_pool();
+    let raw: Option<String> = db::with_conn(&pool, |c| {
+        Ok(c.query_row(
+            "SELECT graphql_json FROM endpoint_details WHERE node_id = 'e1'",
+            [],
+            |r| r.get(0),
+        )?)
+    })
+    .unwrap();
+    assert!(raw.is_none(), "没配过 GraphQL 的端点写 NULL，got {raw:?}");
+    let got = db::with_conn(&pool, |c| get(c, "e1")).unwrap();
+    assert_eq!(got.protocol, RequestProtocol::Http);
+    assert!(got.graphql.is_none());
+}
+
+/// `graphql` 这一列的三态：缺席 = 不动，`null` = 清空，写值 = 整体替换。
+/// `protocol` 没有 null 形态，缺席即不动。
+#[test]
+fn the_graphql_column_distinguishes_absent_from_null() {
+    let (pool, _dir) = fresh_pool();
+    db::with_tx(&pool, |c| {
+        update(
+            c,
+            "e1",
+            serde_json::from_str(r#"{"protocol":"sse","graphql":{"query":"{ ping }"}}"#).unwrap(),
+        )
+    })
+    .unwrap();
+    let got = db::with_conn(&pool, |c| get(c, "e1")).unwrap();
+    assert_eq!(got.protocol, RequestProtocol::Sse);
+    assert_eq!(
+        got.graphql.as_ref().map(|g| g.query.as_str()),
+        Some("{ ping }")
+    );
+
+    // 缺席：两项都不动。
+    db::with_tx(&pool, |c| {
+        update(c, "e1", serde_json::from_str(r#"{"url": "/x"}"#).unwrap())
+    })
+    .unwrap();
+    let got = db::with_conn(&pool, |c| get(c, "e1")).unwrap();
+    assert_eq!(got.protocol, RequestProtocol::Sse);
+    assert!(got.graphql.is_some());
+
+    // `null`：清空 GraphQL 配置；协议仍要显式给值才变。
+    db::with_tx(&pool, |c| {
+        update(
+            c,
+            "e1",
+            serde_json::from_str(r#"{"graphql":null}"#).unwrap(),
+        )
+    })
+    .unwrap();
+    let got = db::with_conn(&pool, |c| get(c, "e1")).unwrap();
+    assert!(got.graphql.is_none());
+    assert_eq!(
+        got.protocol,
+        RequestProtocol::Sse,
+        "缺席的 protocol 不该被改"
+    );
+
+    // 写值：整体替换。
+    db::with_tx(&pool, |c| {
+        update(
+            c,
+            "e1",
+            EndpointDetailPatch {
+                graphql: Some(Some(graphql())),
+                ..Default::default()
+            },
+        )
+    })
+    .unwrap();
+    assert_eq!(
+        db::with_conn(&pool, |c| get(c, "e1")).unwrap().graphql,
+        Some(graphql())
+    );
+}
+
+#[test]
+fn an_older_store_gains_the_protocol_columns_without_a_version_bump() {
+    let (pool, dir) = fresh_pool();
+    // 既有库在这次改动之前没有这两列。
+    db::with_conn(&pool, |c| {
+        Ok(c.execute_batch(
+            "ALTER TABLE endpoint_details DROP COLUMN protocol; \
+             ALTER TABLE endpoint_details DROP COLUMN graphql_json;",
+        )?)
+    })
+    .unwrap();
+    drop(pool);
+
+    let pool = db::init(&dir).expect("re-init");
+    let columns: i64 = db::with_conn(&pool, |c| {
+        Ok(c.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('endpoint_details') \
+             WHERE name IN ('protocol', 'graphql_json')",
+            [],
+            |r| r.get(0),
+        )?)
+    })
+    .unwrap();
+    assert_eq!(columns, 2, "两列都应由 ADDED_COLUMNS 补齐");
+
+    let got = db::with_conn(&pool, |c| get(c, "e1")).unwrap();
+    assert_eq!(got.protocol, RequestProtocol::Http, "旧行读回来是 http");
+    assert!(got.graphql.is_none(), "旧行没有 GraphQL 配置");
+
+    let version: i64 = db::with_conn(&pool, |c| {
+        Ok(c.query_row("PRAGMA user_version", [], |r| r.get(0))?)
+    })
+    .unwrap();
+    assert_eq!(version, crate::db::SCHEMA_VERSION);
 }

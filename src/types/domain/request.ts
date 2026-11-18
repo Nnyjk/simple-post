@@ -11,6 +11,32 @@ export const HTTP_METHODS: HttpMethod[] = [
   'TRACE',
 ];
 
+/**
+ * 端点的请求协议。它决定请求怎么发、响应区画什么：
+ *
+ * - `http`：普通请求/响应；
+ * - `graphql`：仍是 HTTP 语义，但方法强制 POST、body 由 {@link GraphQlRequest} 组装；
+ * - `sse`：请求组装同 http，响应按事件流读取并逐条展示；
+ * - `websocket`：独立会话面板收发帧，不经过 HTTP 请求/响应布局。
+ */
+export type RequestProtocol = 'http' | 'graphql' | 'sse' | 'websocket';
+
+/** 协议选择器里出现的全部取值，顺序即下拉里的顺序。 */
+export const REQUEST_PROTOCOLS: RequestProtocol[] = ['http', 'graphql', 'sse', 'websocket'];
+
+/**
+ * GraphQL 请求的三段，与 Rust 的 `simple_post_core::domain::GraphQlRequest` 一一对应。
+ *
+ * `variables` 存编辑区里的 JSON **原文**：用户可以边写边改，非法 JSON 不会挡住编辑；组装期才
+ * 解析，非法或不是对象时由校验拦下。原文为空（`trim()` 后）表示这次请求不带 variables。
+ */
+export interface GraphQlRequest {
+  query: string;
+  variables: string;
+  /** 多操作的文档里指定执行哪一个；空（`trim()` 后）表示不带这个键。 */
+  operationName?: string;
+}
+
 export interface KeyValue {
   id: string;
   key: string;

@@ -107,6 +107,8 @@ fn seed(st: &AppState, base_url: &str) -> String {
         test_script: None,
         tls: None,
         responses: vec![],
+        protocol: Default::default(),
+        graphql: None,
     };
     let env = Environment {
         id: "env_env".into(),

@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use simple_post_core::domain::{EndpointDetail, Environment};
+use simple_post_core::domain::{EndpointDetail, Environment, GraphQlRequest};
 use simple_post_core::error::AppError;
 
 use super::auth::resolve_auth;
@@ -194,6 +194,26 @@ pub fn resolve_endpoint_with(
     let body = resolved_body.text;
     let body_base64 = resolved_body.base64;
 
+    // ---- GraphQL：HTTP 之上的语义层 ---------------------------------------
+    // 协议是 graphql 时整份请求体由 query / variables 组装，故这一步覆盖 body 与
+    // method；URL、headers、auth 仍由上文的 HTTP 规则产出。它不是一种 body mode，
+    // 故 `core::body` 不参与这里的组装。
+    let graphql = detail.protocol == simple_post_core::domain::RequestProtocol::GraphQl;
+    let (body, body_base64, body_mode) = if graphql {
+        let payload = graphql_payload(detail.graphql.as_ref(), &vars, &mut missing, &mut seen)?;
+        (
+            Some(payload),
+            None,
+            // 装配用的模式按 json 记：multipart 的装配分支不该拿到 SQL 里存的那个模式。
+            simple_post_core::domain::BodyMode::Json,
+        )
+    } else {
+        (body, body_base64, eff_body.mode.clone())
+    };
+    if graphql {
+        eff_method = simple_post_core::domain::HttpMethod::Post;
+    }
+
     // ---- 请求头排序 ---------------------------------------------
     // `binary` 模式的 Content-Type 取文件自己的类型，故要先从 body 内容里读出来。
     // 其余模式不需要它（`None`）。
@@ -203,14 +223,25 @@ pub fn resolve_endpoint_with(
         ),
         _ => None,
     };
-    let headers = build_headers(
+    let mut headers = build_headers(
         &eff_headers,
-        &eff_body.mode,
+        &body_mode,
         &resolved_auth,
         &vars,
         &mut missing,
         binary_content_type.as_deref(),
     );
+    if graphql {
+        // 用户自己写过 Content-Type 就就地改值（与 multipart 补 boundary 同一条规矩），
+        // 没写过时上面按 json 模式已经补上了自动头，这里只是统一取值。
+        match headers
+            .iter_mut()
+            .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+        {
+            Some((_, value)) => *value = "application/json".to_string(),
+            None => headers.push(("Content-Type".to_string(), "application/json".to_string())),
+        }
+    }
 
     Ok(ResolvedEndpoint {
         url: final_url,
@@ -219,11 +250,87 @@ pub fn resolve_endpoint_with(
         params: params_subst,
         body,
         body_base64,
-        body_mode: eff_body.mode,
+        body_mode,
         auth: resolved_auth,
         // 变量池随结果一起走：取 OAuth2 的 token 时要用的正是这一份。
         vars,
         missing_vars: missing,
         missing_path_params,
     })
+}
+
+// -------------------------------------------------------------------------
+// GraphQL 组装
+// -------------------------------------------------------------------------
+
+/// 把端点上的 GraphQL 配置组装成请求体文本。
+///
+/// 字段顺序固定为 `query` → `variables` → `operationName`：这与渲染进程侧
+/// `buildFetchInit` 的 `JSON.stringify({ query, variables, operationName })` 一字不差，
+/// 两侧读同一份 `fixtures/resolve-parity.json`。故这里手工拼串而不用 JSON 对象：
+/// `serde_json::Value` 的 map 是排序的，键序会变成 `operationName` 在前。
+///
+/// `query` 与 `variables` 先过 `{{var}}` 替换。`variables` 替换之后 trim 为空就不带这个
+/// 键；非空则必须是 JSON **对象**，否则这一次请求的载荷是对方解析不了的文本，在这里
+/// 报错比发出去换回一个 GraphQL 错误更早。`operationName` 只有空白也不带这个键。
+pub(super) fn graphql_payload(
+    config: Option<&GraphQlRequest>,
+    vars: &HashMap<String, String>,
+    missing: &mut Vec<String>,
+    seen: &mut HashMap<String, ()>,
+) -> Result<String, AppError> {
+    let empty = GraphQlRequest::default();
+    let config = config.unwrap_or(&empty);
+
+    let query = resolve_template(&config.query, vars);
+    for m in query.missing {
+        if seen.insert(m.clone(), ()).is_none() {
+            missing.push(m);
+        }
+    }
+
+    let variables_raw = resolve_template(&config.variables, vars);
+    for m in variables_raw.missing {
+        if seen.insert(m.clone(), ()).is_none() {
+            missing.push(m);
+        }
+    }
+    let variables = variables_raw.resolved.trim();
+    let variables: Option<serde_json::Value> = if variables.is_empty() {
+        None
+    } else {
+        let value: serde_json::Value = serde_json::from_str(variables).map_err(|e| {
+            AppError::Validation(format!(
+                "GraphQL variables 解析失败：不是合法的 JSON（{e}）；\
+                 请把 variables 写成 JSON 对象，或留空表示不带变量"
+            ))
+        })?;
+        if !value.is_object() {
+            return Err(AppError::Validation(
+                "GraphQL variables 解析失败：variables 必须是 JSON 对象".into(),
+            ));
+        }
+        Some(value)
+    };
+
+    let operation_name = config
+        .operation_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+
+    let mut payload = format!(
+        "{{\"query\":{}",
+        serde_json::to_string(query.resolved.as_str())?
+    );
+    if let Some(value) = variables {
+        payload.push_str(",\"variables\":");
+        payload.push_str(&serde_json::to_string(&value)?);
+    }
+    if let Some(name) = operation_name {
+        payload.push_str(",\"operationName\":");
+        payload.push_str(&serde_json::to_string(name)?);
+    }
+    payload.push('}');
+    Ok(payload)
 }

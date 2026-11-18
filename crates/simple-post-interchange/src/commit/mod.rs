@@ -455,6 +455,9 @@ pub fn commit_in_tx(
                     // 导入进来的接口不带 HTTPS 出站设置：证书路径是本机的东西，导到另一台
                     // 机器上没有意义。故导入的端点一律继承全局默认。
                     tls: None,
+                    // 导入不产生非 HTTP 协议：OpenAPI/Postman 的 IR 没有这一列。
+                    protocol: Default::default(),
+                    graphql: None,
                 };
 
                 db::nodes::create(conn, &node, Some(&detail))?;

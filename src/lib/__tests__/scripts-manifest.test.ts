@@ -37,6 +37,8 @@ const WEB_ROUTES_SRC = join(ROOT, 'src', 'lib', 'tauri-commands', 'web-routes.ts
  * 就说明这个脚本该有个入口、或者该删掉。
  */
 const STANDALONE: Record<string, string> = {
+  'scripts/rewrite-updater-json.mjs':
+    '只在 `.github/workflows/release.yml` 的 `fix-updater-json` 作业里跑（发版后把 latest.json 的平台 url 换成 browser_download_url），本地没有入口、也不被别的脚本 import；它的纯函数由 `src/__tests__/rewrite-updater-json.test.ts` 覆盖。',
   'scripts/_verify_store.mjs':
     '手动排查工具（AGENTS.md:271/:472 记的 `npx tsx scripts/_verify_store.mjs`）：用 mockIPC 在纯 node 里跑 store，断言的是「store-extensions」那次计划的中间态其选择器与级联删除形状；放进快速门禁会因为 store 的正常重构频繁假红，故只手动跑。',
 };

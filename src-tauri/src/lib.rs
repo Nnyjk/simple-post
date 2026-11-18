@@ -229,6 +229,12 @@ pub fn run() {
             // 线上发布说明。桌面壳只有这一条 update 命令：安装由 updater 插件负责，
             // `update_deployment` / `update_apply` 的语义（运维声明的本机更新命令）桌面没有。
             crate::commands::update_check,
+            // 流式传输：SSE 的 start/cancel 与 WebSocket 的 open/send/close。
+            crate::commands::stream_request,
+            crate::commands::stream_cancel,
+            crate::commands::ws_connect,
+            crate::commands::ws_send,
+            crate::commands::ws_close,
         ])
         .setup(|app| {
             // 先读持久化的 mcp.auto_start（默认 false，需用户在设置里开启）再拉 supervisor。

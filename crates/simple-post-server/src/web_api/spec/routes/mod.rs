@@ -17,3 +17,4 @@ pub(super) mod spec_oauth2;
 pub(super) mod spec_projects;
 pub(super) mod spec_response_history;
 pub(super) mod spec_upsert;
+pub(super) mod spec_ws;

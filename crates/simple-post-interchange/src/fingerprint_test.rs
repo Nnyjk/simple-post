@@ -287,6 +287,8 @@ fn the_set_recognises_an_already_stored_endpoint() {
         test_script: None,
         tls: None,
         responses: vec![],
+        protocol: Default::default(),
+        graphql: None,
     };
 
     let mut set = FingerprintSet::new();

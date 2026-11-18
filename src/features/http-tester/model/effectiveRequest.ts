@@ -1,8 +1,10 @@
 import type {
   AuthConfig,
   EndpointDetail,
+  GraphQlRequest,
   KeyValue,
   RequestBody,
+  RequestProtocol,
   ResponseDefinition,
   TlsSettings,
 } from '@/types/domain';
@@ -21,6 +23,10 @@ const EMPTY_AUTH: AuthConfig = { kind: 'none' };
  * 本对象：URL 栏还要原始值做自己的选择器与光标逻辑。
  */
 export interface EffectiveRequest {
+  /** 发送与响应区按它分派。已存的 detail 缺失这个字段时按 `http` 读（早于协议字段的行）。 */
+  protocol: RequestProtocol;
+  /** GraphQL 配置；`null` = 还没填，或协议不是 graphql。 */
+  graphql: GraphQlRequest | null;
   params: KeyValue[];
   pathParams: KeyValue[];
   headers: KeyValue[];
@@ -45,6 +51,9 @@ export function buildEffectiveRequest(
   detail: EndpointDetail | undefined,
 ): EffectiveRequest {
   return {
+    // 协议与 graphql 同 `tls`：草稿显式写过 `null` 要压过已存的那份，`??` 会把它读成「没写」。
+    protocol: draft?.protocol ?? detail?.protocol ?? 'http',
+    graphql: draft?.graphql !== undefined ? draft.graphql : (detail?.graphql ?? null),
     params: draft?.params ?? detail?.params ?? [],
     pathParams: draft?.pathParams ?? detail?.pathParams ?? [],
     headers: draft?.headers ?? detail?.headers ?? [],

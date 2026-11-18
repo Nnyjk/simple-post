@@ -150,7 +150,19 @@ CREATE TABLE IF NOT EXISTS endpoint_details (
   --
   -- 纯增量：`db::ADDED_COLUMNS` 会给既有库补上这一列，故不 bump `SCHEMA_VERSION`；
   -- 重建表会连带丢掉用户的项目与整棵树，而这一列有完全等价的默认值。
-  responses_json         TEXT NOT NULL DEFAULT '[]'
+  responses_json         TEXT NOT NULL DEFAULT '[]',
+  -- 这个端点用哪种传输发出去：`http` / `graphql` / `sse` / `websocket`。只有 `graphql`
+  -- 会改请求组装（强制 POST + 由 query/variables 拼 JSON）；`http` 是其余一切的老路径。
+  --
+  -- 纯增量：`db::ADDED_COLUMNS` 会给既有库补上这一列，故不 bump `SCHEMA_VERSION`。
+  protocol               TEXT NOT NULL DEFAULT 'http',
+  -- `domain::GraphQlRequest` 的 JSON 编码（query / variables / operationName）。
+  --
+  -- NULL = 没有配置。与 `{}` 区分：`{}` 读回来是「有配置但三项都空」，校验会据此报
+  -- 「query 为空」，而 NULL 只表示用户还没填过。
+  --
+  -- 纯增量：`db::ADDED_COLUMNS` 会给既有库补上这一列，故不 bump `SCHEMA_VERSION`。
+  graphql_json           TEXT
 );
 
 -- collection 节点上的两段脚本。

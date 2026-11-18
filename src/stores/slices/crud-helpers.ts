@@ -135,6 +135,8 @@ export function blankDetail(
   return {
     nodeId,
     method: 'GET',
+    protocol: 'http',
+    graphql: null,
     url: '',
     baseUrlOverride: null,
     params: [],

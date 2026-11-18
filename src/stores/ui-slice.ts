@@ -24,9 +24,12 @@ import { createUiNewItem } from './slices/ui-new-item';
 import type { UiNewItem } from './slices/ui-new-item';
 import { createUiDraftEndpoints } from './slices/ui-draft-endpoints';
 import type { UiDraftEndpoints } from './slices/ui-draft-endpoints';
+import { createStreamSlice } from './slices/stream-slice';
+import type { StreamSlice } from './slices/stream-slice';
 
 /** 组合后的 UI slice；每个成员在 `./slices/` 里紧挨实现处声明。 */
-export interface UiSlice extends UiTabs, UiResponse, UiPrefs, UiNewItem, UiDraftEndpoints {}
+export interface UiSlice
+  extends UiTabs, UiResponse, UiPrefs, UiNewItem, UiDraftEndpoints, StreamSlice {}
 
 export const createUiSlice: StateCreator<AppState, [], [], UiSlice> = (set, get, store) => ({
   ...createUiTabs(set, get, store),
@@ -34,4 +37,5 @@ export const createUiSlice: StateCreator<AppState, [], [], UiSlice> = (set, get,
   ...createUiPrefs(set, get, store),
   ...createUiNewItem(set, get, store),
   ...createUiDraftEndpoints(set, get, store),
+  ...createStreamSlice(set, get, store),
 });

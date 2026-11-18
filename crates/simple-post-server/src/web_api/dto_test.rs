@@ -118,3 +118,29 @@ fn a_root_id_the_caller_did_send_is_not_derived_over() {
 
     assert_eq!(row.root_id, "p_explicit");
 }
+
+/// `POST /api/ws/sessions` 与 `POST /api/http/stream` 同形：`tls` 与 `tlsOverride`
+/// 都能收，且 `tlsOverride` 整体取代 `tls`。
+#[test]
+fn ws_sessions_accept_the_same_tls_fields_as_http_streams() {
+    let body: super::WsConnectBody = serde_json::from_value(json!({
+        "sessionId": "ws_1",
+        "url": "wss://example.test/socket",
+        "headers": [["X-Trace", "1"]],
+        "protocols": ["graphql-ws"],
+        "tls": { "skipVerify": true },
+        "tlsOverride": { "caCertificatePath": "/tmp/endpoint-ca.pem" },
+    }))
+    .expect("body parses");
+
+    assert_eq!(body.session_id, "ws_1");
+    assert_eq!(body.protocols, vec!["graphql-ws"]);
+    assert!(body.tls.expect("global tls").skip_verify);
+    assert_eq!(
+        body.tls_override
+            .expect("endpoint tls")
+            .ca_certificate_path
+            .as_deref(),
+        Some("/tmp/endpoint-ca.pem")
+    );
+}

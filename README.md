@@ -61,6 +61,15 @@ Simple Post 是一个 Windows 10/11 上的桌面 API 调试工具。接口树、
 </tr>
 </table>
 
+## 请求协议
+
+一个接口的协议写在端点属性里（`http` / `graphql` / `sse` / `websocket`）。四种协议共用同一条请求装配路径：
+
+- **共用**：URL、查询参数、请求头、鉴权、`{{变量}}` 替换与连接选项（超时、跟随重定向、最大响应体积、HTTPS 出站）都是同一套规则。GraphQL 与 SSE 走 HTTP 发送链路；SSE 与普通 HTTP 共用响应历史与请求快照。
+- **GraphQL**：固定用 `POST`，请求体由 query、variables 与 operationName 组装，query 与 variables 都做 `{{变量}}` 替换。编辑器支持从服务端点拉 introspection 后按上下文补全（字段、参数、`... on`、变量类型）；查询历史来自本接口的响应历史，不额外存储。服务端关掉 introspection 时补全不可用，请求本身不受影响。
+- **SSE**：响应按 `text/event-stream` 逐事件展示，只替换「响应」页的内容，参数、请求头、鉴权页照常可用。「停止」会先请求服务端收尾（约定事件 `end`），拿到收尾事件后写历史。超时语义与 HTTP 一致，另外「块间空闲超时」也算超时。
+- **WebSocket**：独立连接面板，地址、请求头、子协议各自一格，状态从「连接中」到「已连接」再到「断开」，可配自动重连，收发帧按历史列出。它不发请求脚本；Bearer、Basic、API key 会换算进握手请求头，OAuth2 在握手前取 token。TLS 与 HTTP 是同一套设置，WSS 同样支持自定义 CA 与客户端证书。MCP 只能发 HTTP 与 GraphQL，SSE/WebSocket 端点会被拒绝。
+
 ## MCP Server
 
 48 个 MCP 工具，覆盖项目、模块、集合、接口、模块地址、环境变量、动态变量与请求解析。AI 客户端能列项目、搜接口、查环境变量、发起调用，也能创建与改写接口定义。
@@ -350,7 +359,7 @@ sp.example.com {
 | --- | --- | --- |
 | Tauri 外壳与 CLI | `src-tauri/` | 桌面图形界面、`#[tauri::command]` 接口、clap 子命令分发。 |
 | 服务宿主 | `crates/simple-post-server/` | `serve-web` 的 REST 与单页应用、daemon 进程管理、端口登记、Bearer 鉴权、传输层 DTO。 |
-| 核心库 | `crates/simple-post-core/` | 领域模型、SQLite 数据访问、HTTP 执行器、权限，以及请求体、动态变量、OAuth2、路径参数、请求脚本、接口规格、模板、TLS 与 URL 这些模块。不依赖 Tauri 与 axum。 |
+| 核心库 | `crates/simple-post-core/` | 领域模型、SQLite 数据访问、HTTP 执行器、流式连接（SSE 事件流 / WebSocket 会话）、权限，以及请求体、动态变量、OAuth2、路径参数、请求脚本、接口规格、模板、TLS 与 URL 这些模块。不依赖 Tauri 与 axum。 |
 | MCP 服务 | `crates/simple-post-mcp/` | JSON-RPC 2.0 派发（48 个工具）、axum HTTP daemon、标准输入输出桥接。 |
 | 导入导出 | `crates/simple-post-interchange/` | 外来格式与标准格式之间的转换层，负责 Postman 与 OpenAPI 的解析和生成。 |
 | 前端 | `src/` | React、Zustand、Tailwind、CodeMirror 6。 |
@@ -365,7 +374,7 @@ AI 文档生成、AI 测试用例生成与 Git 工作区协作三项不在应用
 
 v1.0 的计划项：
 
-- [ ] WebSocket、SSE 与 GraphQL 协议支持（#12）
+- [x] WebSocket、SSE 与 GraphQL 协议支持（#12）
 - [ ] Mock Server（从集合生成 mock 服务，支持故障注入）（#13）
 - [ ] 性能压测（与开发期的 `npm run perf:bench` 基准区分）（#14）
 - [ ] 插件系统：第三方 MCP 工具注册（须保住两道校验的 fail-closed 行为）（#15）

@@ -222,6 +222,19 @@ const ADDED_COLUMNS: &[(&str, &str, &str)] = &[
         "body_base64",
         "TEXT",
     ),
+    (
+        // 端点的传输协议。纯增量：旧行读回来是 `http`，语义等价于「还没选扩展协议」，
+        // 也正是它们一直以来的行为。
+        "endpoint_details",
+        "protocol",
+        "TEXT NOT NULL DEFAULT 'http'",
+    ),
+    (
+        // GraphQL 的 query / variables。纯增量：旧行读回来是 NULL（= 没有配置）。
+        "endpoint_details",
+        "graphql_json",
+        "TEXT",
+    ),
 ];
 
 /// 为 [`ADDED_COLUMNS`] 中缺列的表补上该列。

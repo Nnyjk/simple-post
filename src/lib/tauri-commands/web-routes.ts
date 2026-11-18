@@ -341,6 +341,25 @@ export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
   // 这里无需翻译。
   [COMMANDS.httpRequest]: { method: 'POST', path: () => '/api/http/send' },
 
+  // ----- 流式传输（SSE / WebSocket） -----
+  // 这五条不经过 `webInvokeCmd`：响应是 `text/event-stream`，靠 `src/lib/stream-transport/web.ts`
+  // 直接 fetch 并逐段读。条目留在这里是为了让路径与动词只有一处来源，也提醒改路由时两处同步。
+  [COMMANDS.streamRequest]: { method: 'POST', path: () => '/api/http/stream' },
+  [COMMANDS.streamCancel]: {
+    method: 'DELETE',
+    path: (a) => `/api/http/stream/${encodeURIComponent(String(a.streamId))}`,
+  },
+  [COMMANDS.wsConnect]: { method: 'POST', path: () => '/api/ws/sessions' },
+  [COMMANDS.wsSend]: {
+    method: 'POST',
+    path: (a) => `/api/ws/sessions/${encodeURIComponent(String(a.sessionId))}/send`,
+  },
+  [COMMANDS.wsClose]: {
+    method: 'DELETE',
+    path: (a) =>
+      `/api/ws/sessions/${encodeURIComponent(String(a.sessionId))}${buildQuery({ code: a.code, reason: a.reason })}`,
+  },
+
   // ----- updates -----
   // 三条都有 `serve-web` 路由。桌面壳只实现 `update_check`（走 IPC，不经过 `WEB_ROUTES`）；
   // `deployment` / `apply` 在桌面没有实现。

@@ -6,7 +6,8 @@ import type { BatchOutcome, BatchReport } from './types';
 
 /**
  * 算一份报告。`total` 是这一批**共有**多少条（不是跑完了多少条）：中止之后没轮到的那几条
- * 也在这个数里，它们由 `notRun` 单独报出。
+ * 也在这个数里，它们由 `notRun` 单独报出。协议不在批量范围内的条目（SSE、WebSocket）同样
+ * 计入 `notRun`：执行器跳过了它们，既不算成功也不算失败。
  *
  * `outcomes` 的条数**不得超过** `total`：每条结论对应这一批里的一条接口，多出来的结论说明
  * 调用方把两个批次的结果混在了一起。宁可当场报错，也不要用 `Math.max(0, …)` 把它压成 0
@@ -24,11 +25,18 @@ export function buildReport(
   let failed = 0;
   let blocked = 0;
   let noResponse = 0;
+  let skipped = 0;
   let totalDurationMs = 0;
   const byStatus = new Map<number, number>();
 
   for (const outcome of outcomes) {
     totalDurationMs += outcome.durationMs;
+    // 主动跳过的协议既不是成功也不是失败：它没发出去，也不该让用户以为这一批里有错误。
+    // 它们与「中止之后没轮到」同属未执行那一档。
+    if (outcome.failure === 'skipped') {
+      skipped++;
+      continue;
+    }
     if (outcome.success) {
       success++;
     } else {
@@ -55,7 +63,7 @@ export function buildReport(
     total,
     success,
     failed,
-    notRun: total - outcomes.length,
+    notRun: total - outcomes.length + skipped,
     statusCounts,
     noResponse,
     blocked,

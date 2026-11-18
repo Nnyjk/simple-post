@@ -148,6 +148,13 @@ export const COMMANDS = {
 
   // ----- low-level HTTP executor (Tauri side) -----
   httpRequest: 'http_request',
+  // 一次性 HTTP 流（SSE）：建连、取消。事件经 `tauri::ipc::Channel` 逐条推回渲染层。
+  streamRequest: 'stream_request',
+  streamCancel: 'stream_cancel',
+  // WebSocket 会话：与 HTTP 的请求/响应无关，故自成一族。
+  wsConnect: 'ws_connect',
+  wsSend: 'ws_send',
+  wsClose: 'ws_close',
 } as const;
 
 export type TauriCommand = (typeof COMMANDS)[keyof typeof COMMANDS];

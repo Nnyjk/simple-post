@@ -5,24 +5,23 @@ import { AuthEditor } from './AuthEditor';
 import { DocsEditor } from './DocsEditor-lazy';
 import { ResponseEditor } from './ResponseEditor-lazy';
 import { ScriptPanel } from './ScriptPanel';
+import { GraphQlPanel, type GraphQlPanelTools } from './GraphQlPanel';
 import { TlsPanel } from './TlsPanel';
 import type { EndpointDraft } from '@/stores/store-types';
 import type { FormatResult } from '@/lib/utils';
 import type {
   AuthConfig,
+  GraphQlRequest,
   KeyValue,
   RequestBody,
   ResponseDefinition,
   TlsSettings,
 } from '@/types/domain';
+import type { TesterTabId } from './tabs/tabItems';
 import type { VarEntry } from './var-hint';
 
-/**
- * 请求配置编辑器的页签 id。`path` 是路径参数，`script` 是请求脚本（前置 / 测试两段），
- * `response` 是文档用的响应定义，与发送请求无关。
- */
-export type TesterTabId =
-  'params' | 'path' | 'headers' | 'body' | 'auth' | 'docs' | 'response' | 'script' | 'tls';
+/** 页签 id 的唯一来源在 `tabs/tabItems`：GraphQL 与 Body 争同一个位置。 */
+export type { TesterTabId };
 
 /**
  * 页签内容区 —— 只渲染当前那一页编辑器。
@@ -50,6 +49,8 @@ export function RequestTabPanels({
   varEntries,
   envName,
   vars,
+  graphql,
+  graphqlTools,
   patchDraft,
   onFormatResult,
 }: {
@@ -82,6 +83,9 @@ export function RequestTabPanels({
   envName: string | undefined;
   /** 变量池：取 OAuth2 token 时送给后端，让它替换配置里那四个字段的 `{{var}}`。 */
   vars: Record<string, string>;
+  graphql: GraphQlRequest | null;
+  /** schema 状态、补全与查询历史的来源，由页面层交给 GraphQL 页签。 */
+  graphqlTools: GraphQlPanelTools;
   patchDraft: (patch: Partial<EndpointDraft>) => void;
   onFormatResult: (result: FormatResult) => void;
 }) {
@@ -116,6 +120,13 @@ export function RequestTabPanels({
           keySuggestions={headerSuggestions}
           varEntries={varEntries}
           envName={envName}
+        />
+      )}
+      {tab === 'graphql' && (
+        <GraphQlPanel
+          value={graphql}
+          onChange={(next) => patchDraft({ graphql: next })}
+          {...graphqlTools}
         />
       )}
       {tab === 'body' && (

@@ -50,6 +50,11 @@ export function buildOrderedHeaders(
   missing: MissingTracker,
   boundary: string | null,
   binaryContentType?: string | null,
+  /**
+   * GraphQL 的 Content-Type。payload 的形状由组装器决定，用户的 body 设置不参与，故这里
+   * 直接钉住 `application/json`；它的位置与 body 模式推导出的那条相同（Accept 之前）。
+   */
+  overrideContentType?: string | null,
 ): Array<[string, string]> {
   const out: Array<[string, string]> = [];
   for (const h of headers) {
@@ -61,14 +66,21 @@ export function buildOrderedHeaders(
 
   const isMultipart = bodyMode === 'multipart';
   const multipartCt = isMultipart && boundary !== null ? multipartContentType(boundary) : null;
+  // GraphQL 的 payload 一律是 JSON，与 multipart 一样由组装期决定值：用户写过就就地替换，
+  // 没写过就补一条。两者不会同时成立——protocol 为 graphql 时 body 设置不参与组装。
+  const fixedCt = overrideContentType ?? multipartCt;
   const existingCt = out.findIndex(([k]) => k.toLowerCase() === 'content-type');
 
-  if (multipartCt !== null) {
+  if (fixedCt !== null) {
     // `buildOrderedHeaders` 就地替换用户自己写过的那条 Content-Type 的**值**，header 名保留用户的
-    // 大小写。multipart 的 body 由 boundary 框出来，用户那条值在结构上描述不了它——留着就是
-    // 「发得错」：请求发得出去、服务端解析不出分片，而用户看不出异常。
+    // 大小写。multipart 的 body 由 boundary 框出来、GraphQL 的 payload 是 JSON，用户那条值在结构上
+    // 描述不了它——留着就是「发得错」：请求发得出去、服务端解析不出内容，而用户看不出异常。
     if (existingCt !== -1) {
-      out[existingCt] = [out[existingCt]![0], multipartCt];
+      out[existingCt] = [out[existingCt]![0], fixedCt];
+    } else if (overrideContentType !== null) {
+      // GraphQL 的值在组装前就定了，位置与 body 模式推导出的 Content-Type 相同：
+      // Accept 之前。Rust 侧同样先放它再加默认 Accept（见 fixtures/resolve-parity.json）。
+      out.push(['Content-Type', fixedCt]);
     }
   } else {
     // `buildOrderedHeaders` 按 body.mode 补 Content-Type：用户已设过（不分大小写）就不加；mode
@@ -101,7 +113,9 @@ export function buildOrderedHeaders(
     }
   }
 
-  // multipart 且用户没写过 Content-Type 时，`buildOrderedHeaders` 把 Content-Type 追加到列表**末尾**，与 Rust 侧 `multipart::apply` 的追加位置一致。
+  // multipart 的 Content-Type 含每次都现生成的 boundary，故它与 Rust 侧 `multipart::apply`
+  // 一样在装配 body 时才追加，位置在列表**末尾**（Accept 之后）。GraphQL 不在这里：它的值
+  // 已经在上面的固定位放好了。
   if (multipartCt !== null && existingCt === -1) {
     out.push(['Content-Type', multipartCt]);
   }

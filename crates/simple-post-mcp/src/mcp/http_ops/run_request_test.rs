@@ -267,3 +267,27 @@ async fn a_run_request_reports_the_variables_it_could_not_resolve() {
     assert!(text.contains("nothing"), "解析不到的变量必须报出来：{text}");
     assert_eq!(seen.lock().unwrap().len(), 1);
 }
+
+/// 会话式传输发不出去：必须在连 socket、解析变量之前就拒绝。
+#[tokio::test]
+async fn a_run_request_refuses_sse_and_websocket_before_dialing() {
+    let (api, seen) = stub().await;
+    let st = mcp_state("protocol");
+
+    for protocol in ["sse", "websocket"] {
+        let err = tool_api_run_request(
+            &st,
+            json!({ "method": "GET", "url": format!("{api}/x"), "protocol": protocol }),
+        )
+        .await
+        .expect_err("streaming protocols are not sent by MCP");
+        assert!(
+            matches!(&err, AppError::Validation(message) if message.contains("应用内打开连接")),
+            "{protocol}: {err:?}"
+        );
+    }
+    assert!(
+        seen.lock().unwrap().is_empty(),
+        "no request may reach the socket"
+    );
+}

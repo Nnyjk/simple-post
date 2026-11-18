@@ -60,7 +60,10 @@ reqwest = { version = "0.12", default-features = false, features = [
     "brotli",
     "deflate",
     "http2",
-  "json",
+    "json",
+    # SSE：`Response::chunk()` 只在开这个 feature 时存在（`reqwest` 的流式响应体）。
+    # 关掉它，`/api/http/stream` 就只能拿整块 body，流也就没有意义。
+    "stream",
 ] }
 clap = { version = "4", features = ["derive", "env"] }
 
@@ -118,6 +121,33 @@ base64 = "0.23"
 # 重定向限制与体积上限会被绕过，成为第二条出站通道。出站由
 # `oauth2::AsyncHttpClient` 适配，见 `crates/simple-post-core/src/oauth2/http_client.rs`。
 oauth2 = { version = "5.0.0", default-features = false }
+
+# SSE 的 axum 响应要求 `Stream`，而 tokio 的 mpsc 接收端不是；`stream::unfold` 与
+# WebSocket 的 `SinkExt`/`StreamExt` 都出自这里。它已在 reqwest/hyper-util 的树里，
+# 显式声明只是为了能直接 `use`。
+futures-util = "0.3"
+
+# WebSocket 会话（issue #12）。`connect` 提供 `connect_async`，`rustls-tls-webpki-roots`
+# 让 WSS 的根证书与 HTTP 侧同一套（内置 Mozilla 根），不引 OS 证书库那条路。
+tokio-tungstenite = { version = "0.26", default-features = false, features = [
+    "connect",
+    "handshake",
+    "rustls-tls-webpki-roots",
+] }
+# WSS 的 `acceptInvalidCerts` 要自己造校验器，而 tokio-tungstenite 不重导出 rustls。
+# 版本与 reqwest 的 `rustls-tls` 拉进来的同一份（0.23）；关掉 default 的 aws-lc-rs，
+# 用树里已有的 ring，不新增任何编译单元。
+rustls = { version = "0.23", default-features = false, features = [
+    "ring",
+    "std",
+    "tls12",
+] }
+# WSS 的根证书底座：版本与 tokio-tungstenite 的 `rustls-tls-webpki-roots` 拉进来的
+# 那份相同（0.26），只是要显式读那份 trust anchor 列表。
+webpki-roots = "0.26"
+# WSS 的客户端证书/CA 要从 PEM 读成 rustls 的类型。reqwest 的 rustls 后端不重导出
+# 解析器，故显式声明；版本取当前主版本 2，不引入第二个主版本。
+rustls-pemfile = "2"
 
 # Cross-platform paths
 dirs = "7"

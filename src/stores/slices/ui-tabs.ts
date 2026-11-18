@@ -9,7 +9,6 @@ import type {
   SettingsCategoryId,
   TabKind,
 } from '../store-types';
-import type { EndpointResponseState } from './ui-response';
 
 /**
  * ui-tabs —— 工作区标签条与每个 endpoint 的编辑草稿。
@@ -186,8 +185,9 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
         endpointDrafts,
         dirtyTabIds,
         draftEndpoints,
-        // 响应是挂在标签上的，故关标签要把它带走——同一套规矩的第四样东西。
-        lastResponses: withoutResponses(s.lastResponses, [tabId]),
+        // 响应与流视图都挂在标签上，故关标签要把它们带走——同一套规矩的其余成员。
+        lastResponses: withoutTabKeys(s.lastResponses, [tabId]),
+        lastStreams: withoutTabKeys(s.lastStreams, [tabId]),
       };
     }),
   setActiveTab: (tabId) =>
@@ -292,28 +292,31 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
           nextDrafts[t.id] = s.endpointDrafts[t.id];
         }
       }
+      const removedIds = s.openTabs
+        .filter((t) => !valid.some((v) => v.id === t.id))
+        .map((t) => t.id);
       return {
         openTabs: valid,
         activeTabId: nextActive,
         dirtyTabIds: nextDirty,
         endpointDrafts: nextDrafts,
-        // 被清扫掉的标签（底层实体已经没了）带走的那份响应。留下的标签继续用自己那份，故这里只删被移除的那些。
-        lastResponses: withoutResponses(
-          s.lastResponses,
-          s.openTabs.filter((t) => !valid.some((v) => v.id === t.id)).map((t) => t.id),
-        ),
+        // 被清扫掉的标签（底层实体已经没了）带走的那份响应与流视图。留下的标签继续用自己
+        // 那份，故这里只删被移除的那些。
+        lastResponses: withoutTabKeys(s.lastResponses, removedIds),
+        lastStreams: withoutTabKeys(s.lastStreams, removedIds),
       };
     }),
   closeAllTabs: () =>
-    set((s) => ({
+    set(() => ({
       openTabs: [],
       activeTabId: null,
       dirtyTabIds: new Set(),
       endpointDrafts: {},
       // 与上面同一条理由、上一级：关掉的 draft 标签就是一份再也存不下去的草稿，故「全关」必须把文档一起带走。
       draftEndpoints: {},
-      // 全关 ⇒ 所有标签都没了 ⇒ 所有响应一起走。
-      lastResponses: withoutResponses(s.lastResponses, Object.keys(s.lastResponses)),
+      // 全关 ⇒ 所有标签都没了 ⇒ 所有响应与流视图一起走。
+      lastResponses: {},
+      lastStreams: {},
     })),
   closeSavedTabs: () => {
     const state = get();
@@ -345,9 +348,13 @@ export const createUiTabs: StateCreator<AppState, [], [], UiTabs> = (set, get) =
         activeTabId: nextActive,
         endpointDrafts: nextDrafts,
         draftEndpoints: nextDraftEndpoints,
-        // 被关掉的标签带走它的响应——与草稿、文档同一条理由。
-        lastResponses: withoutResponses(
+        // 被关掉的标签带走它的响应与流视图——与草稿、文档同一条理由。
+        lastResponses: withoutTabKeys(
           s.lastResponses,
+          toClose.map((t) => t.id),
+        ),
+        lastStreams: withoutTabKeys(
+          s.lastStreams,
           toClose.map((t) => t.id),
         ),
       };
@@ -461,18 +468,19 @@ function selectionFor(tab: OpenTab): Selection {
 }
 
 /**
- * 丢掉这些标签带走的**响应状态**。响应是挂在标签上的（见 `slices/ui-response.ts`），故移除
- * 标签的每条路径（关标签、清扫失效标签、全关、删接口、删项目）都要带走那份响应：标签 id
- * 会被复用（同一个接口重新打开就是同一个 id），漏掉一处，新开的标签就会看到上一条命途的响应。
+ * 丢掉这些标签带走的**每标签状态**：当前响应（`lastResponses`，见 `slices/ui-response.ts`）
+ * 与流式会话视图（`lastStreams`，见 `slices/stream-slice.ts`）。移除标签的每条路径（关标签、
+ * 清扫失效标签、全关、删接口、删项目）都要带走它们：标签 id 会被复用（同一个接口重新打开
+ * 就是同一个 id），漏掉一处，新开的标签就会看到上一条命途的响应或帧。
  *
  * 没有要清的键时返回**原引用**：这样这次 `set()` 不会因为一张没变过的表而多出新对象，
  * 订阅它的组件也就不会白白重渲染。
  */
-function withoutResponses(
-  responses: Record<string, EndpointResponseState>,
+function withoutTabKeys<T>(
+  map: Record<string, T>,
   removedTabIds: Iterable<string>,
-): Record<string, EndpointResponseState> {
-  const next = { ...responses };
+): Record<string, T> {
+  const next = { ...map };
   let changed = false;
   for (const id of removedTabIds) {
     if (id in next) {
@@ -480,7 +488,7 @@ function withoutResponses(
       changed = true;
     }
   }
-  return changed ? next : responses;
+  return changed ? next : map;
 }
 
 /**

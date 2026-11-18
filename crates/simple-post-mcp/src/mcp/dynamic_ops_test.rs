@@ -116,6 +116,8 @@ fn test_state_pair(p1_permission: Permission, p2_permission: Permission) -> Arc<
                 test_script: None,
                 tls: None,
                 responses: vec![],
+                protocol: Default::default(),
+                graphql: None,
             }),
         )?;
         db::environments::create(
@@ -176,6 +178,8 @@ fn test_state_pair(p1_permission: Permission, p2_permission: Permission) -> Arc<
                 test_script: None,
                 tls: None,
                 responses: vec![],
+                protocol: Default::default(),
+                graphql: None,
             }),
         )?;
         Ok(())

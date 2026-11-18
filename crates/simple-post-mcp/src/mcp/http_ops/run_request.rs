@@ -28,6 +28,26 @@ pub(super) async fn tool_api_run_request(
     if a.url.trim().is_empty() {
         return Err(AppError::Validation("url must not be empty".into()));
     }
+    if let Some(protocol) = a
+        .protocol
+        .as_deref()
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+    {
+        match protocol.to_ascii_lowercase().as_str() {
+            "http" | "graphql" => {}
+            "sse" | "websocket" => {
+                return Err(AppError::Validation(format!(
+                    "SSE / WebSocket 端点需要在应用内打开连接，MCP 只能发送 HTTP 与 GraphQL（该端点协议是 {protocol}）"
+                )));
+            }
+            other => {
+                return Err(AppError::Validation(format!(
+                    "未知的 protocol {other:?}；可选 http / graphql"
+                )));
+            }
+        }
+    }
 
     let method = simple_post_core::domain::parse_http_method(&a.method)?;
     let headers = flatten_key_values(a.headers.as_ref(), "headers")?;
@@ -99,6 +119,8 @@ pub(super) async fn tool_api_run_request(
         // 临时请求没有端点，故它没有「端点自带的那份」HTTPS 设置。
         tls: None,
         responses: vec![],
+        protocol: Default::default(),
+        graphql: None,
     };
 
     let overrides = crate::variable_fill::EndpointOverrides {

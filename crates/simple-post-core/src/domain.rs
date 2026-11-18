@@ -38,8 +38,8 @@ pub use project::{
 };
 pub use resource::{
     ensure_response_ids, is_media_type, is_response_status, response_problems, EndpointDetail,
-    EndpointDetailPatch, EndpointResource, ResourceNode, ResourceNodePatch, ResourceNodeType,
-    ResponseDefinition, ResponseProblem, ResponseProblemKind,
+    EndpointDetailPatch, EndpointResource, GraphQlRequest, RequestProtocol, ResourceNode,
+    ResourceNodePatch, ResourceNodeType, ResponseDefinition, ResponseProblem, ResponseProblemKind,
 };
 pub use response::{
     ApiResponse, ResponseHistoryEntry, StoredRequestSnapshot, StoredResponse,

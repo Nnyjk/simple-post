@@ -244,6 +244,14 @@ function StatusCell({ outcome, isRunning }: { outcome: BatchOutcome | null; isRu
       </span>
     );
   }
+  if (outcome.failure === 'skipped') {
+    // 主动跳过不是错误：用中性色，原因放在 title 里。
+    return (
+      <span className="text-muted-foreground" title={outcome.error}>
+        未执行
+      </span>
+    );
+  }
   return (
     <span className="text-destructive" title={outcome.error}>
       {outcome.status > 0 ? outcome.status : failureLabel(outcome)}
@@ -261,6 +269,8 @@ function failureLabel(outcome: BatchOutcome): string {
       return '已中止';
     case 'transport':
       return '无响应';
+    case 'skipped':
+      return '未执行';
     default:
       return '失败';
   }

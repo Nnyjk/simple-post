@@ -303,3 +303,62 @@ fn a_repeated_upsert_never_grows_the_tree() {
         "重复三次 upsert 之后，树上只该多出一个模块和一个集合"
     );
 }
+
+// =========================================================================
+// protocol / graphql 的入参转换
+// =========================================================================
+
+#[test]
+fn the_protocol_defaults_to_http_and_accepts_the_four_wire_values() {
+    use crate::domain::RequestProtocol;
+    use crate::spec::input::{parse_protocol, PROTOCOL_VALUES};
+
+    assert_eq!(parse_protocol(None).unwrap(), RequestProtocol::Http);
+    assert_eq!(parse_protocol(Some("")).unwrap(), RequestProtocol::Http);
+    assert_eq!(parse_protocol(Some("  ")).unwrap(), RequestProtocol::Http);
+    for (raw, want) in [
+        ("http", RequestProtocol::Http),
+        ("graphql", RequestProtocol::GraphQl),
+        ("sse", RequestProtocol::Sse),
+        ("websocket", RequestProtocol::WebSocket),
+        ("GraphQL", RequestProtocol::GraphQl),
+    ] {
+        assert_eq!(parse_protocol(Some(raw)).unwrap(), want, "{raw}");
+    }
+    // JSON Schema 里的枚举与解析器接受的值必须来自同一处。
+    assert_eq!(
+        PROTOCOL_VALUES,
+        &["http", "graphql", "sse", "websocket"],
+        "PROTOCOL_VALUES 与 RequestProtocol 的线上值一一对应"
+    );
+    let err = parse_protocol(Some("grpc")).unwrap_err();
+    assert!(err.to_string().contains("grpc"), "{err}");
+}
+
+#[test]
+fn a_graphql_config_must_name_a_non_blank_query() {
+    use crate::spec::input::{coerce_graphql, GraphQlRequestInput};
+
+    assert!(
+        coerce_graphql(None).unwrap().is_none(),
+        "没提到就什么都不要"
+    );
+    let input = GraphQlRequestInput {
+        query: "  ".into(),
+        variables: "{}".into(),
+        operation_name: None,
+    };
+    let err = coerce_graphql(Some(input)).unwrap_err();
+    assert!(err.to_string().contains("graphql.query"), "{err}");
+
+    let input = GraphQlRequestInput {
+        query: "{ ping }".into(),
+        variables: r#"{"id": "{{id}}"}"#.into(),
+        operation_name: Some("Ping".into()),
+    };
+    let got = coerce_graphql(Some(input)).unwrap().unwrap();
+    assert_eq!(got.query, "{ ping }");
+    // variables 原样保留：其中的 `{{id}}` 要等组装时才替换。
+    assert_eq!(got.variables, r#"{"id": "{{id}}"}"#);
+    assert_eq!(got.operation_name.as_deref(), Some("Ping"));
+}

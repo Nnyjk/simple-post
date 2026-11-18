@@ -50,6 +50,10 @@ pub(super) struct RunRequestArgs {
     pub(super) follow_redirects: Option<bool>,
     #[serde(default)]
     pub(super) max_response_size_kb: Option<u64>,
+    /// 传输协议。SSE / WebSocket 是会话式传输，这个工具发不出去；GraphQL 照原样发，
+    /// body 由调用方自己写成 GraphQL 载荷。
+    #[serde(default)]
+    pub(super) protocol: Option<String>,
 }
 
 /// `api_call_endpoint` 的入参。

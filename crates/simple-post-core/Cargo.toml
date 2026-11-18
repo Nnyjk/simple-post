@@ -20,6 +20,11 @@ sha2 = { workspace = true }
 base64 = { workspace = true }
 tokio = { workspace = true }
 reqwest = { workspace = true }
+futures-util = { workspace = true }
+tokio-tungstenite = { workspace = true }
+rustls = { workspace = true }
+webpki-roots = { workspace = true }
+rustls-pemfile = { workspace = true }
 rusqlite = { workspace = true }
 r2d2 = { workspace = true }
 r2d2_sqlite = { workspace = true }

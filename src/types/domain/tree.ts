@@ -1,8 +1,10 @@
 import type {
   AuthConfig,
+  GraphQlRequest,
   HttpMethod,
   KeyValue,
   RequestBody,
+  RequestProtocol,
   ResponseDefinition,
   TlsSettings,
 } from './request';
@@ -52,6 +54,16 @@ export interface ResourceNode {
 export interface EndpointDetail {
   nodeId: string;
   method: HttpMethod;
+  /**
+   * 请求协议。它是 endpoint 的属性，不随环境变化。缺省（早于这个字段的行、或内存里手搓的
+   * detail）按 `http` 读，消费方一律写 `detail.protocol ?? 'http'`。
+   */
+  protocol?: RequestProtocol;
+  /**
+   * 协议为 `graphql` 时的查询与 variables。`null`/缺省 = 还没填。切到别的协议时它不丢，
+   * 切回 GraphQL 还在。
+   */
+  graphql?: GraphQlRequest | null;
   /**
    * 请求 URL 的 path 部分，**不含**任何 baseUrl；完整 URL 在发送时由
    * `resolveBaseUrl`（见 lib/url）算出。存 path 是为了让同一个 endpoint

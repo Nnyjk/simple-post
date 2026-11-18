@@ -20,6 +20,7 @@ import { HttpTester } from '@/features/http-tester/HttpTester';
 import { WorkspaceTabs } from '@/features/workspace/WorkspaceTabs';
 import { Splitter } from '@/components/ui/splitter';
 import { useAppStore } from '@/stores/app-store';
+import type { RequestProtocol } from '@/types/domain';
 
 // ---------------------------------------------------------------------------
 // 代码分割 —— 每个 lazy 边界的原因见其上方的说明。这些都是只存在于*本外壳之内*的面板，
@@ -72,6 +73,13 @@ function PanelFallback({ label }: { label?: string }) {
 export function WorkspaceShell() {
   const activeTab = useAppStore((s) => s.openTabs.find((t) => t.id === s.activeTabId) ?? null);
   const activeProjectId = useAppStore((s) => s.activeProjectId);
+  // 流式协议自己画响应区（SSE 面板 / WS 会话面板），故这一栏不再分上下两半。
+  // 返回字符串而非对象：selector 每次渲染都跑，新对象会让 store 的比较失效。
+  const activeProtocol = useAppStore((s): RequestProtocol => {
+    const id = s.activeTabId;
+    if (!id) return 'http';
+    return s.endpointDrafts[id]?.protocol ?? s.endpointDetails[id]?.protocol ?? 'http';
+  });
 
   // 本地的分隔条状态 —— HttpTester（上）/ ResponseViewer（下）的比例。仅在当前标签是接口
   // 时有意义；项目 / 模块 / 集合标签的内容区是单一滚动区。
@@ -85,13 +93,15 @@ export function WorkspaceShell() {
   // 无条件预热会把约 450 kB 编辑器拉进一个只显示项目卡片的工作区。
   useEffect(() => {
     if (activeTab?.kind !== 'endpoint') return;
+    // SSE / WS 没有 body 编辑器与响应查看器可预热。
+    if (activeProtocol === 'sse' || activeProtocol === 'websocket') return;
     const t = setTimeout(() => {
       void import('@/features/http-tester/BodyEditor');
       void import('@/features/response-viewer/ResponseViewer');
       void import('@/features/http-tester/DocsEditor');
     }, 0);
     return () => clearTimeout(t);
-  }, [activeTab?.kind]);
+  }, [activeTab?.kind, activeProtocol]);
 
   // `renderActiveContent` 按当前标签类型决定右栏渲染什么：
   //   endpoint → 请求 / 响应上下分栏
@@ -114,6 +124,15 @@ export function WorkspaceShell() {
     // `useActiveEndpointResource` 以同一种形状交出两者，故 tester 只跑一条代码路径，未保存
     // 的接口也能用与已保存接口相同的 UI 编辑、发送与预览。
     if (activeTab.kind === 'endpoint' || activeTab.kind === 'endpoint-draft') {
+      // SSE 与 WebSocket 的响应区就是 tester 自己的面板：事件 / 帧不属于一次请求的结果，
+      // 故不再挂 ResponseViewer，也不再画分隔条。
+      if (activeProtocol === 'sse' || activeProtocol === 'websocket') {
+        return (
+          <div className="flex min-h-0 flex-1 flex-col">
+            <HttpTester />
+          </div>
+        );
+      }
       return (
         <>
           <div

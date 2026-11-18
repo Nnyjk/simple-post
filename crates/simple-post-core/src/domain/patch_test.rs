@@ -143,6 +143,8 @@ fn a_resource_read_back_can_be_written_back_as_a_patch() {
         test_script: None,
         tls: None,
         responses: vec![],
+        protocol: Default::default(),
+        graphql: None,
     };
     let patch: EndpointDetailPatch =
         serde_json::from_value(serde_json::to_value(&detail).unwrap()).unwrap();

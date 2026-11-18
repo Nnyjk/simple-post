@@ -108,6 +108,8 @@ fn detail(case: &EndpointCase) -> EndpointDetail {
         test_script: None,
         tls: None,
         responses: vec![],
+        protocol: Default::default(),
+        graphql: None,
     }
 }
 

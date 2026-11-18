@@ -127,6 +127,8 @@ fn test_state_with(base_url: &str, url: &str, body_content: &str) -> Arc<AppStat
                 test_script: None,
                 tls: None,
                 responses: vec![],
+                protocol: Default::default(),
+                graphql: None,
             },
         )?;
         Ok(())
@@ -248,6 +250,8 @@ fn two_project_state() -> Arc<AppState> {
                 test_script: None,
                 tls: None,
                 responses: vec![],
+                protocol: Default::default(),
+                graphql: None,
             },
         )?;
         db::endpoint_details::create(
@@ -269,6 +273,8 @@ fn two_project_state() -> Arc<AppState> {
                 test_script: None,
                 tls: None,
                 responses: vec![],
+                protocol: Default::default(),
+                graphql: None,
             },
         )?;
         Ok(())

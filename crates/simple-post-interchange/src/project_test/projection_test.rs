@@ -178,3 +178,211 @@ fn an_endpoint_without_a_detail_row_is_reported_not_dropped_silently() {
     assert_eq!(errors.len(), 1, "{:?}", ex.diagnostics);
     assert_eq!(errors[0].pointer, format!("/nodes/{orphan}"));
 }
+
+/// 会话式传输没有「一次请求一份响应」可描述：导出跳过并按诊断说明。
+#[test]
+fn streaming_endpoints_are_skipped_with_a_diagnostic() {
+    use simple_post_core::domain::{EndpointDetailPatch, RequestProtocol};
+    use simple_post_core::error::AppError;
+
+    let pool = temp_pool("skip-protocol");
+    let s = seed_project(&pool);
+    let id = add_endpoint(&pool, &s, &s.module_id);
+    db::with_tx(&pool, |conn| {
+        db::endpoint_details::update(
+            conn,
+            &id,
+            EndpointDetailPatch {
+                protocol: Some(RequestProtocol::Sse),
+                ..Default::default()
+            },
+        )?;
+        Ok::<(), AppError>(())
+    })
+    .expect("mark the endpoint as sse");
+
+    let ex = project(&pool, &s.project_id, &s.module_id, None);
+    assert_eq!(ex.endpoint_count(), 0, "SSE 端点不能出现在导出里");
+    assert!(
+        ex.diagnostics
+            .iter()
+            .any(|d| d.message.contains("已跳过") && d.message.contains("sse")),
+        "跳过必须留下诊断：{:?}",
+        ex.diagnostics
+    );
+}
+
+/// GraphQL 端点导出成真正会发出的请求：POST、JSON 正文、`Content-Type`。
+#[test]
+fn graphql_endpoints_export_as_the_post_they_send() {
+    use simple_post_core::domain::{
+        BodyMode, EndpointDetailPatch, GraphQlRequest, HttpMethod, RequestProtocol,
+    };
+    use simple_post_core::error::AppError;
+
+    let pool = temp_pool("graphql");
+    let s = seed_project(&pool);
+    let id = add_endpoint(&pool, &s, &s.module_id);
+    db::with_tx(&pool, |conn| {
+        db::endpoint_details::update(
+            conn,
+            &id,
+            EndpointDetailPatch {
+                protocol: Some(RequestProtocol::GraphQl),
+                graphql: Some(Some(GraphQlRequest {
+                    query: "{ me { id } }".into(),
+                    variables: "{\"b\":1,\"a\":2}".into(),
+                    operation_name: Some("Me".into()),
+                })),
+                ..Default::default()
+            },
+        )?;
+        Ok::<(), AppError>(())
+    })
+    .expect("mark the endpoint as graphql");
+
+    let ex = project(&pool, &s.project_id, &s.module_id, None);
+    let endpoint = &ex.modules[0].endpoints[0];
+    assert_eq!(endpoint.method, HttpMethod::Post);
+    assert_eq!(endpoint.body.mode, BodyMode::Json);
+    let body: serde_json::Value = serde_json::from_str(&endpoint.body.content).expect("json body");
+    assert_eq!(body["query"], "{ me { id } }");
+    assert_eq!(body["variables"], serde_json::json!({"b": 1, "a": 2}));
+    assert_eq!(body["operationName"], "Me");
+    assert!(
+        endpoint.headers.iter().any(|h| {
+            h.key.eq_ignore_ascii_case("content-type") && h.value == "application/json"
+        }),
+        "导出必须带上 Content-Type：{:?}",
+        endpoint.headers
+    );
+}
+
+/// WebSocket 与 SSE 同一档：导出跳过并说明。
+#[test]
+fn websocket_endpoints_are_skipped_with_a_diagnostic() {
+    use simple_post_core::domain::{EndpointDetailPatch, RequestProtocol};
+    use simple_post_core::error::AppError;
+
+    let pool = temp_pool("skip-ws");
+    let s = seed_project(&pool);
+    let id = add_endpoint(&pool, &s, &s.module_id);
+    db::with_tx(&pool, |conn| {
+        db::endpoint_details::update(
+            conn,
+            &id,
+            EndpointDetailPatch {
+                protocol: Some(RequestProtocol::WebSocket),
+                ..Default::default()
+            },
+        )?;
+        Ok::<(), AppError>(())
+    })
+    .expect("mark the endpoint as websocket");
+
+    let ex = project(&pool, &s.project_id, &s.module_id, None);
+    assert_eq!(ex.endpoint_count(), 0, "WebSocket 端点不能出现在导出里");
+    assert!(ex
+        .diagnostics
+        .iter()
+        .any(|d| { d.message.contains("已跳过") && d.message.contains("websocket") }));
+}
+
+/// 停用的 `Content-Type` 不算写过：导出补一条启用的，停用那条原样保留。
+#[test]
+fn a_disabled_content_type_still_gets_a_json_one_for_graphql() {
+    use simple_post_core::domain::{
+        EndpointDetailPatch, GraphQlRequest, KeyValue, RequestProtocol,
+    };
+    use simple_post_core::error::AppError;
+
+    let pool = temp_pool("graphql-disabled-ct");
+    let s = seed_project(&pool);
+    let id = add_endpoint(&pool, &s, &s.module_id);
+    db::with_tx(&pool, |conn| {
+        db::endpoint_details::update(
+            conn,
+            &id,
+            EndpointDetailPatch {
+                protocol: Some(RequestProtocol::GraphQl),
+                graphql: Some(Some(GraphQlRequest {
+                    query: "{ ping }".into(),
+                    variables: String::new(),
+                    operation_name: None,
+                })),
+                headers: Some(vec![KeyValue {
+                    id: "h-disabled".into(),
+                    key: "Content-Type".into(),
+                    value: "text/plain".into(),
+                    enabled: false,
+                    description: None,
+                }]),
+                ..Default::default()
+            },
+        )?;
+        Ok::<(), AppError>(())
+    })
+    .expect("mark the endpoint as graphql");
+
+    let ex = project(&pool, &s.project_id, &s.module_id, None);
+    let headers = &ex.modules[0].endpoints[0].headers;
+    assert!(
+        headers.iter().any(|h| {
+            h.enabled && h.key.eq_ignore_ascii_case("content-type") && h.value == "application/json"
+        }),
+        "缺一条启用的 application/json：{headers:?}"
+    );
+    assert!(
+        headers.iter().any(|h| {
+            !h.enabled && h.key.eq_ignore_ascii_case("content-type") && h.value == "text/plain"
+        }),
+        "停用的那条要原样保留：{headers:?}"
+    );
+}
+
+/// 用户启用的 `Content-Type` 不被覆盖：只在缺的时候补。
+#[test]
+fn an_enabled_content_type_keeps_the_users_value_for_graphql() {
+    use simple_post_core::domain::{
+        EndpointDetailPatch, GraphQlRequest, KeyValue, RequestProtocol,
+    };
+    use simple_post_core::error::AppError;
+
+    let pool = temp_pool("graphql-enabled-ct");
+    let s = seed_project(&pool);
+    let id = add_endpoint(&pool, &s, &s.module_id);
+    db::with_tx(&pool, |conn| {
+        db::endpoint_details::update(
+            conn,
+            &id,
+            EndpointDetailPatch {
+                protocol: Some(RequestProtocol::GraphQl),
+                graphql: Some(Some(GraphQlRequest {
+                    query: "{ ping }".into(),
+                    variables: String::new(),
+                    operation_name: None,
+                })),
+                headers: Some(vec![KeyValue {
+                    id: "h-ct".into(),
+                    key: "content-type".into(),
+                    value: "application/graphql+json".into(),
+                    enabled: true,
+                    description: None,
+                }]),
+                ..Default::default()
+            },
+        )?;
+        Ok::<(), AppError>(())
+    })
+    .expect("mark the endpoint as graphql");
+
+    let ex = project(&pool, &s.project_id, &s.module_id, None);
+    let headers = &ex.modules[0].endpoints[0].headers;
+    let content_types: Vec<&KeyValue> = headers
+        .iter()
+        .filter(|h| h.key.eq_ignore_ascii_case("content-type"))
+        .collect();
+    assert_eq!(content_types.len(), 1, "不该再补一条：{headers:?}");
+    assert_eq!(content_types[0].value, "application/graphql+json");
+    assert!(content_types[0].enabled);
+}

@@ -2,13 +2,14 @@
 
 use crate::db::{self, Connection};
 use crate::domain::{
-    AuthConfig, EndpointDetail, EndpointDetailPatch, EndpointResource, RequestBody, ResourceNode,
-    ResourceNodePatch, ResourceNodeType,
+    AuthConfig, EndpointDetail, EndpointDetailPatch, EndpointResource, GraphQlRequest, RequestBody,
+    RequestProtocol, ResourceNode, ResourceNodePatch, ResourceNodeType,
 };
 use crate::error::AppError;
 use crate::spec::find_endpoint_by_identity;
 use crate::spec::input::{
-    check_auth_payload, coerce_key_values, coerce_responses, reject_schema_shaped_payload,
+    check_auth_payload, coerce_graphql, coerce_key_values, coerce_responses, parse_protocol,
+    reject_schema_shaped_payload,
 };
 
 use super::resolve::{resolve_environment_of, resolve_module_of, resolve_parent_of};
@@ -98,6 +99,10 @@ fn upsert_endpoint_of(
         }
         None => AuthConfig::default(),
     };
+    // 协议与 GraphQL 配置：`graphql` 点名了就必须带一个非空 query —— 一个没有 query 的
+    // GraphQL 请求发出去只会换回 GraphQL 层的错误，在这里说清更早。
+    let protocol = parse_protocol(def.protocol.as_deref())?;
+    let graphql = coerce_graphql(def.graphql.clone())?;
 
     // 端点不绑定环境：用哪个环境是发请求那一刻的事——界面按它自己的「当前环境」，
     // MCP 按每次调用点名的那个。故规格里没有任何东西要写进端点行。
@@ -127,7 +132,15 @@ fn upsert_endpoint_of(
             }
             EndpointIfExists::Duplicate => {}
             EndpointIfExists::Update => {
-                apply_endpoint_patch(conn, existing_id, def, &body, &auth)?;
+                apply_endpoint_patch(
+                    conn,
+                    existing_id,
+                    def,
+                    &body,
+                    &auth,
+                    protocol,
+                    graphql.clone(),
+                )?;
                 return Ok(EndpointOutcome {
                     created: false,
                     updated: true,
@@ -172,6 +185,8 @@ fn upsert_endpoint_of(
         test_script: def.test_script.clone(),
         // 接口规格里没有 HTTPS 出站设置这一项：证书是本机的东西，不随规格走。
         tls: None,
+        protocol,
+        graphql,
     };
     // `db::nodes::create` 一次写入节点与请求配置：只建节点会留下一个没有配置行的端点。
     db::nodes::create(conn, &node, Some(&detail))?;
@@ -201,6 +216,8 @@ fn apply_endpoint_patch(
     def: &EndpointDefinition,
     body: &RequestBody,
     auth: &AuthConfig,
+    protocol: RequestProtocol,
+    graphql: Option<GraphQlRequest>,
 ) -> Result<(), AppError> {
     let node_patch = ResourceNodePatch {
         parent_id: None,
@@ -235,6 +252,10 @@ fn apply_endpoint_patch(
         test_script: def.test_script.clone().map(Some),
         // 接口规格里没有 HTTPS 出站设置这一项：证书是本机的东西，不随规格走。
         tls: None,
+        // 规格没点名协议/GraphQL 配置时不动它们：`reuse` 与 `update` 的差别只在
+        // 「点了名的字段」，不是「把没写的字段重置成默认值」。
+        protocol: def.protocol.as_ref().map(|_| protocol),
+        graphql: def.graphql.as_ref().map(|_| graphql),
         ..Default::default()
     };
     if !node_patch.is_empty() {

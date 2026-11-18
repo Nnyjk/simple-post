@@ -98,6 +98,10 @@ impl CreateEndpointDetailOpts {
             pre_request_script: self.pre_request_script,
             test_script: self.test_script,
             tls: self.tls,
+            // `CreateEndpointOpts` 是桌面 `nodes_create` 的入参：协议默认 HTTP，
+            // GraphQL 配置走端点详情补丁，不在这里。
+            protocol: Default::default(),
+            graphql: None,
         }
     }
 }

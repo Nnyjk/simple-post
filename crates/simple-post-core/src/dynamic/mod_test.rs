@@ -900,6 +900,8 @@ fn pool_with_a_module() -> (db::DbPool, std::path::PathBuf) {
                 test_script: None,
                 tls: None,
                 responses: vec![],
+                protocol: Default::default(),
+                graphql: None,
             }),
         )?;
         Ok(())

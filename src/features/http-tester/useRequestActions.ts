@@ -14,10 +14,12 @@ import type {
   EndpointDetail,
   EnvSnapshot,
   EnvWrite,
+  RequestProtocol,
   ScriptOutcome,
   StoredRequestSnapshot,
   TlsSettings,
 } from '@/types/domain';
+import { pathParamsReady } from './model/path-param-gate';
 import { toRequestSnapshot } from './model/requestInput';
 
 /** 一个已存接口的补丁：`nodeId` 由目标行决定，补丁里不带。 */
@@ -40,6 +42,7 @@ export function useRequestActions({
   isDraft,
   draft,
   prepared,
+  protocol,
   prepareWithDynamic,
   dynamicNames,
   auth,
@@ -66,6 +69,8 @@ export function useRequestActions({
   isDraft: boolean;
   draft: EndpointDraft | undefined;
   prepared: PreparedRequest;
+  /** 这条端点当前的协议。流式协议不走这条发送路径。 */
+  protocol: RequestProtocol;
   /**
    * 用给定的动态变量值重新组装请求。发送前若解析出了新的动态变量值，就要用它们重新
    * 组装一次 —— 预览用的是 store 里上一批值，而发出去的那份必须是刚解析出来的那一份。
@@ -135,6 +140,10 @@ export function useRequestActions({
 
   const handleSend = useCallback(async () => {
     if (!endpointId) return;
+    // 流式协议不在这条路径上：SSE 走 `startSse` 建流，WebSocket 由面板收发帧。界面上的
+    // 发送按钮已经按 `sendActionFor` 分流，但快捷键与任何直接调用仍可能落到这里，而
+    // `ws://` 地址当成 HTTP 发出去只会失败得莫名其妙。
+    if (protocol === 'sse' || protocol === 'websocket') return;
     // 校验是请求的前置门：解析不了的 json body 不该让服务端去猜，照发只会让用户对着
     // 服务端解析错误，而这个错误本可以指出他敲错的那个字符。
     if (!runValidation()) return;
@@ -154,14 +163,10 @@ export function useRequestActions({
         const { values } = await resolveDynamicVariables(dynamicNames, activeProjectId);
         request = prepareWithDynamic(values);
       }
-      // 路径参数缺值时这里不发出去：它按 OpenAPI 惯例是必填的，带着 `{id}` 发出去只会换一个
-      // 含义不明的 404。这一步在动态变量解析**之后**：路径参数的值可能就是一个动态变量，
-      // 它取不到值时这个路径参数同样算「还没准备好」。
-      const missingPathParams = request.missingPathParams;
-      onPathParamGate(missingPathParams);
-      if (missingPathParams.length > 0) {
-        return;
-      }
+      // 路径参数缺值时这里不发出去。这一步在动态变量解析**之后**：路径参数的值可能就是一个
+      // 动态变量，它取不到值时这个路径参数同样算「还没准备好」。判断与 SSE / WS 建连共用
+      // `pathParamsReady`。
+      if (!pathParamsReady(request, onPathParamGate)) return;
       // 请求的一切都在 `prepared` 里 —— 后端是纯执行器，不会被告知请求来自哪个接口，这正是
       // 未保存的草稿也能发送的原因。「当前环境」只存在于 Zustand（不落库），故解析基于
       // 工作区当前环境，`prepareRequest` 已经折进去了。
@@ -218,6 +223,7 @@ export function useRequestActions({
     onPathParamGate,
     prepared,
     prepareWithDynamic,
+    protocol,
     dynamicNames,
     resolveDynamicVariables,
     activeProjectId,

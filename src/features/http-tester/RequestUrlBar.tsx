@@ -2,14 +2,16 @@ import { Play, Save, Copy, Check } from 'lucide-react';
 import type { RefObject } from 'react';
 import { Button } from '@/components/ui/button';
 import { MethodPicker } from '@/components/ui/method-picker';
+import { MethodPill } from '@/components/ui/method-pill';
 import { Tooltip } from '@/components/ui/tooltip';
 import { BaseUrlPicker, type BaseUrlSelection } from './BaseUrlPicker';
+import { ProtocolPicker } from './ProtocolPicker';
 import { VarHintInput, type VarEntry } from './var-hint';
 import { cn } from '@/lib/utils';
-import type { HttpMethod } from '@/types/domain';
+import type { HttpMethod, RequestProtocol } from '@/types/domain';
 
 /**
- * 请求栏：方法、地址来源选择器、URL 输入框，以及发送 / 复制 cURL / 保存三个动作。
+ * 请求栏：协议、方法、地址来源选择器、URL 输入框，以及发送 / 复制 cURL / 保存三个动作。
  *
  * 它渲染**当前有效**的请求（草稿叠已存的 detail）；编辑经回调回写草稿。请求本身的
  * 组装不在这里——它要与发送和 cURL 预览共用同一个对象，故留在 `HttpTester`。
@@ -18,6 +20,7 @@ import type { HttpMethod } from '@/types/domain';
  * `{{key}}`（见 `var-hint`）。
  */
 export function RequestUrlBar({
+  protocol,
   method,
   resolvedBaseUrl,
   moduleBaseUrl,
@@ -34,6 +37,7 @@ export function RequestUrlBar({
   isDraft,
   varEntries,
   envName,
+  onProtocolChange,
   onMethodChange,
   onSelectionChange,
   onUrlChange,
@@ -41,6 +45,7 @@ export function RequestUrlBar({
   onSave,
   onCopyCurl,
 }: {
+  protocol: RequestProtocol;
   method: HttpMethod;
   resolvedBaseUrl: string;
   /** 环境里「环境 × 模块」那一格的地址。`null` = 没有那一格。 */
@@ -60,6 +65,7 @@ export function RequestUrlBar({
   varEntries: VarEntry[];
   /** 当前环境名，显示在候选浮层的标题上。 */
   envName?: string;
+  onProtocolChange: (next: RequestProtocol) => void;
   onMethodChange: (m: HttpMethod) => void;
   onSelectionChange: (next: BaseUrlSelection) => void;
   onUrlChange: (next: string) => void;
@@ -69,7 +75,16 @@ export function RequestUrlBar({
 }) {
   return (
     <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card/30 px-4 py-2.5">
-      <MethodPicker value={method} onChange={onMethodChange} className="border-0" />
+      <ProtocolPicker value={protocol} onChange={onProtocolChange} className="h-9 w-[7.5rem]" />
+      {/* GraphQL 一律 POST：方法位只读，展示的不是存储值而是组装后的真实动词。
+          切回 HTTP 时仍在原处的方法照旧可改。 */}
+      {protocol === 'graphql' ? (
+        <span title="GraphQL 请求固定用 POST 发送，方法不可改">
+          <MethodPill method="POST" />
+        </span>
+      ) : (
+        <MethodPicker value={method} onChange={onMethodChange} className="border-0" />
+      )}
       <BaseUrlPicker
         resolvedBaseUrl={resolvedBaseUrl}
         moduleBaseUrl={moduleBaseUrl}

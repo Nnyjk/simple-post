@@ -77,6 +77,12 @@ pub(super) struct EndpointCreateArgs {
     /// 它不上线：既不参与发送，也不从调用历史里反推。
     #[serde(default)]
     pub responses: Option<Vec<ResponseDefinitionInput>>,
+    /// 传输协议：`http`（缺省）/ `graphql` / `sse` / `websocket`。
+    #[serde(default)]
+    pub protocol: Option<String>,
+    /// GraphQL 的 query / variables / operationName。`protocol=graphql` 时用来拼请求体。
+    #[serde(default)]
+    pub graphql: Option<simple_post_core::spec::input::GraphQlRequestInput>,
 }
 
 /// `tls` 载荷的线格式。

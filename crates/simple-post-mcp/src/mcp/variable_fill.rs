@@ -257,7 +257,7 @@ fn endpoint_project_id(pool: &simple_post_core::db::DbPool, node_id: &str) -> St
 /// base URL 里也可能有 `{version}` 这样的占位符，而发送那侧是在拼接后的 URL 上做
 /// 替换，只看端点自己的 URL 会漏掉它。
 fn validate(endpoint: &EndpointDetail, url: &str) -> Vec<Value> {
-    use simple_post_core::domain::{AuthType, BodyMode, ResponseProblemKind};
+    use simple_post_core::domain::{AuthType, BodyMode, RequestProtocol, ResponseProblemKind};
     let mut issues = Vec::new();
 
     if endpoint.url.trim().is_empty() {
@@ -442,6 +442,45 @@ fn validate(endpoint: &EndpointDetail, url: &str) -> Vec<Value> {
             ),
         };
         issues.push(json!({ "field": problem.field_path(), "message": message }));
+    }
+
+    // 协议是端点属性：HTTP 之外的几档各有自己的前置条件，静态检查在发请求之前点出来。
+    match endpoint.protocol {
+        RequestProtocol::Http => {}
+        RequestProtocol::Sse | RequestProtocol::WebSocket => {
+            issues.push(json!({
+                "field": "protocol",
+                "message": "SSE / WebSocket endpoints are opened in the app, not sent by MCP"
+            }));
+        }
+        RequestProtocol::GraphQl => match &endpoint.graphql {
+            None => issues.push(json!({
+                "field": "graphql",
+                "message": "protocol=graphql requires a graphql config with a query"
+            })),
+            Some(config) => {
+                if config.query.trim().is_empty() {
+                    issues.push(json!({
+                        "field": "graphql.query",
+                        "message": "required for a GraphQL endpoint"
+                    }));
+                }
+                let variables = config.variables.trim();
+                if !variables.is_empty() {
+                    match serde_json::from_str::<serde_json::Value>(variables) {
+                        Ok(serde_json::Value::Object(_)) => {}
+                        Ok(_) => issues.push(json!({
+                            "field": "graphql.variables",
+                            "message": "variables must be a JSON object"
+                        })),
+                        Err(e) => issues.push(json!({
+                            "field": "graphql.variables",
+                            "message": format!("variables is not valid JSON: {e}")
+                        })),
+                    }
+                }
+            }
+        },
     }
 
     issues

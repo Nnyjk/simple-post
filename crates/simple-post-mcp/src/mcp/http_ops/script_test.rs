@@ -123,6 +123,8 @@ fn script_endpoint(
         test_script: test.map(String::from),
         tls: None,
         responses: vec![],
+        protocol: Default::default(),
+        graphql: None,
     };
     let env = Environment {
         id: "env_script".into(),

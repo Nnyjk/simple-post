@@ -11,9 +11,10 @@ import type { EnvWrite } from '@/types/domain';
  * - `http` —— 拿到了响应，但状态码不是 2xx；
  * - `transport` —— 压根没拿到响应（超时、网络错误）；
  * - `blocked` —— 压根没发出去（缺路径参数、body 解析不了）；
- * - `aborted` —— 用户中止了在途的那一条。
+ * - `aborted` —— 用户中止了在途的那一条；
+ * - `skipped` —— 这条协议不在批量运行范围内（SSE、WebSocket），执行器主动跳过了它。
  */
-export type BatchFailureKind = 'http' | 'transport' | 'blocked' | 'aborted';
+export type BatchFailureKind = 'http' | 'transport' | 'blocked' | 'aborted' | 'skipped';
 
 /** 批量运行里的一条：一个待发送的端点。 */
 export interface BatchItem {
@@ -65,7 +66,7 @@ export interface BatchReport {
   success: number;
   /** 失败的条数：非 2xx、传输失败、被拦下、中止，都算。 */
   failed: number;
-  /** 中止之后压根没轮到执行的条数。 */
+  /** 没轮到执行的条数：中止之后剩下的那些，以及协议不在批量范围内的（SSE、WebSocket）。 */
   notRun: number;
   /** 状态码分布，只统计真正拿到状态码的那些。按状态码升序。 */
   statusCounts: Array<{ status: number; count: number }>;

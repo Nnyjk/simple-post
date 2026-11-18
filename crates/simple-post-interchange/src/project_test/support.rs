@@ -110,6 +110,8 @@ fn rich_detail(node_id: String) -> EndpointDetail {
                 example: None,
             },
         ],
+        protocol: Default::default(),
+        graphql: None,
     }
 }
 

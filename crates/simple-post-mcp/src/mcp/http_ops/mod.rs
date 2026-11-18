@@ -47,6 +47,22 @@ use args::RunRequestArgs;
 pub(crate) use input::flatten_string_map;
 pub(crate) use project::EMPTY_PROJECT;
 pub(crate) use send::{env_snapshot, resolve_settings};
+
+use simple_post_core::domain::RequestProtocol;
+
+/// 端点的协议若不是 HTTP/GraphQL，返回它的线上名。
+///
+/// SSE 与 WebSocket 是会话式传输：MCP 的调用没有「连接活着」这个概念，也无处收帧，
+/// 故这两档由工具在发请求之前拒绝。
+pub(super) fn unsupported_protocol(
+    detail: &simple_post_core::domain::EndpointDetail,
+) -> Option<&'static str> {
+    match detail.protocol {
+        RequestProtocol::Sse => Some("sse"),
+        RequestProtocol::WebSocket => Some("websocket"),
+        RequestProtocol::Http | RequestProtocol::GraphQl => None,
+    }
+}
 pub(crate) use table::table;
 
 // 这两个 handler 由 `table.rs` 自己引用；本模块的这份重导出只给同目录下的测试用
