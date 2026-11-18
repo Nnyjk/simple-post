@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import { json } from '@codemirror/lang-json';
 import { EditorView } from '@codemirror/view';
@@ -7,6 +7,7 @@ import { Check, Copy, Wand2, WrapText } from 'lucide-react';
 import { useIsDark } from '@/lib/theme';
 import { lightCodeTheme } from '@/lib/codemirror-themes';
 import { cn, type FormatResult } from '@/lib/utils';
+import { parseJsonTree } from '@/lib/json-tree';
 import { FloatToolbar, type FloatToolbarAction } from '@/components/ui/float-toolbar';
 import { JsonTreeView } from '@/components/ui/json-tree-view';
 
@@ -51,6 +52,18 @@ export function PrettyView({
 
   const [copyState, setCopyState] = useState<'idle' | 'ok' | 'fail'>('idle');
   const flashTimer = useRef<number | null>(null);
+  // 这一份响应体是不是用户点按钮时那一份：剪贴板是异步的，写完时响应可能已经换了。
+  const latestBody = useRef(body);
+  useEffect(() => {
+    latestBody.current = body;
+    // 新响应到达：上一份的「已复制 / 复制失败」与它的计时器都作废，否则新响应一上来就
+    // 顶着上一份的结论。
+    setCopyState('idle');
+    if (flashTimer.current !== null) {
+      window.clearTimeout(flashTimer.current);
+      flashTimer.current = null;
+    }
+  }, [body]);
   useEffect(
     () => () => {
       if (flashTimer.current !== null) window.clearTimeout(flashTimer.current);
@@ -58,15 +71,27 @@ export function PrettyView({
     [],
   );
 
+  // 树直接用这里解析好的结果：调用方本就要判「是不是合法 JSON」，再让树自己解析一遍
+  // 就是同一份文本解析两次。
+  const treeRoot = useMemo(() => {
+    const parsed = parseJsonTree(body);
+    return parsed.ok ? parsed.root : null;
+  }, [body]);
+
   /** 先等剪贴板给出结论再点亮按钮：写失败却显示「已复制」，用户会以为内容已经在剪贴板里。 */
   const copyAll = async () => {
+    const target = body;
     try {
       if (!navigator.clipboard) throw new Error('剪贴板不可用');
-      await navigator.clipboard.writeText(body);
+      await navigator.clipboard.writeText(target);
+      // 写完时响应体已经换了：这条结论说的是旧内容，不许落到新响应的工具条上。
+      if (latestBody.current !== target) return;
       setCopyState('ok');
     } catch {
+      if (latestBody.current !== target) return;
       setCopyState('fail');
     }
+    if (latestBody.current !== target) return;
     if (flashTimer.current !== null) window.clearTimeout(flashTimer.current);
     flashTimer.current = window.setTimeout(() => setCopyState('idle'), 1500);
   };
@@ -125,7 +150,7 @@ export function PrettyView({
           </pre>
         </>
       ) : view === 'pretty' ? (
-        <JsonTreeView text={body} wrap={wrap} />
+        <JsonTreeView root={treeRoot} wrap={wrap} />
       ) : (
         <div className="min-h-0 flex-1">
           <CodeMirror

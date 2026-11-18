@@ -42,6 +42,10 @@ export function FloatToolbar({ actions, className }: FloatToolbarProps) {
     >
       {actions.map((action) => {
         const hint = action.active ? (action.activeLabel ?? action.label) : action.label;
+        // 开关的可访问名要稳定：名字跟着状态变的话，读屏会念「取消自动换行，已按下」——
+        // 名字在描述动作，`aria-pressed` 又说是开着的。故开关用 `label` 取名，状态交给
+        // `aria-pressed`；`hint` 只给 Tooltip 与那些没有开合之分的按钮（复制）。
+        const name = action.activeLabel ? action.label : hint;
         return (
           <Tooltip key={action.id} content={hint} side="bottom">
             <Button
@@ -51,8 +55,8 @@ export function FloatToolbar({ actions, className }: FloatToolbarProps) {
               onClick={action.onClick}
               disabled={action.disabled}
               aria-pressed={action.active}
-              // 按钮只有图标，读屏要拿到与 Tooltip 同一句文案。
-              aria-label={hint}
+              // 按钮只有图标：读屏拿到的这个名字要与 Tooltip 说的一致。
+              aria-label={name}
               data-testid={action.testId}
             >
               {action.icon}

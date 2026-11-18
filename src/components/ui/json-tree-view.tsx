@@ -5,7 +5,6 @@ import {
   defaultExpandedPaths,
   flattenTree,
   pairText,
-  parseJsonTree,
   subtreeJson,
   valueText,
   type JsonTreeNode,
@@ -14,10 +13,22 @@ import {
 import { ContextMenu, type ContextMenuItem } from './context-menu';
 
 export interface JsonTreeViewProps {
-  /** JSON 文本。解析失败时本组件不渲染任何东西，由调用方退回原文并给提示。 */
-  text: string;
+  /**
+   * 已解析的树；调用方 `useMemo` 后传入。
+   *
+   * 解析放在调用方是有意的：调用方本来就要在同一份文本上判一次「是不是合法 JSON」，
+   * 树这边再解析一次就是同一份文本解析两遍。
+   */
+  root: JsonTreeNode | null;
   /** 长字符串值是否在内容宽度内折行；默认 false，靠横向滚动看完整内容。 */
   wrap?: boolean;
+  /**
+   * 是否处于可见档位；默认 true。
+   *
+   * 切到别的档位时菜单要一并关掉：`ContextMenu` portal 在 `document.body` 上，宿主藏起
+   * 树是藏不住菜单的，留着它还能从看不见的树上取值、还会截走 Escape。
+   */
+  active?: boolean;
 }
 
 /** 标量按类型取色：字符串暖绿、数字橙、布尔与 null 蓝，与编辑器的 JSON 高亮同一族。 */
@@ -33,12 +44,7 @@ function scalarClass(value: JsonValue): string {
  * 响应体与请求体两侧共用它：它只认文本与换行开关，不读 store、不依赖任何 feature。
  * 右键条目的复制目标都是那一行的节点，故菜单不需要知道树的形状。
  */
-export function JsonTreeView({ text, wrap = false }: JsonTreeViewProps) {
-  const root = useMemo(() => {
-    const result = parseJsonTree(text);
-    return result.ok ? result.root : null;
-  }, [text]);
-
+export function JsonTreeView({ root, wrap = false, active = true }: JsonTreeViewProps) {
   const [expanded, setExpanded] = useState<Set<string>>(
     () => new Set(root ? defaultExpandedPaths(root) : []),
   );
@@ -46,6 +52,8 @@ export function JsonTreeView({ text, wrap = false }: JsonTreeViewProps) {
   const [menu, setMenu] = useState<{ node: JsonTreeNode; x: number; y: number } | null>(null);
   const [copyFailed, setCopyFailed] = useState(false);
   const failTimer = useRef<number | null>(null);
+  /** 复制尝试的序号：只有最后一次尝试有权改提示，先发后至的旧结论直接丢掉。 */
+  const attempt = useRef(0);
 
   // 文本换了一棵树：展开状态交回默认值，旧路径的痕迹不会留到新树上；菜单里那几项指向的
   // 是上一棵树的节点，留着会把已经不在屏幕上的内容复制进剪贴板。
@@ -53,6 +61,12 @@ export function JsonTreeView({ text, wrap = false }: JsonTreeViewProps) {
     setExpanded(new Set(root ? defaultExpandedPaths(root) : []));
     setMenu(null);
   }, [root]);
+
+  // 档位切走了（树被 `display: none` 藏起来）：菜单挂在 body 上，不跟着藏，必须自己关。
+  useEffect(() => {
+    if (active) return;
+    setMenu(null);
+  }, [active]);
 
   // 卸载时清掉未到期的计时器，否则它会在已卸载的组件上 setState。
   useEffect(
@@ -81,11 +95,22 @@ export function JsonTreeView({ text, wrap = false }: JsonTreeViewProps) {
    * 报失败，不能先点亮「已复制」再让内容留在旧剪贴板里。
    */
   const copy = (value: string) => {
+    const id = ++attempt.current;
     void (async () => {
       try {
         if (!navigator.clipboard) throw new Error('剪贴板不可用');
         await navigator.clipboard.writeText(value);
+        // 这一次已经被后来的尝试顶掉：提示归那一次管，这里不许再改。
+        if (id !== attempt.current) return;
+        // 重试成功了，上一轮那条失败提示连同它的计时器一起作废 —— 留着它会在成功后
+        // 继续挂 2.4s，用户刚复制成功却仍看到「复制失败」。
+        if (failTimer.current !== null) {
+          window.clearTimeout(failTimer.current);
+          failTimer.current = null;
+        }
+        setCopyFailed(false);
       } catch {
+        if (id !== attempt.current) return;
         // 菜单选中即关闭，提示必须落在菜单之外 —— 故挂在树的滚动区上方。
         setCopyFailed(true);
         if (failTimer.current !== null) window.clearTimeout(failTimer.current);
@@ -154,11 +179,11 @@ export function JsonTreeView({ text, wrap = false }: JsonTreeViewProps) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {copyFailed && (
-        <div role="status" className="shrink-0 px-2 pt-1 text-destructive text-nano">
-          复制失败：无法访问剪贴板
-        </div>
-      )}
+      {/* 这一条 `role="status"` 常驻，只有文案是条件渲染：读屏只播报「已有的 live
+          region 里新增的内容」，容器与消息同一次渲染才出现的，常常一句都不念。 */}
+      <div role="status" className="shrink-0 px-2 pt-1 text-destructive text-nano">
+        {copyFailed ? '复制失败：无法访问剪贴板' : null}
+      </div>
       <div
         className={cn(
           // 工具条让出的那一条由宿主容器负责（`PrettyView` / `JsonBody` 的外层 `pt-11`），
@@ -236,7 +261,7 @@ export function JsonTreeView({ text, wrap = false }: JsonTreeViewProps) {
         </div>
       </div>
       <ContextMenu
-        open={menu !== null}
+        open={menu !== null && active}
         x={menu?.x ?? 0}
         y={menu?.y ?? 0}
         items={items}

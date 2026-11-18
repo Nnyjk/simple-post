@@ -277,6 +277,9 @@ function parseArray(c: Cursor): ParsedValue {
 function parseObject(c: Cursor): ParsedValue {
   c.i += 1; // 跳过 `{`
   const entries: [string, ParsedValue][] = [];
+  // 键名到 `entries` 下标的索引。重复键要「位置留第一次、值取最后一次」，逐条扫
+  // `entries.findIndex` 在键多的对象上是平方级的（5 万个键 ≈ 12.5 亿次比较）。
+  const positions = new Map<string, number>();
   skipWhitespace(c);
   if (c.s[c.i] === '}') {
     c.i += 1;
@@ -291,9 +294,13 @@ function parseObject(c: Cursor): ParsedValue {
     c.i += 1;
     const value = parseValue(c);
     // 重复键名以最后一次为准，位置留在第一次出现处 —— 与 `JSON.parse` 的结果一致。
-    const seen = entries.findIndex(([k]) => k === key);
-    if (seen === -1) entries.push([key, value]);
-    else entries[seen] = [key, value];
+    const seen = positions.get(key);
+    if (seen === undefined) {
+      positions.set(key, entries.length);
+      entries.push([key, value]);
+    } else {
+      entries[seen] = [key, value];
+    }
     skipWhitespace(c);
     const ch = c.s[c.i];
     if (ch === ',') {

@@ -219,7 +219,9 @@ function JsonBody({
 }) {
   // 自动换行默认关闭：树一旦折行，缩进层级就读不出来了。
   const [wrap, setWrap] = useState(false);
-  const [copyState, setCopyState] = useState<'idle' | 'ok' | 'fail'>('idle');
+  // `busy` 是「剪贴板还没给结论」的那一段：这段时间里按钮要禁用，不然连点几次会排起
+  // 一串写入，最后落到哪一个结果上取决于它们完成的先后。
+  const [copyState, setCopyState] = useState<'idle' | 'busy' | 'ok' | 'fail'>('idle');
   const flashTimer = useRef<number | null>(null);
 
   // 卸载时清掉未到期的计时器，否则它会在已卸载的组件上 setState。
@@ -232,6 +234,14 @@ function JsonBody({
 
   /** 先等剪贴板给出结论再点亮按钮：写失败却报成功，用户会以为载荷已经在剪贴板里。 */
   const copyAll = async () => {
+    if (copyState === 'busy') return;
+    // 上一次的「已复制 / 复制失败」还没到期就重试：先撤掉它的计时器，否则它会在这次
+    // 结论之后到点，把刚点亮的按钮又抹回 idle。
+    if (flashTimer.current !== null) {
+      window.clearTimeout(flashTimer.current);
+      flashTimer.current = null;
+    }
+    setCopyState('busy');
     try {
       if (!navigator.clipboard) throw new Error('剪贴板不可用');
       await navigator.clipboard.writeText(value.content);
@@ -239,7 +249,6 @@ function JsonBody({
     } catch {
       setCopyState('fail');
     }
-    if (flashTimer.current !== null) window.clearTimeout(flashTimer.current);
     flashTimer.current = window.setTimeout(() => setCopyState('idle'), 1500);
   };
 
@@ -261,7 +270,14 @@ function JsonBody({
   const actions: FloatToolbarAction[] = [
     {
       id: 'copy',
-      label: copyState === 'ok' ? '已复制' : copyState === 'fail' ? '复制失败' : '复制请求体',
+      label:
+        copyState === 'busy'
+          ? '正在复制…'
+          : copyState === 'ok'
+            ? '已复制'
+            : copyState === 'fail'
+              ? '复制失败'
+              : '复制请求体',
       icon:
         copyState === 'ok' ? (
           <Check className="h-3.5 w-3.5 text-success" />
@@ -269,6 +285,8 @@ function JsonBody({
           <Copy className={cn('h-3.5 w-3.5', copyState === 'fail' && 'text-destructive')} />
         ),
       onClick: copyAll,
+      // 剪贴板还没回话：再点一次也只是排队，且可能以旧结论收尾。
+      disabled: copyState === 'busy',
       testId: 'copy-body-btn',
     },
     {
@@ -295,7 +313,10 @@ function JsonBody({
 
   // 树能不能渲染，判据必须与真正建树的那一个解析器同源。只调 `JSON.parse` 的话，
   // `parseJsonTree` 拒掉的文本（比如结尾多一个字符）会先被判成合法，树于是空白一片。
-  const valid = parseJsonTree(value.content).ok;
+  // 一份文本只解析一次：`valid` 与树根都从这个结果取，解析开销落在内容变化那一刻。
+  const parsed = useMemo(() => parseJsonTree(value.content), [value.content]);
+  const valid = parsed.ok;
+  const treeRoot = parsed.ok ? parsed.root : null;
 
   return (
     <div className="relative flex min-h-0 flex-col gap-1.5">
@@ -335,7 +356,7 @@ function JsonBody({
       */}
       <div className={cn('min-h-0 flex-1 flex-col', view === 'tree' ? 'flex' : 'hidden')}>
         {valid ? (
-          <JsonTreeView text={value.content} wrap={wrap} />
+          <JsonTreeView root={treeRoot} wrap={wrap} active={view === 'tree'} />
         ) : (
           <EmptyHint className="flex h-32 items-center justify-center text-sm">
             {value.content.trim() ? 'JSON 格式有误，切到 Raw 修改' : '还没有内容，切到 Raw 输入'}
