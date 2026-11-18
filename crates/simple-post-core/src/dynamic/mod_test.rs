@@ -284,6 +284,28 @@ fn force_ignores_a_fresh_cache_entry() {
 }
 
 #[test]
+fn force_offers_only_an_expired_value_as_the_fallback() {
+    // 「过期值」这个身份只对真的过期的行成立：`force` 不看有效期，一份新鲜值也会走到取数，
+    // 但它不是过期值，取数失败时按缺失处理，而不是把它标成「过期值」交给界面。
+    let def = definition(60, true);
+    let fresh = entry(false, 1_000, None);
+    assert_eq!(
+        decide(&def, Some(&fresh), 500, true),
+        Decision::Fetch {
+            stale_fallback: None
+        }
+    );
+
+    let expired = entry(false, 400, None);
+    assert_eq!(
+        decide(&def, Some(&expired), 500, true),
+        Decision::Fetch {
+            stale_fallback: Some("\"v\"".to_string())
+        }
+    );
+}
+
+#[test]
 fn force_also_drops_a_live_override() {
     // 「刷新」是强制重新取数：它跳过缓存里的一切，包括用户手动指定的值。
     // 一个什么都不做的按钮比丢掉一份手动值更糟——丢掉是可见的（徽标变回「自动取回」）。
@@ -453,7 +475,23 @@ fn context(pool: &db::DbPool) -> ResolveContext {
     ResolveContext {
         pool: pool.clone(),
         environment_id: None,
+        lock_wait: None,
     }
+}
+
+/// 带「等锁」探针的上下文：解析在拿单飞行锁之前往返回的通道里报一声。
+///
+/// 用它取代固定时长的等待——`sleep` 证明不了对方已经算完进门那一次、正排在锁上。
+fn context_with_lock_wait(
+    pool: &db::DbPool,
+) -> (ResolveContext, tokio::sync::mpsc::UnboundedReceiver<()>) {
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    let ctx = ResolveContext {
+        pool: pool.clone(),
+        environment_id: None,
+        lock_wait: Some(tx),
+    };
+    (ctx, rx)
 }
 
 #[tokio::test]
@@ -1306,6 +1344,18 @@ async fn wait_for_fetch(reached: &mut tokio::sync::mpsc::Receiver<()>, what: &st
     }
 }
 
+/// 等一个「已经排在单飞行锁上」的信号，超时就当失败。
+///
+/// 与 `wait_for_fetch` 同一个道理：无超时的等待会把整个测试进程挂死，宽裕但有限的上限才是
+/// 失败该有的样子。
+async fn wait_for_lock_wait(reached: &mut tokio::sync::mpsc::UnboundedReceiver<()>, what: &str) {
+    match tokio::time::timeout(Duration::from_secs(10), reached.recv()).await {
+        Ok(Some(())) => {}
+        Ok(None) => panic!("{what}：等锁信号的通道关了，测试没等到排队"),
+        Err(_) => panic!("{what}：10 秒内没排到锁上"),
+    }
+}
+
 impl SourceFetcher for GatedFetcher {
     fn fetch<'a>(
         &'a self,
@@ -1516,14 +1566,16 @@ async fn an_override_written_while_waiting_for_the_lock_wins_without_a_request()
     });
     wait_for_fetch(&mut reached_rx, "第一次取数").await;
 
-    // 第二次解析同一个名字：它已经算过一次结论（那时没有缓存行），此刻正等锁。
+    // 第二次解析同一个名字：它已经算过一次结论（那时没有缓存行），此刻正排队等锁。
+    // 等锁那一步不可观测，故用探针确认它已经排上——`sleep` 证明不了这件事，覆盖值早一步
+    // 提交的话它会直接命中覆盖值、零取数，断言照样过。
+    let (waiter_ctx, mut lock_wait_rx) = context_with_lock_wait(&pool);
     let waiter_fetcher = Arc::new(CountingFetcher::new("\"不该取数\""));
     let second = tokio::spawn({
-        let pool = pool.clone();
         let waiter_fetcher = Arc::clone(&waiter_fetcher);
         async move {
             resolve_names(
-                &context(&pool),
+                &waiter_ctx,
                 Some("p1"),
                 &["sns".to_string()],
                 false,
@@ -1533,8 +1585,7 @@ async fn an_override_written_while_waiting_for_the_lock_wins_without_a_request()
             .expect("解析")
         }
     });
-    // 给它跑完进门那一步、排到锁上的时间；锁在第一次解析手里，故它不会更靠前。
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    wait_for_lock_wait(&mut lock_wait_rx, "第二次解析").await;
 
     // 等锁期间写了覆盖值。
     db::with_tx(&pool, |c| {
@@ -1600,18 +1651,18 @@ async fn a_refresh_waits_out_an_override_written_during_the_wait() {
     });
     wait_for_fetch(&mut reached_rx, "第一次取数").await;
 
-    // 刷新：进门时缓存里没有覆盖值，于是排到锁上等。
+    // 刷新：进门时缓存里没有覆盖值，于是排到锁上等。探针确认它已经排上，再写覆盖值。
+    let (refreshing_ctx, mut lock_wait_rx) = context_with_lock_wait(&pool);
     let refreshing = Arc::new(CountingFetcher::new("\"刷新取回\""));
     let second = tokio::spawn({
-        let pool = pool.clone();
         let refreshing = Arc::clone(&refreshing);
         async move {
-            resolve_definition(&context(&pool), &definition, true, refreshing.as_ref())
+            resolve_definition(&refreshing_ctx, &definition, true, refreshing.as_ref())
                 .await
                 .expect("刷新")
         }
     });
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    wait_for_lock_wait(&mut lock_wait_rx, "刷新").await;
 
     // 等锁期间写了覆盖值：它比任何一次取数都新。
     db::with_tx(&pool, |c| {
@@ -1650,4 +1701,165 @@ async fn a_refresh_waits_out_an_override_written_during_the_wait() {
         .expect("有缓存行");
     assert!(cached.is_override, "等锁期间写下的手工值没被顶掉");
     assert_eq!(cached.value_json.as_deref(), Some("\"等锁时手写\""));
+}
+
+/// 刷新不该冲掉取数途中新存下的覆盖值：它只该换掉自己进门时看见的那一份。
+///
+/// 只看「此刻有没有覆盖值」不够——进门就有一份（刷新该换掉它），但途中用户又存了另一份，
+/// 那一份不属于这次刷新。故写回侧按身份比对：还是进门那一份才换，换过了就留住。
+#[tokio::test]
+async fn a_refresh_does_not_overwrite_an_override_saved_during_the_fetch() {
+    let (pool, _dir) = seeded_pool();
+    // 进门时已经有一份永久覆盖值。
+    db::with_tx(&pool, |c| {
+        db::dynamic_variable_cache::upsert(
+            c,
+            &DynamicCacheEntry {
+                definition_id: "d1".into(),
+                environment_id: String::new(),
+                value_json: Some("\"旧手写\"".into()),
+                fetched_at: 1,
+                expires_at: 1,
+                is_override: true,
+                override_expires_at: None,
+            },
+        )
+    })
+    .expect("写覆盖值");
+
+    let definition = db::with_conn(&pool, |c| db::dynamic_variables::get(c, "d1")).expect("定义");
+    let (reached_tx, mut reached_rx) = tokio::sync::mpsc::channel(1);
+    let (release_tx, release_rx) = tokio::sync::mpsc::channel(1);
+    let fetcher = Arc::new(GatedFetcher {
+        calls: AtomicUsize::new(0),
+        reached: reached_tx,
+        release: tokio::sync::Mutex::new(release_rx),
+        body: "\"刷新取回\"".to_string(),
+    });
+
+    let task = tokio::spawn({
+        let pool = pool.clone();
+        let fetcher = Arc::clone(&fetcher);
+        async move {
+            resolve_definition(&context(&pool), &definition, true, fetcher.as_ref())
+                .await
+                .expect("刷新")
+        }
+    });
+    wait_for_fetch(&mut reached_rx, "刷新取数").await;
+
+    // 请求还没回来，用户又存了一份覆盖值：这是新的手工值，刷新不该顶掉它。
+    db::with_tx(&pool, |c| {
+        db::dynamic_variable_cache::upsert(
+            c,
+            &DynamicCacheEntry {
+                definition_id: "d1".into(),
+                environment_id: String::new(),
+                value_json: Some("\"新手写\"".into()),
+                fetched_at: 2,
+                expires_at: 1,
+                is_override: true,
+                override_expires_at: None,
+            },
+        )
+    })
+    .expect("写第二份覆盖值");
+
+    release_tx.send(()).await.expect("放行刷新取数");
+    let out = task.await.expect("任务");
+    assert_eq!(
+        out.value.as_deref(),
+        Some("刷新取回"),
+        "这次取回的值照常返回"
+    );
+    assert!(
+        out.expires_at.is_none(),
+        "没写回就没有到期时间：{:?}",
+        out.expires_at
+    );
+
+    let cached = db::with_conn(&pool, |c| db::dynamic_variable_cache::get(c, "d1", ""))
+        .expect("读缓存")
+        .expect("覆盖行还在");
+    assert!(cached.is_override, "途中新写的覆盖值还在");
+    assert_eq!(cached.value_json.as_deref(), Some("\"新手写\""));
+}
+
+/// 等锁期间别人刚写下的新鲜值不是「过期值」。
+///
+/// 刷新不看有效期（它本来就要跳过缓存），故锁后读到的新鲜值也会走到取数。取数失败时只有
+/// **真的过期**的行才配当回退候选：把新鲜值标成「过期值」交给界面，等于告诉用户这份数据
+/// 已经旧了。
+#[tokio::test]
+async fn a_fresh_value_cached_during_the_wait_is_not_returned_as_stale() {
+    let (pool, _dir) = seeded_pool();
+    db::with_tx(&pool, |c| {
+        db::dynamic_variables::update(
+            c,
+            "d1",
+            DynamicVariablePatch {
+                stale_fallback: Some(true),
+                ..Default::default()
+            },
+        )
+    })
+    .expect("允许过期值回退");
+    let definition = db::with_conn(&pool, |c| db::dynamic_variables::get(c, "d1")).expect("定义");
+
+    // 第一次解析占住锁，停在半路；放行之后它会把值写进缓存。
+    let (reached_tx, mut reached_rx) = tokio::sync::mpsc::channel(1);
+    let (release_tx, release_rx) = tokio::sync::mpsc::channel(1);
+    let holder = Arc::new(GatedFetcher {
+        calls: AtomicUsize::new(0),
+        reached: reached_tx,
+        release: tokio::sync::Mutex::new(release_rx),
+        body: "\"[1]\"".to_string(),
+    });
+    let first = tokio::spawn({
+        let pool = pool.clone();
+        let definition = definition.clone();
+        let holder = Arc::clone(&holder);
+        async move {
+            resolve_definition(&context(&pool), &definition, false, holder.as_ref())
+                .await
+                .expect("解析")
+        }
+    });
+    wait_for_fetch(&mut reached_rx, "第一次取数").await;
+
+    // 刷新排队等锁：它进门时缓存还是空的。
+    let (refreshing_ctx, mut lock_wait_rx) = context_with_lock_wait(&pool);
+    let refreshing = Arc::new(CountingFetcher::failing());
+    let second = tokio::spawn({
+        let refreshing = Arc::clone(&refreshing);
+        async move {
+            resolve_definition(&refreshing_ctx, &definition, true, refreshing.as_ref())
+                .await
+                .expect("刷新")
+        }
+    });
+    wait_for_lock_wait(&mut lock_wait_rx, "刷新").await;
+
+    release_tx.send(()).await.expect("放行第一次取数");
+    first.await.expect("任务");
+
+    let refreshed = second.await.expect("刷新");
+    assert_eq!(
+        refreshed.source,
+        DynamicValueSource::Missing,
+        "新鲜值不是过期值：{:?}",
+        refreshed.source
+    );
+    assert!(
+        refreshed.value.is_none(),
+        "取数失败且没有过期值可用：{:?}",
+        refreshed.value
+    );
+    assert!(refreshed.error.is_some(), "取数失败仍要记一条错误");
+
+    let cached = db::with_conn(&pool, |c| db::dynamic_variable_cache::get(c, "d1", ""))
+        .expect("读缓存")
+        .expect("缓存行还在");
+    assert!(!cached.is_override);
+    assert_eq!(cached.value_json.as_deref(), Some("\"[1]\""));
 }

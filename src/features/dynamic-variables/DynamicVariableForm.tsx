@@ -20,7 +20,11 @@
  */
 import { useMemo, useState } from 'react';
 import { useAppStore } from '@/stores/app-store';
-import { emptyDynamicVariableDraft, type DynamicVariableDraft } from '@/stores/dynamic-slice';
+import {
+  creatingDraftKey,
+  emptyDynamicVariableDraft,
+  type DynamicVariableDraft,
+} from '@/stores/dynamic-slice';
 import type { DynamicVariable, DynamicVariableView, ValueMode } from '@/types/domain';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -41,7 +45,11 @@ export interface DynamicVariableFormProps {
    * 保存成功。带上**提交的那一份**草稿与落库的那份定义：调用方据此判断期间有没有新输入，
    * 并在有输入时把草稿改写成刚落地那条的编辑态。
    */
-  onDone: (submitted: DynamicVariableDraft, saved: DynamicVariable) => void;
+  onDone: (
+    submitted: DynamicVariableDraft,
+    saved: DynamicVariable,
+    patch: Partial<DynamicVariable>,
+  ) => void;
 }
 
 /** 没有草稿时的兜底：面板只在草稿存在时挂载表单，故这一份不会出现在正常路径上。 */
@@ -67,14 +75,18 @@ export function DynamicVariableForm({
   const updateDynamicVariable = useAppStore((s) => s.updateDynamicVariable);
   // 保存失败的原因。表单就地显示它，免得用户只看到表单凭空消失。
   const saveError = useAppStore((s) => s.dynamicError);
-  // 这条定义正在保存。标志在 store 里而不是组件 state：卡片换环境会重挂，`busy` 会归零，
-  // 而 PATCH 还在路上——那时再点一次保存，两个请求乱序落地就会盖掉新编辑。
-  const savingThis = useAppStore(
-    (s) => variable !== undefined && s.savingDynamicVariableIds.has(variable.id),
-  );
-
   // 归属项目。编辑时以定义自己的为准，新建时是当前项目。
   const ownerProjectId = variable?.projectId ?? projectId ?? activeProjectId;
+
+  // 这次保存正在路上。标志在 store 里而不是组件 state：卡片换环境会重挂，切标签还会卸载整张
+  // 表单，`busy` 都随之归零，而请求还在路上——那时再点一次，编辑会多发一个 PATCH（乱序落地
+  // 就盖掉新编辑），新建会落成两条定义（撞项目内名字唯一）。新建没有定义 id 可用，按键是
+  // `creatingDraftKey(项目)`，故切回来仍是「保存中」。
+  const savingThis = useAppStore((s) =>
+    variable !== undefined
+      ? s.savingDynamicVariableIds.has(variable.id)
+      : s.savingDynamicVariableIds.has(creatingDraftKey(ownerProjectId)),
+  );
 
   // 表单内容全在 store 的草稿里，按项目分桶。选择器只读当前项目那一份对象：别的项目改草稿
   // 换的是记录里的另一个键，这里的引用不动，故不会触发重渲染。
@@ -150,11 +162,14 @@ export function DynamicVariableForm({
     try {
       const ttlValue = ttlSecondsOf(ttlSeconds);
       let saved: DynamicVariable | null = null;
+      // 发出去的那份 patch：收尾时按它决定推进基线的哪几格（没提到的格保持原基线）。
+      let patch: Partial<DynamicVariable> = {};
       if (variable) {
         // 兜底用此刻这条定义：草稿是被 `patchDynamicVariableDraft` 凭空垫出来的那种极端情形，
         // 也不能把「编辑」错走成「新建」。
         const baseline = openedWith ?? variable;
-        saved = await updateDynamicVariable(variable.id, buildEditPatch(baseline, draft));
+        patch = buildEditPatch(baseline, draft);
+        saved = await updateDynamicVariable(variable.id, patch);
         // 保存失败时表单留着：用户填的内容不丢。
         if (!saved) return;
       } else {
@@ -175,7 +190,7 @@ export function DynamicVariableForm({
         });
         if (!saved) return;
       }
-      onDone(draft, saved);
+      onDone(draft, saved, patch);
     } finally {
       setBusy(false);
     }
@@ -378,7 +393,7 @@ export function DynamicVariableForm({
               ownerProjectId === ''
             }
           >
-            {savingThis ? '保存中…' : '保存'}
+            {savingThis || busy ? '保存中…' : '保存'}
           </Button>
           <Button variant="ghost" size="sm" onClick={onCancel}>
             取消

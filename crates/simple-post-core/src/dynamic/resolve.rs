@@ -69,7 +69,6 @@ pub async fn resolve_definition(
     force: bool,
     fetcher: &dyn SourceFetcher,
 ) -> Result<DynamicValueStatus, AppError> {
-    let now = crate::domain::now_ms();
     // 取数上下文造不出来（数据源端点已被删掉、那一行读不出来……）时，这一次解析按缺失
     // 处理并记一条错误，而不是让整次发送在请求发出前中止。`dynamic/mod.rs` 的规范
     // 如此要求：取数失败不让整次发送失败。
@@ -95,7 +94,7 @@ pub async fn resolve_definition(
             });
         }
     };
-    let outcome = resolve_one(ctx, def, &source, now, force, fetcher).await?;
+    let outcome = resolve_one(ctx, def, &source, force, fetcher).await?;
     Ok(DynamicValueStatus {
         name: def.name.clone(),
         value: outcome.value,
@@ -178,7 +177,6 @@ async fn resolve_one(
     ctx: &ResolveContext,
     def: &DynamicVariable,
     source: &SourceContext,
-    now: i64,
     force: bool,
     fetcher: &dyn SourceFetcher,
 ) -> Result<OneOutcome, AppError> {
@@ -186,13 +184,16 @@ async fn resolve_one(
     let entry = db::with_conn(&ctx.pool, |c| {
         db::dynamic_variable_cache::get(c, &def.id, &env_key)
     })?;
+    // 判活用的时刻不早于读到的那一行：先读行、再取时刻，恰好在这两个动作之间到期的覆盖值
+    // 才判得成过期，而不是被当成活值返回。
+    let now = crate::domain::now_ms();
 
-    // 进门这一刻那一行是不是仍然生效的覆盖值。写回侧要保护的只是**这之后**才写下的手工值，
-    // 故这个判断取的是此刻——不是锁后那一次（见 `fetch_one`）。
-    let had_live_override = entry
+    // 进门这一刻那份仍然生效的覆盖值长什么样。写回侧要分辨「进门就有、这次刷新该换掉的」
+    // 与「取数途中才写下的、必须留住的」——只记「有没有覆盖值」会把后者当成前者冲掉。
+    let seen_override = entry
         .as_ref()
-        .map(|e| live_override(e, now))
-        .unwrap_or(false);
+        .filter(|e| live_override(e, now))
+        .map(OverrideRef::of);
 
     match decide(def, entry.as_ref(), now, force) {
         Decision::UseOverride { value_json } => {
@@ -201,9 +202,7 @@ async fn resolve_one(
         Decision::UseCache { value_json } => Ok(cache_outcome(def, entry.as_ref(), &value_json)),
         // 这次结论只说「大概要走取数」：单飞行锁要等，等的那段时间缓存行还会变，故
         // `fetch_one` 拿到锁之后会重算一次。
-        Decision::Fetch { .. } => {
-            fetch_one(ctx, def, source, force, had_live_override, fetcher).await
-        }
+        Decision::Fetch { .. } => fetch_one(ctx, def, source, force, seen_override, fetcher).await,
     }
 }
 
@@ -251,24 +250,29 @@ async fn fetch_one(
     def: &DynamicVariable,
     source: &SourceContext,
     force: bool,
-    had_live_override: bool,
+    seen_override: Option<OverrideRef>,
     fetcher: &dyn SourceFetcher,
 ) -> Result<OneOutcome, AppError> {
     // 缓存键的环境段取自取数上下文——**实际生效**的那个环境（指定模式是定义点名的那个，
     // 继承模式是调用方选中的那个）。它随调用方切环境而变，故切环境不会读到上一个环境的值。
     let env_key = source.environment_id.clone().unwrap_or_default();
     let lock = flight_lock(&(def.id.clone(), env_key.clone()));
+    // 测试用它观察「进门那一次已经算完、正排在锁上」——等锁不可观测，而固定时长的等待
+    // 证明不了对方已经走到这一步。
+    #[cfg(test)]
+    if let Some(hook) = &ctx.lock_wait {
+        let _ = hook.send(());
+    }
     let _guard = lock.lock().await;
 
     // 等锁那段时间缓存行会变：前一个等待者可能刚把值填好，用户在另一条连接上可能刚点
-    // 「保存为覆盖值」。故拿到锁之后按锁后这一刻的时刻重读缓存行、重跑同一个 `decide`，
-    // 用它这一刻的结论——结论变成「用手工值」或「用新鲜缓存」就直接返回，不发请求，也不进
-    // 写回事务。写回侧仍用进门时那份 `had_live_override`：刷新在等锁期间被写下的手工值
-    // 也算「途中写的」，不该由这次刷新顶掉。
-    let now = crate::domain::now_ms();
+    // 「保存为覆盖值」。故拿到锁之后重读缓存行、重跑同一个 `decide`，用它这一刻的结论——
+    // 结论变成「用手工值」或「用新鲜缓存」就直接返回，不发请求，也不进写回事务。
+    // 时刻在这行之后取：判活用的时刻不早于读到的那一行。
     let entry = db::with_conn(&ctx.pool, |c| {
         db::dynamic_variable_cache::get(c, &def.id, &env_key)
     })?;
+    let now = crate::domain::now_ms();
     let stale_fallback = match decide(def, entry.as_ref(), now, force) {
         Decision::UseOverride { value_json } => {
             return Ok(override_outcome(def, entry.as_ref(), &value_json));
@@ -365,10 +369,9 @@ async fn fetch_one(
     // 同一个事务里还要看一眼当前的缓存行：用户在取数途中（锁前、锁后都算）点了「保存为
     // 覆盖值」，那一行是他在这个环境上亲手钉住的，而这次取数只是「本该这样算」，不该盖过
     // 人手写的值。
-    // 只在**进门那一刻还没有**有效覆盖值时才保护——那一刻就有的话，这次取数只可能是刷新
-    // 走上来的（`cache::decide` 的 `force` 特意跳过覆盖值），刷新要的就是把那份手工值换掉。
-    // 反过来，刷新在等锁期间被别人写下的手工值也算「途中写的」：`had_live_override` 取的是
-    // 进门那一刻，不是锁后那一次。
+    // 进门那一刻就有的覆盖值另算：这次取数只可能是刷新走上来的（`cache::decide` 的 `force`
+    // 特意跳过覆盖值），刷新要的就是把**它看见的那一份**手工值换掉，故只有当前行仍是那一份
+    // 才允许写；换成了另一份（取数途中写的），同样留住。
     let stored = db::with_tx(&ctx.pool, |c| {
         let current = match db::dynamic_variables::get(c, &def.id) {
             Ok(current) => current,
@@ -379,9 +382,13 @@ async fn fetch_one(
         if !same_fetch_inputs(&current, def) {
             return Ok(false);
         }
-        if !had_live_override {
-            if let Some(existing) = db::dynamic_variable_cache::get(c, &def.id, &env_key)? {
-                if live_override(&existing, crate::domain::now_ms()) {
+        if let Some(existing) = db::dynamic_variable_cache::get(c, &def.id, &env_key)? {
+            if existing.is_override {
+                let replaceable = match &seen_override {
+                    Some(seen) => OverrideRef::of(&existing) == *seen,
+                    None => !live_override(&existing, crate::domain::now_ms()),
+                };
+                if !replaceable {
                     return Ok(false);
                 }
             }
@@ -430,15 +437,31 @@ async fn fetch_one(
     })
 }
 
+/// 进门那一刻那份覆盖值的身份：写回侧据此分辨「还是它看见的那一份吗」。
+///
+/// 只比对值本身不够：用户可以把同一份值再存一次，保存时刻与到期时刻都变了，那就是新的一份。
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct OverrideRef {
+    value_json: Option<String>,
+    fetched_at: i64,
+    override_expires_at: Option<i64>,
+}
+
+impl OverrideRef {
+    fn of(entry: &DynamicCacheEntry) -> OverrideRef {
+        OverrideRef {
+            value_json: entry.value_json.clone(),
+            fetched_at: entry.fetched_at,
+            override_expires_at: entry.override_expires_at,
+        }
+    }
+}
+
 /// 这一行是**仍然生效**的覆盖值吗：人手写的，且没有到期或还没到。
 ///
 /// 「仍然生效」按调用方给的时刻算，故取数开始与写回两处可以用不同的时刻各判一次。
 fn live_override(entry: &DynamicCacheEntry, now: i64) -> bool {
-    entry.is_override
-        && entry
-            .override_expires_at
-            .map(|deadline| deadline > now)
-            .unwrap_or(true)
+    entry.is_override && !super::cache::is_expired(entry, now)
 }
 
 /// 这两份定义算出来的值会一样吗：数据源、取数环境、抽取规则、处理脚本。

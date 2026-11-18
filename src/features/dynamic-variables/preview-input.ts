@@ -50,26 +50,38 @@ export function previewPayload(input: PreviewInput): PreviewPayload {
 /**
  * 发起时那一份输入的指纹。
  *
- * 只看抽取规则与「有没有脚本」不够：换掉内联 URL、换一个数据源接口、换取数环境，或改掉
- * 脚本正文，拿到的都是另一份输入下的结果，却会被当成「当前草稿」的结果继续展示。
+ * 只看抽取规则与「有没有脚本」不够：换掉内联 URL、换一个数据源接口，或改掉脚本正文，拿到的
+ * 都是另一份输入下的结果，界面却会把它当成「当前草稿」的结果继续展示。
  *
- * 调用方环境只在**继承**时才算数：定义点名了取数环境、或者干脆是内联请求，切一下环境并不
- * 改变这次取数会拿到什么，指纹却因此变了就会误标「这份结果对应旧输入」，让用户白白再打一次
- * 请求（非幂等接口就是对端生效两次）。
+ * **环境不进指纹**。一份响应到底在哪个环境下取到，只有后端说得准：定义点名了就用点名的那个，
+ * 否则继承调用方环境，而调用方环境不属于数据源接口那个项目时还会回落到那儿的默认环境。前端
+ * 复刻这套判定只会错——按调用方环境算指纹，本项目里切一下环境就会把同一份结果标成「对应旧
+ * 输入」，还诱导用户再点一次「预览取数」（非幂等接口就是对端生效两次）。
+ *
+ * 环境那一路由界面直接说明：结果旁边一直写着「环境：X」，与此刻会生效的环境不一致时再补一行
+ * 「这份结果取自 X」（见 `previewExpectedEnvironment`）。
  */
 export function previewFingerprint(input: PreviewInput): string {
   const payload = previewPayload(input);
-  // 实际生效的环境：定义点名的那个，否则是继承来的调用方环境；内联请求用不到环境。
-  const effectiveEnvironmentId =
-    payload.sourceEnvironmentId ?? (input.usesEndpoint ? input.activeEnvironmentId : null);
   return JSON.stringify({
     sourceEndpointId: payload.sourceEndpointId,
     sourceInlineJson: payload.sourceInlineJson,
-    sourceEnvironmentId: payload.sourceEnvironmentId,
     extractPath: payload.extractPath,
     transformScript: payload.transformScript,
-    environmentId: effectiveEnvironmentId,
   });
+}
+
+/**
+ * 此刻再点一次「预览取数」会用的环境（`null` = 用不到环境，或还没有可用环境）。
+ *
+ * 定义点了名就用点名的那个，否则用调用方当前环境的那个；内联请求自带完整地址，用不到环境。
+ * 这只是**界面能算出来的那一档**：后端还会在环境不属于数据源接口所在项目时回落到那儿的默认
+ * 环境，那一步前端不复刻。故它只用来判断「结果旁边的环境是不是此刻会生效的那个」，不参与
+ * 指纹。
+ */
+export function previewExpectedEnvironment(input: PreviewInput): string | null {
+  if (!input.usesEndpoint) return null;
+  return input.environmentId || input.activeEnvironmentId;
 }
 
 /** 预览失败也只属于交出它的那份输入。 */

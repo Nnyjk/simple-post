@@ -46,6 +46,7 @@ function draftOf(initial: DynamicVariable, over: Partial<DynamicVariableDraft> =
   return {
     creating: false,
     editingId: initial.id,
+    draftSession: 1,
     openedWith: initial,
     name: initial.name,
     description: initial.description ?? '',
