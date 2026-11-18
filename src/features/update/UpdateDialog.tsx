@@ -220,14 +220,17 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
     return null;
   })();
 
+  // 高度受限的 flex 列：页头与页脚不参与压缩（`shrink-0` 在 `Dialog` 里），正文吃剩下的
+  // 高度并自己滚。只给正文 `max-h-[62vh]` 的话，页头 + 62vh + 页脚会超过 86vh 的面板，
+  // 发布说明一长就把页脚按钮推出视口。
   return (
     <Dialog
       open={open}
       onOpenChange={onOpenChange}
       title={latest ? `发现新版本 v${latest}` : '更新'}
       description="查看这个版本带来什么，再决定什么时候更新"
-      className="w-[560px] max-w-[92vw] max-h-[86vh]"
-      bodyClassName="max-h-[62vh] overflow-y-auto overscroll-contain"
+      className="flex w-[560px] max-w-[92vw] max-h-[86vh] flex-col"
+      bodyClassName="min-h-0 flex-1 overflow-y-auto overscroll-contain"
       footer={
         <>
           <Button variant="ghost" size="sm" onClick={dismiss}>

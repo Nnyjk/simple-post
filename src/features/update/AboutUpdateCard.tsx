@@ -144,7 +144,7 @@ export function AboutUpdateCard() {
         )}
         <SettingRow
           label="GitHub 镜像"
-          description="发布页与下载链接走所选镜像；检查更新仍直连 GitHub API"
+          description="发布页与发布说明里的链接走所选镜像；检查更新与桌面安装包下载仍直连 GitHub"
           control={
             <Select
               aria-label="GitHub 镜像"

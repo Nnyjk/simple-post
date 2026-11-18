@@ -26,10 +26,13 @@ export interface SaveResult {
 /**
  * 保存对话框的过滤器。扩展名由 `doc.mediaType` 决定；用户在对话框里改文件名不受这个过滤器限制。
  *
- * 三种产物都从这一条路出去：OpenAPI 的 `application/json` / `application/yaml`，以及接口文档
- * 快照的 `text/html`。媒体类型不认识时退回 `json`——那是绝大多数调用方的形状。
+ * 四种产物都从这一条路出去：OpenAPI 的 `application/json` / `application/yaml`、接口文档
+ * 快照的 `text/html`，以及纯文本日志的 `text/plain`（导出 `.txt` 时若只给 `JSON` 一条，
+ * 用户的 `.txt` 文件名在对话框里会显示成被隐藏的其它类型）。媒体类型不认识时退回 `json`
+ * ——那是绝大多数调用方的形状。
  */
 function filtersFor(doc: ExportDocument) {
+  if (doc.mediaType === 'text/plain') return [{ name: '文本', extensions: ['txt'] }];
   const ext =
     doc.mediaType === 'application/yaml' ? 'yaml' : doc.mediaType === 'text/html' ? 'html' : 'json';
   return [{ name: ext.toUpperCase(), extensions: [ext] }];
