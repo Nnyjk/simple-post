@@ -14,6 +14,7 @@ import { useEffect, useState } from 'react';
 import { Minus, Square, Copy, X } from 'lucide-react';
 import { Tooltip } from '@/components/ui/tooltip';
 import { cn, focusRingBare } from '@/lib/utils';
+import { IS_TAURI_SHELL } from '@/lib/tauri-commands';
 
 /**
  * 三个标题栏按钮共用的几何与静止态颜色。hover 处理各不相同（最小化/还原为中性、
@@ -50,7 +51,6 @@ export function WindowControls() {
   // 图标（两个叠放方块）之间切换。订阅 Tauri window 的 `resized` 事件并重新查这个
   // 布尔量——只在点击时查会漏掉双击最大化，以及任何不经过我们的系统级贴靠。
   const [isMaximized, setIsMaximized] = useState(false);
-
   useEffect(() => {
     if (
       typeof window === 'undefined' ||
@@ -84,6 +84,10 @@ export function WindowControls() {
       }
     };
   }, []);
+
+  // 这三个按钮只驱动 Tauri 窗口（decorations: false 的自绘标题栏）。浏览器 / serve-web /
+  // docker 宿主里没有窗口可控制，渲染出来是三个点了没反应的按钮，故整组不渲染。
+  if (!IS_TAURI_SHELL) return null;
 
   const minimize = () =>
     safeCall(async () => {

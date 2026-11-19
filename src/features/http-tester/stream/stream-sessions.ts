@@ -420,17 +420,6 @@ export function disposeSession(tabId: string): void {
   useAppStore.getState().dropTabStreams(tabId);
 }
 
-/**
- * 这个标签是否有一条**可以继续收事件**的会话。不读 store：句柄是唯一真相。
- *
- * SSE 条目在取消之后还会短暂留在注册表里等收尾事件，那段时间它不算会话。
- */
-export function hasSession(tabId: string): boolean {
-  const entry = sessions.get(tabId);
-  if (!entry) return false;
-  return entry.kind !== 'sse' || !entry.abandoned;
-}
-
 // 标签集合一变就关掉不在其中的会话。store 不认识传输层，故订阅放在这一侧。
 useAppStore.subscribe((state, prev) => {
   if (state.openTabs === prev.openTabs) return;

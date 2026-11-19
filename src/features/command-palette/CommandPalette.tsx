@@ -13,7 +13,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Search, CornerDownLeft, ArrowUp, ArrowDown, X } from 'lucide-react';
 import { buildCommands, type Command } from './command-registry';
-import { cn } from '@/lib/utils';
+import { cn, iconButton } from '@/lib/utils';
 import { useAppStore } from '@/stores/app-store';
 import { UpdateDot } from '@/features/update/UpdateDot';
 import { ModalSurface } from '@/components/ui/modal-surface';
@@ -150,7 +150,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-overlay-hover hover:text-foreground"
+            className={cn(iconButton, 'hover:bg-overlay-hover')}
             aria-label="关闭"
           >
             <X className="h-3.5 w-3.5" />

@@ -40,6 +40,17 @@ export const focusRingBare =
 export const focusRingInset =
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset';
 
+/**
+ * 行内小图标按钮（24×24、只有图标、`aria-label` 取名）的唯一写法：胶囊行尾的刷新 / 详情 / 删除、
+ * 命令面板的关闭。
+ * 尺寸固定 `h-6 w-6`：这些按钮嵌在 30 来像素高的行里，再大就把行撑开。
+ * 用的时候 `cn(iconButton, '…')`，`focusRing` 已经含在里面。
+ */
+export const iconButton = cn(
+  'inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-40',
+  focusRing,
+);
+
 export function formatBytes(bytes: number): string {
   if (!bytes) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB'];

@@ -7,6 +7,7 @@
  * 提成组件还为了让回归网不必依赖浏览器：这一段渲染不读 store，服务端渲染就能把开关打开与
  * 关掉两种状态都渲染出来。
  */
+import { InlineError } from '@/components/ui/inline-error';
 import { TLS_SKIP_VERIFY } from '@/lib/tls';
 import { cn } from '@/lib/utils';
 
@@ -22,13 +23,8 @@ export function SkipVerifyWarning({
   if (!skipVerify) return null;
 
   return (
-    <p
-      className={cn(
-        'rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-micro text-destructive',
-        className,
-      )}
-    >
+    <InlineError className={cn('px-3 py-2 text-micro', className)}>
       {TLS_SKIP_VERIFY.warning}
-    </p>
+    </InlineError>
   );
 }

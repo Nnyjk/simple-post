@@ -31,7 +31,11 @@ const MAX_STRING = 80;
 
 export function PreviewJsonTree({ value, path, onPick }: PreviewJsonTreeProps) {
   return (
-    <div role="tree" aria-label="响应 JSON" className="font-mono text-xs leading-relaxed">
+    <div
+      role="tree"
+      aria-label="响应 JSON"
+      className="w-max min-w-full font-mono text-xs leading-relaxed"
+    >
       <TreeNode value={value} path={path} depth={0} onPick={onPick} />
     </div>
   );

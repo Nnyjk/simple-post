@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Dialog } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { InlineError } from '@/components/ui/inline-error';
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
 import type { NodeScripts } from '@/types/domain';
 import { ScriptPanel } from '@/features/http-tester/ScriptPanel';
@@ -89,7 +90,11 @@ export function CollectionScriptDialog({
         </>
       }
     >
-      {error && <div className="alert-error-inline mb-2">{error}</div>}
+      {error && (
+        <InlineError className="mb-2 mt-2 flex items-start gap-1.5 border-destructive/30 bg-destructive/5 px-2.5 py-1.5 text-xs">
+          {error}
+        </InlineError>
+      )}
       <ScriptPanel
         preRequest={preRequest}
         test={test}

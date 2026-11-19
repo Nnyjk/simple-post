@@ -44,9 +44,13 @@ import { TabContextMenu } from './TabContextMenu';
  *
  * `BAR_SETTLE_MS` 是变化之后继续读实时 rect 的时长，必须长过任何能移动标签的动画：
  * 280ms Flip + 200ms 标题截断上限过渡。
+ *
+ * 缓动还是直接就位，由标签在 `openTabs` 里的**下标距离**与 compact 模式是否翻转决定，
+ * 不看像素距离：横条压不压住中间标签的名字是标签相邻性问题，不是距离问题。
  */
 const BAR_APPROACH = 0.24;
 const BAR_SETTLE_MS = 480;
+
 export function WorkspaceTabs() {
   const openTabs = useAppStore((s) => s.openTabs);
   const activeTabId = useAppStore((s) => s.activeTabId);
@@ -247,12 +251,22 @@ export function WorkspaceTabs() {
   // 所以只要这三者之一可能在跑，条的目标就每帧从实时 rect 重读。当前位置再以固定比例向该
   // 目标缓动，于是条既能滑向相邻标签，也能跟住动画中的标签。
   //
+  // 但缓动只用于**相邻标签**：跨过中间标签的缓动，那条 92px 的横条会依次压过它们
+  // 的名字，读起来就是「效果条乱跑 + 卡」，故换到非相邻标签就直接就位；宽度只在
+  // normal ⇄ compact 翻转时直接就位。
+  //
   // 循环不是常驻的：任何能移动标签的东西变化时（激活标签、标签集、compact 模式）重跑一个
   // 有时限的窗口，窗口结束即停。窗口长到覆盖 280ms Flip 与 200ms 标题截断上限过渡。
   const barRef = useRef<HTMLSpanElement>(null);
   // `started` 区分「放置」与「移动」：某次激活的首帧是直接就位（没有值得动画的上一位置 ——
-  // 全新挂载，或条从无标签状态回来），之后每帧才缓动。
+  // 全新挂载，或条从无标签状态回来），之后每帧才缓动或就位。
   const barState = useRef({ x: 0, width: 0, started: false });
+  // 上一次放置时的激活标签与宽度模式：这一次该缓动还是直接就位，由它俩的差决定 ——
+  // 缓动只在「换到相邻标签」时成立，跨标签的横扫会压住中间标签的名字。
+  const prevBarKey = useRef<{ tabId: string | null; compact: boolean }>({
+    tabId: null,
+    compact: false,
+  });
 
   const placeBar = useCallback(() => {
     const strip = stripRef.current;
@@ -261,6 +275,7 @@ export function WorkspaceTabs() {
       // 标签在最后一个关闭时整条卸载（上面的 `descriptors.length === 0` 返回 null）。此处
       // 忘掉上一位置，下一条出现的条就会直接就位到自己的标签上，而不是从过期坐标滑进来。
       barState.current.started = false;
+      prevBarKey.current = { tabId: null, compact: isCompact };
       return;
     }
     const activeEl = activeTabId
@@ -269,6 +284,7 @@ export function WorkspaceTabs() {
     if (!activeEl) {
       // 没有任何激活项（全部关闭）—— 收起条，而不是让它停在一个已经不存在的标签下。
       barState.current.started = false;
+      prevBarKey.current = { tabId: null, compact: isCompact };
       gsap.set(bar, { width: 0, opacity: 0 });
       return;
     }
@@ -279,10 +295,20 @@ export function WorkspaceTabs() {
     const targetX = tabRect.left - stripRect.left + strip.scrollLeft;
     const targetW = tabRect.width;
     const cur = barState.current;
+    const prev = prevBarKey.current;
+    const compactChanged = prev.compact !== isCompact;
+    const prevIndex = prev.tabId ? openTabs.findIndex((t) => t.id === prev.tabId) : -1;
+    const nextIndex = openTabs.findIndex((t) => t.id === activeTabId);
+    // 相邻（含同一个）才缓动：跨两个以上标签的缓动 = 横条擦过中间标签。
+    const adjacent = prevIndex >= 0 && nextIndex >= 0 && Math.abs(nextIndex - prevIndex) <= 1;
     if (cur.started) {
-      // 指数逼近：约 0.28s 落定 —— 与 Flip 的时长一致，但目标本身可能正在移动。
-      cur.x += (targetX - cur.x) * BAR_APPROACH;
-      cur.width += (targetW - cur.width) * BAR_APPROACH;
+      const dx = targetX - cur.x;
+      const dw = targetW - cur.width;
+      if (adjacent && !compactChanged) cur.x += dx * BAR_APPROACH;
+      else cur.x = targetX;
+      // 宽度只在两种模式（160 / 92）间跳，模式没变就没有值得动画的宽度差。
+      if (compactChanged) cur.width = targetW;
+      else cur.width += dw * BAR_APPROACH;
       if (Math.abs(targetX - cur.x) < 0.25 && Math.abs(targetW - cur.width) < 0.25) {
         cur.x = targetX;
         cur.width = targetW;
@@ -292,8 +318,9 @@ export function WorkspaceTabs() {
       cur.width = targetW;
       cur.started = true;
     }
+    prevBarKey.current = { tabId: activeTabId, compact: isCompact };
     gsap.set(bar, { x: cur.x, width: cur.width, opacity: 1 });
-  }, [activeTabId]);
+  }, [activeTabId, openTabs, isCompact]);
 
   useEffect(() => {
     let raf = 0;
