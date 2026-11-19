@@ -1,4 +1,6 @@
 import { Braces, Globe } from 'lucide-react';
+import { useRef } from 'react';
+import { gsap, motionSafe, useGSAP } from '@/lib/gsap';
 import type { Environment, ResourceNode } from '@/types/domain';
 import type { EnvironmentSectionProps } from '../EnvironmentSection';
 import { GroupHeader } from './GroupHeader';
@@ -33,8 +35,29 @@ export function EnvBody({
   setEnvironmentModuleBaseUrl,
   onAddVar,
 }: EnvBodyProps) {
+  // 环境一换，宿主就以 env id 为 key 把本组件整棵重挂，行数据是一次性替换的 —— 所以动画
+  // 挂在根容器上，而不是每一行：项目可能有几十个模块，逐行补间既是性能问题，也让眼睛跟着
+  // 一排行一起动，读不出「换的是整张表」。补间结束后清掉 transform，免得给表格里任何
+  // fixed / sticky 元素留下一个非视口的包含块。
+  const rootRef = useRef<HTMLDivElement>(null);
+  useGSAP(
+    () => {
+      const el = rootRef.current;
+      if (!el) return;
+      gsap.killTweensOf(el);
+      return motionSafe(() => {
+        gsap.fromTo(
+          el,
+          { opacity: 0, y: 4 },
+          { opacity: 1, y: 0, duration: 0.2, ease: 'power2.out', clearProps: 'transform' },
+        );
+      });
+    },
+    { scope: rootRef, dependencies: [env.id] },
+  );
+
   return (
-    <div className="flex flex-col">
+    <div ref={rootRef} className="flex flex-col">
       <GroupHeader
         icon={<Globe className="h-3.5 w-3.5" />}
         title="模块地址"

@@ -13,13 +13,16 @@
  * 本外壳因此不必在没有树的情况下渲染设置。两个宿主挂载的是同一个 `SettingsPanel`。
  */
 
-import { Suspense, lazy, useEffect, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useDeferredValue, useEffect, useRef, useState } from 'react';
 import { TopBar } from '@/features/top-bar/TopBar';
 import { ProjectTree } from '@/features/project-tree/ProjectTree';
 import { HttpTester } from '@/features/http-tester/HttpTester';
 import { WorkspaceTabs } from '@/features/workspace/WorkspaceTabs';
 import { Splitter } from '@/components/ui/splitter';
+import { LoadingChip, LoadingState } from '@/components/ui/loading-indicator';
+import { gsap, motionSafe, useGSAP } from '@/lib/gsap';
 import { useAppStore } from '@/stores/app-store';
+import type { OpenTab } from '@/stores/store-types';
 import type { RequestProtocol } from '@/types/domain';
 
 // ---------------------------------------------------------------------------
@@ -56,27 +59,40 @@ const DirtyCloseDialog = lazy(() =>
 );
 
 /**
- * 尚未到达的 chunk 的占位。尺寸填满自己的槽位而非一个居中的 spinner：先塌成 spinner 再猛地
- * 撑满高度的 lazy 面板就是一次布局跳动。
+ * 右栏内容的形状。它同时决定挂载哪一棵子树与 deferred 值能否沿用：形状相同的两个标签走
+ * 同一个分支，形状不同就必须立刻换分支。
  */
-function PanelFallback({ label }: { label?: string }) {
-  return (
-    <div
-      className="flex min-h-0 flex-1 items-center justify-center text-xs text-muted-foreground"
-      aria-busy="true"
-    >
-      {label ?? <span className="opacity-60">加载中…</span>}
-    </div>
-  );
+type ContentShape =
+  'entity' | 'endpoint-split' | 'endpoint-stream' | 'settings' | 'dynamic-variables';
+
+/** 从标签与协议推出内容形状；`null` 标签是「最后一个标签关掉了」，此时画当前项目。 */
+function contentShape(tab: OpenTab | null, protocol: RequestProtocol): ContentShape {
+  if (!tab) return 'entity';
+  if (tab.kind === 'endpoint' || tab.kind === 'endpoint-draft') {
+    return protocol === 'sse' || protocol === 'websocket' ? 'endpoint-stream' : 'endpoint-split';
+  }
+  if (tab.kind === 'settings') return 'settings';
+  if (tab.kind === 'dynamic-variables') return 'dynamic-variables';
+  return 'entity';
 }
 
 export function WorkspaceShell() {
-  const activeTab = useAppStore((s) => s.openTabs.find((t) => t.id === s.activeTabId) ?? null);
+  const activeTabId = useAppStore((s) => s.activeTabId);
   const activeProjectId = useAppStore((s) => s.activeProjectId);
+  // 标签条读立即值（它自己订阅 store），右栏内容按 deferred 值渲染 —— 理由见 `contentTab`。
+  const deferredTabId = useDeferredValue(activeTabId);
+  const activeTab = useAppStore((s) => s.openTabs.find((t) => t.id === activeTabId) ?? null);
+  const deferredTab = useAppStore((s) => s.openTabs.find((t) => t.id === deferredTabId) ?? null);
+
   // 流式协议自己画响应区（SSE 面板 / WS 会话面板），故这一栏不再分上下两半。
   // 返回字符串而非对象：selector 每次渲染都跑，新对象会让 store 的比较失效。
   const activeProtocol = useAppStore((s): RequestProtocol => {
     const id = s.activeTabId;
+    if (!id) return 'http';
+    return s.endpointDrafts[id]?.protocol ?? s.endpointDetails[id]?.protocol ?? 'http';
+  });
+  const deferredProtocol = useAppStore((s): RequestProtocol => {
+    const id = deferredTabId;
     if (!id) return 'http';
     return s.endpointDrafts[id]?.protocol ?? s.endpointDetails[id]?.protocol ?? 'http';
   });
@@ -85,7 +101,7 @@ export function WorkspaceShell() {
   // 时有意义；项目 / 模块 / 集合标签的内容区是单一滚动区。
   const [basis, setBasis] = useState<string>('50%');
   const containerRef = useRef<HTMLDivElement>(null);
-  const resetBasis = () => setBasis('50%');
+  const resetBasis = useCallback(() => setBasis('50%'), []);
 
   // 这个 effect 在 bootstrap 窗口内预热编辑器 chunk。本外壳本身是 lazy，所以它挂载时模块图已在
   // 解析中；发起与 lazy 组件相同的动态 import 会填好注册表（同一 specifier → 同一 chunk），
@@ -103,7 +119,58 @@ export function WorkspaceShell() {
     return () => clearTimeout(t);
   }, [activeTab?.kind, activeProtocol]);
 
-  // `renderActiveContent` 按当前标签类型决定右栏渲染什么：
+  // 右栏内容全部从 `contentTab` / `contentProtocol` 派生 —— 两者同源于 deferred id，故不会
+  // 出现「内容是 A 的、协议是 B 的」。
+  //
+  // 有一处例外：deferred id 指向的标签已被关掉时 `find` 返回 null。此时旧内容本就不该再占着
+  // 位置（关掉标签，内容立刻消失），故直接回落到立即值，而不是先闪一帧加载态。
+  const deferredResolved = deferredTab !== null || deferredTabId === activeTabId;
+  const contentTab = deferredResolved ? deferredTab : activeTab;
+  const contentProtocol = deferredResolved ? deferredProtocol : activeProtocol;
+  const shapeNow = contentShape(activeTab, activeProtocol);
+  const shapeDeferred = contentShape(contentTab, contentProtocol);
+
+  // 形状不一致时**直接用立即值渲染**，不再挂「正在切换视图…」的空白占位。
+  //
+  // deferred 值是低优先级那一轮才提交的：形状变化时（动态变量 → 接口、设置 → 接口…）若先
+  // 提交一帧占位，用户看到的是整栏被清空 + 居中 spinner，然后新内容才出现。实测 6 倍 CPU
+  // 降速下这段空白持续 317ms —— 正是用户报的「切标签严重卡顿」。
+  //
+  // 形状一致时仍走 deferred：相邻标签共用同一棵子树，React 不换层，deferred 只是把一次
+  // 重渲染降级，不会有中间空白帧。
+  const shapeMismatch = shapeNow !== shapeDeferred;
+  const shownTab = shapeMismatch ? activeTab : contentTab;
+  const shownProtocol = shapeMismatch ? activeProtocol : contentProtocol;
+
+  // 只有「数据未就绪」这一档：`nodesLoaded === false` 的窗口里 `nodes: []` 是歧义的，
+  // 内容得先给个「在取」的信号。子树是否已经换过来不在此列 —— 形状相同的两个标签共用
+  // 同一棵子树，`HttpTester` / `ResponseViewer` 自己订阅 `activeTabId`，commit 时画面
+  // 已经是新端点，再写「正在载入」就是撒谎。
+  const nodesLoading = useAppStore((s) => s.nodesLoading);
+  const dataPending = nodesLoading && shapeNow !== 'settings' && shapeNow !== 'dynamic-variables';
+
+  // 承载旧内容的子树正在被替换时淡入新的那一棵。只补 opacity / transform，且只挂在内容列
+  // 容器上 —— 标签条的 Flip 有自己的通道，左侧树的长列表也不该每次切标签重绘。
+  // 补间结束后清掉 transform：留下的 translate(0,0) 会给内容列造一个包含块，里面的
+  // fixed / sticky 后代就改以它为准而不认视口。
+  const contentRef = useRef<HTMLDivElement>(null);
+  useGSAP(
+    () => {
+      const el = contentRef.current;
+      if (!el) return;
+      gsap.killTweensOf(el);
+      return motionSafe(() => {
+        gsap.fromTo(
+          el,
+          { opacity: 0, y: 4 },
+          { opacity: 1, y: 0, duration: 0.2, ease: 'power2.out', clearProps: 'transform' },
+        );
+      });
+    },
+    { scope: contentRef, dependencies: [shownTab?.id] },
+  );
+
+  // `renderActiveContent` 按内容标签的类型决定右栏渲染什么：
   //   endpoint → 请求 / 响应上下分栏
   //   project / module / collection → EntitySettings：该实体自己的单列面板（基础信息，再是
   //     该类型所属的配置 —— 项目的环境、模块在各环境下的地址）。面板不点名实体，上方的
@@ -112,10 +179,10 @@ export function WorkspaceShell() {
   //
   // 「有项目但没有激活标签」正是关掉最后一个标签后的状态：项目本身就适合作为这块内容，
   // 项目重命名 / 删除也住在那里，因为项目不是树中的一行。
-  const renderActiveContent = () => {
-    if (!activeTab) {
+  const renderActiveContent = (tab: OpenTab | null, protocol: RequestProtocol) => {
+    if (!tab) {
       return (
-        <Suspense fallback={<PanelFallback />}>
+        <Suspense fallback={<LoadingState />}>
           <EntitySettings kind="project" entityId={activeProjectId} />
         </Suspense>
       );
@@ -123,62 +190,70 @@ export function WorkspaceShell() {
     // 草稿接口渲染与已保存接口同一个 tester。两者刻意不是两个组件：
     // `useActiveEndpointResource` 以同一种形状交出两者，故 tester 只跑一条代码路径，未保存
     // 的接口也能用与已保存接口相同的 UI 编辑、发送与预览。
-    if (activeTab.kind === 'endpoint' || activeTab.kind === 'endpoint-draft') {
+    if (tab.kind === 'endpoint' || tab.kind === 'endpoint-draft') {
       // SSE 与 WebSocket 的响应区就是 tester 自己的面板：事件 / 帧不属于一次请求的结果，
-      // 故不再挂 ResponseViewer，也不再画分隔条。
-      if (activeProtocol === 'sse' || activeProtocol === 'websocket') {
-        return (
-          <div className="flex min-h-0 flex-1 flex-col">
-            <HttpTester />
-          </div>
-        );
-      }
+      // 故不挂 ResponseViewer、也不画分隔条。
+      //
+      // tester 的宿主容器在两个形态下占同一个树位置：改协议若让容器换一层，React 会把
+      // tester 整棵卸载重挂 —— 请求页签复位到「参数」、CodeMirror 的撤销历史与滚动位置一起丢。
+      // 两个形态的尺寸互斥（独占整高 vs 受分隔条控制），故只写其中一套 flex 属性。
+      const stream = protocol === 'sse' || protocol === 'websocket';
       return (
         <>
           <div
-            style={{ flexBasis: basis, flexGrow: 0, flexShrink: 0 }}
+            style={stream ? { flex: '1 1 0%' } : { flexBasis: basis, flexGrow: 0, flexShrink: 0 }}
             className="flex min-h-0 flex-col"
           >
             <HttpTester />
           </div>
-          <Splitter
-            direction="horizontal"
-            containerRef={containerRef}
-            basis={basis}
-            onResize={setBasis}
-            onReset={resetBasis}
-            minSize={240}
-            minOtherSize={160}
-          />
-          <div className="min-h-0 flex-1">
-            <Suspense fallback={<PanelFallback />}>
-              <ResponseViewer />
-            </Suspense>
-          </div>
+          {!stream && (
+            <>
+              <Splitter
+                direction="horizontal"
+                containerRef={containerRef}
+                basis={basis}
+                onResize={setBasis}
+                onReset={resetBasis}
+                minSize={240}
+                minOtherSize={160}
+              />
+              <div className="min-h-0 flex-1">
+                <Suspense fallback={<LoadingState />}>
+                  <ResponseViewer />
+                </Suspense>
+              </div>
+            </>
+          )}
         </>
       );
     }
-    if (activeTab.kind === 'settings') {
+    if (tab.kind === 'settings') {
       return (
-        <Suspense fallback={<PanelFallback />}>
+        <Suspense fallback={<LoadingState />}>
           <SettingsPanel />
         </Suspense>
       );
     }
     // 动态变量是项目内的一页：面板自己按当前项目过滤，它不需要这里传项目。
-    if (activeTab.kind === 'dynamic-variables') {
+    if (tab.kind === 'dynamic-variables') {
       return (
-        <Suspense fallback={<PanelFallback />}>
+        <Suspense fallback={<LoadingState />}>
           <DynamicVariablesPanel />
         </Suspense>
       );
     }
     return (
-      <Suspense fallback={<PanelFallback />}>
-        <EntitySettings kind={activeTab.kind} entityId={activeTab.id} />
+      <Suspense fallback={<LoadingState />}>
+        <EntitySettings kind={tab.kind} entityId={tab.id} />
       </Suspense>
     );
   };
+
+  // 形状不同 → 旧子树已经没有意义（分栏的 tester 换成设置面板，或反之），换成新形状的子树。
+  // 这里不挂「正在切换视图…」的占位：那会让整栏先空一帧再出现内容，正是用户报的卡顿。
+  // 数据还没回来的那一档由各面板自己的加载态负责（如 DynamicVariablesPanel 的
+  // 「正在读取动态变量…」），外加这里的 LoadingChip。
+  const content = renderActiveContent(shownTab, shownProtocol);
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col">
@@ -188,7 +263,10 @@ export function WorkspaceShell() {
         {activeProjectId !== '' && <ProjectTree />}
         <div ref={containerRef} className="flex min-w-0 flex-1 flex-col">
           <WorkspaceTabs />
-          {renderActiveContent()}
+          <div ref={contentRef} className="relative flex min-h-0 flex-1 flex-col">
+            {dataPending && <LoadingChip label="正在同步数据…" />}
+            {content}
+          </div>
         </div>
       </main>
       <Suspense fallback={null}>

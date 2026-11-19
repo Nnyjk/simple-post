@@ -18,7 +18,7 @@
  * `stores/dynamic-slice.ts`），因为切到别的标签时面板连同这张表单一起被 `WorkspaceShell`
  * 卸载，组件 state 留不住用户填了一半的内容。组件只留 `busy` 这类瞬时状态。
  */
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useAppStore } from '@/stores/app-store';
 import {
   creatingDraftKey,
@@ -28,9 +28,12 @@ import {
 import type { DynamicVariable, DynamicVariableView, ValueMode } from '@/types/domain';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
+import { InlineError } from '@/components/ui/inline-error';
 import { EndpointTreePicker } from './EndpointTreePicker';
 import { ExtractPreview } from './ExtractPreview';
 import { buildEditPatch, keepsSource, ttlSecondsOf } from './edit-patch';
+import { gsap, motionSafe, useGSAP } from '@/lib/gsap';
 
 export interface DynamicVariableFormProps {
   /** 传了就走编辑模式，不传就是新建。 */
@@ -54,6 +57,10 @@ export interface DynamicVariableFormProps {
 
 /** 没有草稿时的兜底：面板只在草稿存在时挂载表单，故这一份不会出现在正常路径上。 */
 const EMPTY_DRAFT = emptyDynamicVariableDraft();
+
+/** 表单行的骨架：左列是字段标签（固定 5rem，各行标签对齐），右列占满剩余宽度。八行共用
+ * 一份，改宽度或列间距时不必逐行同步。 */
+const FORM_ROW = 'grid grid-cols-[5rem_minmax(0,1fr)] items-start gap-x-2 gap-y-1 text-xs';
 
 /** 按代码点比两个字符串。SQLite 的 `ORDER BY name` 比的是 UTF-8 字节，JS 的 `<` 比的是
  * UTF-16 码元 —— 对 BMP 里的常用字符两者一致，故这里直接用 `<`。 */
@@ -110,6 +117,20 @@ export function DynamicVariableForm({
   } = draft;
 
   const [busy, setBusy] = useState(false);
+  const formRef = useRef<HTMLDivElement>(null);
+
+  // 只在这一份表单挂载时播一次：依赖留空，用户每次敲键都重渲染，但动画不复播。
+  useGSAP(
+    () =>
+      motionSafe(() =>
+        gsap.fromTo(
+          formRef.current,
+          { opacity: 0, y: 4 },
+          { opacity: 1, y: 0, duration: 0.2, ease: 'power2.out', clearProps: 'transform' },
+        ),
+      ),
+    { scope: formRef },
+  );
 
   // 「数据源接口已被删除」的定义落在**引用接口**形态：那条路是唯一能救它的（重新挑一个
   // 接口），而内联形态会让用户以为要手写一份请求。
@@ -197,55 +218,66 @@ export function DynamicVariableForm({
   };
 
   return (
-    <div className="rounded-md border border-border p-3">
-      <h3 className="text-xs font-medium">{variable ? '编辑定义' : '新建定义'}</h3>
-      <p className="mt-1 text-micro text-muted-foreground">
-        归属项目：{projects.find((p) => p.id === ownerProjectId)?.name ?? '（未知）'}
-        。变量名在这个项目里唯一。
-      </p>
-      <div className="mt-2 flex flex-col gap-2">
-        <label className="flex items-center gap-2 text-xs">
-          <span className="w-20 shrink-0 text-muted-foreground">变量名</span>
-          <Input
-            value={name}
-            onChange={(e) => patchDraft(ownerProjectId, { name: e.target.value })}
-            placeholder="sns"
-            className="font-mono"
-          />
-          <span className="text-micro text-muted-foreground">只能用字母、数字与下划线。</span>
+    <div
+      ref={formRef}
+      className="flex flex-col divide-y divide-border rounded-lg border border-border"
+    >
+      <div className="px-4 py-3">
+        <h3 className="text-xs font-medium">{variable ? '编辑定义' : '新建定义'}</h3>
+        <p className="mt-1 text-micro text-muted-foreground">
+          归属项目：{projects.find((p) => p.id === ownerProjectId)?.name ?? '（未知）'}
+        </p>
+      </div>
+
+      <section className="flex flex-col gap-2 px-4 py-3">
+        <h4 className="text-micro font-medium text-muted-foreground">基本</h4>
+        <label className={FORM_ROW}>
+          <span className="text-muted-foreground">变量名</span>
+          <div className="flex min-w-0 flex-col gap-1">
+            <Input
+              value={name}
+              onChange={(e) => patchDraft(ownerProjectId, { name: e.target.value })}
+              placeholder="sns"
+              className="w-full min-w-0 font-mono"
+            />
+            <span className="text-micro text-faint">只能用字母、数字与下划线。</span>
+          </div>
         </label>
 
-        <label className="flex items-center gap-2 text-xs">
-          <span className="w-20 shrink-0 text-muted-foreground">说明</span>
+        <label className={FORM_ROW}>
+          <span className="text-muted-foreground">说明</span>
           <Input
             value={description}
             onChange={(e) => patchDraft(ownerProjectId, { description: e.target.value })}
             placeholder="站点清单"
+            className="w-full min-w-0"
           />
         </label>
+      </section>
 
-        <div className="flex items-start gap-2 text-xs">
-          <span className="w-20 shrink-0 pt-1.5 text-muted-foreground">数据源</span>
-          <div className="flex flex-1 flex-col gap-1">
-            <div className="flex items-center gap-2">
-              <select
-                value={sourceKind}
-                onChange={(e) =>
-                  patchDraft(ownerProjectId, {
-                    sourceKind: e.target.value as 'endpoint' | 'inline',
-                  })
-                }
-                className="h-8 rounded-md border border-input bg-background px-2 text-sm"
-              >
-                <option value="endpoint">引用接口</option>
-                <option value="inline">内联请求</option>
-              </select>
-              {usesEndpoint && sourceEndpointId && (
-                <span className="truncate text-micro text-muted-foreground">
-                  已选接口 {sourceEndpointName || sourceEndpointId}
-                </span>
-              )}
-            </div>
+      <section className="flex min-w-0 flex-col gap-2 px-4 py-3">
+        <h4 className="text-micro font-medium text-muted-foreground">数据源</h4>
+        <div className={FORM_ROW}>
+          <span className="pt-1.5 text-muted-foreground">形态</span>
+          <div className="flex min-w-0 flex-col gap-1">
+            <Select
+              value={sourceKind}
+              onChange={(e) =>
+                patchDraft(ownerProjectId, {
+                  sourceKind: e.target.value as 'endpoint' | 'inline',
+                })
+              }
+              className="w-full min-w-0"
+              options={[
+                { value: 'endpoint', label: '引用接口' },
+                { value: 'inline', label: '内联请求' },
+              ]}
+            />
+            {usesEndpoint && sourceEndpointId && (
+              <span className="text-micro text-faint">
+                已选接口 {sourceEndpointName || sourceEndpointId}
+              </span>
+            )}
             {sourceDeleted && (
               <p className="text-micro text-destructive">
                 这条定义引用的接口已被删除，故它现在没有数据源。挑一个接口替上它即可救回这条定义。
@@ -260,7 +292,7 @@ export function DynamicVariableForm({
                 onChange={(e) => patchDraft(ownerProjectId, { sourceInlineJson: e.target.value })}
                 spellCheck={false}
                 placeholder='{"method":"GET","url":"https://example.test/points","headers":[],"body":{"mode":"none","content":""},"auth":{"kind":"none"}}'
-                className="min-h-20 w-full rounded-md border border-input bg-background px-2 py-1 font-mono text-xs"
+                className="min-h-20 w-full max-w-full min-w-0 rounded-md border border-input bg-background px-2 py-1 font-mono text-xs whitespace-pre-wrap break-all placeholder:text-faint placeholder:italic"
               />
             )}
           </div>
@@ -268,38 +300,45 @@ export function DynamicVariableForm({
 
         {usesEndpoint && sourceEndpointId !== '' && (
           <>
-            <label className="flex items-center gap-2 text-xs">
-              <span className="w-20 shrink-0 text-muted-foreground">取数环境</span>
-              <select
-                value={environmentId}
-                onChange={(e) => patchDraft(ownerProjectId, { environmentId: e.target.value })}
-                className="h-8 w-48 rounded-md border border-input bg-background px-2 text-sm"
-              >
-                <option value="">继承当前环境</option>
-                {projectEnvironments.map((env) => (
-                  <option key={env.id} value={env.id}>
-                    指定：{env.name}
-                  </option>
-                ))}
-              </select>
-              <span className="text-micro text-muted-foreground">
-                {environmentId === ''
-                  ? '取数时用你发送请求时选中的那个环境；你切环境，它的值就跟着变。没有可用环境时，用这个接口所属项目的默认环境（最早建的那个）。'
-                  : '固定用这个环境。'}
-              </span>
+            <label className={FORM_ROW}>
+              <span className="text-muted-foreground">取数环境</span>
+              <div className="flex min-w-0 flex-col gap-1">
+                <Select
+                  value={environmentId}
+                  onChange={(e) => patchDraft(ownerProjectId, { environmentId: e.target.value })}
+                  className="w-full min-w-0"
+                  options={[
+                    { value: '', label: '继承当前环境' },
+                    ...projectEnvironments.map((env) => ({
+                      value: env.id,
+                      label: `指定：${env.name}`,
+                    })),
+                  ]}
+                />
+                <span className="text-micro text-faint">
+                  {environmentId === ''
+                    ? '取数时用你发送请求时选中的那个环境；你切环境，它的值就跟着变。没有可用环境时，用这个接口所属项目的默认环境（最早建的那个）。'
+                    : '固定用这个环境。'}
+                </span>
+              </div>
             </label>
           </>
         )}
+      </section>
 
-        <label className="flex items-center gap-2 text-xs">
-          <span className="w-20 shrink-0 text-muted-foreground">抽取规则</span>
-          <Input
-            value={extractPath}
-            onChange={(e) => patchDraft(ownerProjectId, { extractPath: e.target.value })}
-            placeholder="$"
-            className="font-mono"
-          />
-          <span className="text-micro text-muted-foreground">JSONPath；`$` 表示整段响应。</span>
+      <section className="flex min-w-0 flex-col gap-2 px-4 py-3">
+        <h4 className="text-micro font-medium text-muted-foreground">抽取与处理</h4>
+        <label className={FORM_ROW}>
+          <span className="text-muted-foreground">抽取规则</span>
+          <div className="flex min-w-0 flex-col gap-1">
+            <Input
+              value={extractPath}
+              onChange={(e) => patchDraft(ownerProjectId, { extractPath: e.target.value })}
+              placeholder="$"
+              className="w-full min-w-0 font-mono"
+            />
+            <span className="text-micro text-faint">JSONPath；`$` 表示整段响应。</span>
+          </div>
         </label>
 
         {/* 预览夹在「抽取规则」与「处理脚本」之间：它产出的两样东西就是这两个字段
@@ -316,17 +355,17 @@ export function DynamicVariableForm({
           onUseScript={(script) => patchDraft(ownerProjectId, { transformScript: script })}
         />
 
-        <div className="flex items-start gap-2 text-xs">
-          <span className="w-20 shrink-0 pt-1.5 text-muted-foreground">处理脚本</span>
-          <div className="flex flex-1 flex-col gap-1">
+        <div className={FORM_ROW}>
+          <span className="pt-1.5 text-muted-foreground">处理脚本</span>
+          <div className="flex min-w-0 flex-col gap-1">
             <textarea
               value={transformScript}
               onChange={(e) => patchDraft(ownerProjectId, { transformScript: e.target.value })}
               spellCheck={false}
               placeholder={'return pm.data.items.map((x) => x.code).join(",")'}
-              className="min-h-20 w-full rounded-md border border-input bg-background px-2 py-1 font-mono text-xs"
+              className="min-h-20 w-full max-w-full min-w-0 rounded-md border border-input bg-background px-2 py-1 font-mono text-xs placeholder:text-faint placeholder:italic"
             />
-            <span className="text-micro text-muted-foreground">
+            <span className="text-micro text-faint">
               可选。抽取之后跑，用来做 JSONPath 表达不了的加工。脚本拿得到抽取结果（
               <code className="font-mono">pm.data</code>）与原始响应（
               <code className="font-mono">pm.response</code>），用
@@ -334,33 +373,43 @@ export function DynamicVariableForm({
             </span>
           </div>
         </div>
+      </section>
 
-        <label className="flex items-center gap-2 text-xs">
-          <span className="w-20 shrink-0 text-muted-foreground">值的形态</span>
-          <select
-            value={valueMode}
-            onChange={(e) => patchDraft(ownerProjectId, { valueMode: e.target.value as ValueMode })}
-            className="h-8 w-40 rounded-md border border-input bg-background px-2 text-sm"
-          >
-            <option value="auto">auto</option>
-            <option value="json">json</option>
-            <option value="text">text</option>
-          </select>
-          <span className="text-micro text-muted-foreground">
-            auto 与 text 输出相同；json 会给标量加引号。
-          </span>
+      <section className="flex flex-col gap-2 px-4 py-3">
+        <h4 className="text-micro font-medium text-muted-foreground">缓存与开关</h4>
+        <label className={FORM_ROW}>
+          <span className="text-muted-foreground">值的形态</span>
+          <div className="flex min-w-0 flex-col gap-1">
+            <Select
+              value={valueMode}
+              onChange={(e) =>
+                patchDraft(ownerProjectId, { valueMode: e.target.value as ValueMode })
+              }
+              className="w-full min-w-0"
+              options={[
+                { value: 'auto', label: 'auto' },
+                { value: 'json', label: 'json' },
+                { value: 'text', label: 'text' },
+              ]}
+            />
+            <span className="text-micro text-faint">
+              auto 与 text 输出相同；json 会给标量加引号。
+            </span>
+          </div>
         </label>
 
-        <label className="flex items-center gap-2 text-xs">
-          <span className="w-20 shrink-0 text-muted-foreground">缓存时长</span>
-          <Input
-            type="number"
-            min={0}
-            value={ttlSeconds}
-            onChange={(e) => patchDraft(ownerProjectId, { ttlSeconds: e.target.value })}
-            className="w-24"
-          />
-          <span className="text-micro text-muted-foreground">秒。</span>
+        <label className={FORM_ROW}>
+          <span className="text-muted-foreground">缓存时长</span>
+          <div className="flex min-w-0 flex-col gap-1">
+            <Input
+              type="number"
+              min={0}
+              value={ttlSeconds}
+              onChange={(e) => patchDraft(ownerProjectId, { ttlSeconds: e.target.value })}
+              className="w-full min-w-0"
+            />
+            <span className="text-micro text-faint">秒。</span>
+          </div>
         </label>
 
         <label className="flex items-center gap-2 text-xs">
@@ -380,8 +429,10 @@ export function DynamicVariableForm({
           />
           <span>启用（停用后不参与替换）</span>
         </label>
+      </section>
 
-        <div className="mt-1 flex items-center gap-2">
+      <section className="flex flex-col gap-2 px-4 py-3">
+        <div className="flex items-center gap-2">
           <Button
             size="sm"
             onClick={() => void handleSubmit()}
@@ -399,12 +450,8 @@ export function DynamicVariableForm({
             取消
           </Button>
         </div>
-        {saveError && (
-          <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-            {saveError}
-          </p>
-        )}
-      </div>
+        {saveError && <InlineError className="px-3 py-2 text-xs">{saveError}</InlineError>}
+      </section>
     </div>
   );
 }

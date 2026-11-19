@@ -24,7 +24,9 @@ import type { DynamicPreviewResult } from '@/types/domain';
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
 import { errorText } from '@/lib/error-text';
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { InlineError } from '@/components/ui/inline-error';
 import { buildScriptSnippet, shouldConfirmOverwrite } from './extract-path';
 import {
   previewExpectedEnvironment,
@@ -84,6 +86,30 @@ interface DraftSnapshot {
 function summarizeValue(value: unknown): string {
   const text = JSON.stringify(value) ?? 'undefined';
   return text.length > 160 ? `${text.slice(0, 160)}…` : text;
+}
+
+/**
+ * 一行 label-value：标签弱、值可读。
+ *
+ * 元信息一行行拆开就是为了能扫读，故标签与值必须在视觉上分开——挤进同一个自然段时，
+ * 「环境是哪一档」这种要靠找的信息就找不到了。
+ */
+function MetaRow({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  /** 路径、状态码这类值用等宽排版，一眼看出它是个标识符而不是一段话。 */
+  mono?: boolean;
+}) {
+  return (
+    <div className="flex min-w-0 items-baseline gap-2 text-micro">
+      <span className="shrink-0 text-faint">{label}</span>
+      <span className={cn('min-w-0 break-all', mono && 'font-mono')}>{value}</span>
+    </div>
+  );
 }
 
 export function ExtractPreview({
@@ -217,7 +243,7 @@ export function ExtractPreview({
   };
 
   return (
-    <div className="flex flex-col gap-1.5 rounded-md border border-border bg-muted/20 p-2">
+    <div className="flex min-w-0 flex-col gap-1.5 rounded-md bg-muted/20 p-2">
       <div className="flex items-center gap-2 text-xs">
         <Button
           size="sm"
@@ -235,27 +261,34 @@ export function ExtractPreview({
       {!hasSource && (
         <p className="text-micro text-muted-foreground">先选好数据源（接口或内联请求）再预览。</p>
       )}
-      {error && (
-        <p className="rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1 text-micro text-destructive">
-          取数失败：{error}
-        </p>
-      )}
+      {error && <InlineError className="px-2 py-1 text-micro">取数失败：{error}</InlineError>}
       {result && snapshot && (
         <div className="flex flex-col gap-1">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-micro text-muted-foreground">
-            <span className="font-mono text-foreground">{result.status}</span>
-            <span>{result.durationMs} ms</span>
-            <span className="font-mono">{result.contentType || '（无）'}</span>
-            <span>
-              环境：
-              {snapshot.environment === null ? '没有环境' : snapshot.environment}
+          {/* 第一行：响应本身的三个数（状态码 / 耗时 / content-type）。它们是「这次请求怎么样」，
+              与下面「这份结果对应哪份草稿」是两件事，故分成两组。 */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="rounded bg-muted px-1.5 py-0.5 text-micro text-faint">
+              状态码 <code className="font-mono text-muted-foreground">{result.status}</code>
             </span>
-            <span className="text-faint">
-              ← 这份结果对应{snapshot.source}，抽取规则{' '}
-              <code className="font-mono">{snapshot.extractPath}</code>，
-              {snapshot.hasScript ? '带处理脚本' : '没有处理脚本'}
+            <span className="rounded bg-muted px-1.5 py-0.5 text-micro text-faint">
+              耗时 <code className="font-mono text-muted-foreground">{result.durationMs} ms</code>
+            </span>
+            <span className="rounded bg-muted px-1.5 py-0.5 text-micro text-faint">
+              content-type{' '}
+              <code className="break-all font-mono text-muted-foreground">
+                {result.contentType || '（无）'}
+              </code>
             </span>
           </div>
+          {/* 第二组：这批结果对应哪份草稿（环境、数据源、抽取规则、有没有处理脚本）。
+              每条一行、标签弱值强：挤成一句话时用户扫不出「环境是哪一档」。 */}
+          <MetaRow
+            label="环境"
+            value={snapshot.environment === null ? '没有环境' : snapshot.environment}
+          />
+          <MetaRow label="这份结果对应" value={snapshot.source} />
+          <MetaRow label="抽取规则" value={snapshot.extractPath} mono />
+          <MetaRow label="处理脚本" value={snapshot.hasScript ? '带处理脚本' : '没有处理脚本'} />
           {draftChanged && (
             <p className="text-micro text-warning">
               这份结果对应的是旧输入：下面这份响应来自上面这份草稿的上一版，改完点「预览取数」再重取一次。
@@ -278,32 +311,33 @@ export function ExtractPreview({
             </p>
           )}
           {result.extractError && (
-            <p className="rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1 text-micro text-destructive">
+            <InlineError className="px-2 py-1 text-micro">
               抽取失败（{result.extractError.kind}）：{result.extractError.message}
               。正文照给，照着树重新点一条路径即可。
-            </p>
+            </InlineError>
           )}
           {result.transformError && (
-            <p className="rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1 text-micro text-destructive">
+            <InlineError className="px-2 py-1 text-micro">
               处理脚本失败：{result.transformError.message}。最终值仍是抽取结果。
-            </p>
+            </InlineError>
           )}
           {result.extracted !== undefined && (
-            <p className="text-micro text-muted-foreground">
-              抽取结果 <code className="font-mono">{summarizeValue(result.extracted)}</code>
-              {'；最终值 '}
-              <code className="font-mono">
-                {result.value === undefined ? '（无）' : summarizeValue(result.value)}
-              </code>
-            </p>
+            <div className="mt-0.5 flex flex-col gap-0.5">
+              <MetaRow label="抽取结果" value={summarizeValue(result.extracted)} mono />
+              <MetaRow
+                label="最终值"
+                value={result.value === undefined ? '（无）' : summarizeValue(result.value)}
+                mono
+              />
+            </div>
           )}
           {result.bodyJson !== undefined ? (
-            <div className="max-h-64 overflow-auto rounded border border-border bg-background/60 p-1.5">
+            <div className="max-h-64 min-w-0 max-w-full overflow-auto rounded bg-background/70 p-1.5">
               <PreviewJsonTree value={result.bodyJson} path="$" onPick={pick} />
             </div>
           ) : (
             !result.binary && (
-              <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded border border-border bg-background/60 p-1.5 font-mono text-micro text-muted-foreground">
+              <pre className="max-h-40 min-w-0 max-w-full overflow-auto whitespace-pre-wrap break-all rounded bg-background/70 p-1.5 font-mono text-micro text-muted-foreground">
                 {result.bodyText === '' ? '（正文为空）' : result.bodyText}
               </pre>
             )
@@ -311,7 +345,7 @@ export function ExtractPreview({
           {pickedPath && (
             <div className="flex flex-wrap items-center gap-2 text-micro">
               <span className="text-muted-foreground">已写入抽取规则：</span>
-              <code className="font-mono text-foreground">{pickedPath}</code>
+              <code className="min-w-0 break-all font-mono text-foreground">{pickedPath}</code>
               <Button size="sm" variant="ghost" onClick={generateSnippet}>
                 生成脚本片段
               </Button>

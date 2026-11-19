@@ -11,14 +11,17 @@
  * 面板读的是 store 里的 `dynamicVariables`（列表命令一次带回定义 + 当前值 + 缓存状态），故它
  * 不自己发请求；取数与写覆盖值都走 store 动作。
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useAppStore } from '@/stores/app-store';
-import type { DynamicVariable, DynamicVariableView, ValueMode } from '@/types/domain';
+import type { DynamicVariableView } from '@/types/domain';
 import { Button } from '@/components/ui/button';
 import { EmptyHint } from '@/components/ui/empty-hint';
+import { InlineError } from '@/components/ui/inline-error';
+import { LoadingState } from '@/components/ui/loading-indicator';
+import { gsap, motionSafe, useGSAP } from '@/lib/gsap';
+import { dynamicListMatchesEnvironment } from '@/stores/dynamic-slice';
+import { DynamicVariableCard } from './DynamicVariableCard';
 import { DynamicVariableForm } from './DynamicVariableForm';
-import { overrideEditor } from './override-editor';
-import { dynamicValueScope, type DynamicVariableDraft } from '@/stores/dynamic-slice';
 
 export function DynamicVariablesPanel() {
   const projectId = useAppStore((s) => s.activeProjectId);
@@ -26,6 +29,9 @@ export function DynamicVariablesPanel() {
   // 切了环境，这个列表就得重载，否则卡片上的值还是上一个环境的。
   const activeEnvironmentId = useAppStore((s) => s.activeEnvironmentId);
   const loaded = useAppStore((s) => s.dynamicVariables);
+  // 这批列表是「在哪个 (项目 × 环境) 下取到的」。首载时它是 null：此刻列表还没回来，
+  // 面板不能先说「还没有动态变量」。
+  const listScope = useAppStore((s) => s.dynamicVariablesScope);
   const resolving = useAppStore((s) => s.dynamicInFlight > 0);
   const error = useAppStore((s) => s.dynamicError);
   const loadDynamicVariables = useAppStore((s) => s.loadDynamicVariables);
@@ -43,6 +49,7 @@ export function DynamicVariablesPanel() {
 
   const creating = draft?.creating ?? false;
   const editingId = draft?.editingId ?? null;
+  const listRef = useRef<HTMLDivElement>(null);
 
   // 只列当前项目的定义：别的项目的同名变量不归这条标签管。
   const variables = useMemo(
@@ -50,9 +57,42 @@ export function DynamicVariablesPanel() {
     [loaded, projectId],
   );
 
+  // 列表还没回到当前这一格：显示加载态，别先给一句「还没有动态变量」。
+  const listMatches = dynamicListMatchesEnvironment(
+    listScope,
+    projectId,
+    activeEnvironmentId || null,
+  );
+  const loading = !listMatches && variables.length === 0;
+
   useEffect(() => {
     void loadDynamicVariables(projectId);
   }, [loadDynamicVariables, projectId, activeEnvironmentId]);
+
+  // 依赖是项目与条数：换项目、以及条数一变（含首批数据到达）都会整体重播一次这一轮淡入。
+  // 错峰用的是固定总预算（amount），无论多少条都在四分之一秒内摊完，条数再多也不会把
+  // 末项拖到一秒之后。
+  useGSAP(
+    () => {
+      const cards = listRef.current?.querySelectorAll('[data-dynamic-card]');
+      if (!cards || cards.length === 0) return;
+      return motionSafe(() =>
+        gsap.fromTo(
+          cards,
+          { opacity: 0, y: 4 },
+          {
+            opacity: 1,
+            y: 0,
+            duration: 0.2,
+            ease: 'power2.out',
+            stagger: { amount: 0.25 },
+            clearProps: 'transform',
+          },
+        ),
+      );
+    },
+    { scope: listRef, dependencies: [projectId, variables.length] },
+  );
 
   const handleResolveAll = useCallback(async () => {
     const names = variables.map((v) => v.name);
@@ -94,39 +134,40 @@ export function DynamicVariablesPanel() {
           </div>
         </header>
 
-        {error && (
-          <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-            {error}
-          </p>
-        )}
+        {error && <InlineError className="px-3 py-2 text-xs">{error}</InlineError>}
 
-        {variables.length === 0 && !creating && (
+        {loading && <LoadingState className="py-6" label="正在读取动态变量…" />}
+
+        {!loading && variables.length === 0 && !creating && (
           <EmptyHint className="py-6 text-xs">
             还没有动态变量。新建一条：给它一个名字、一个数据源（引用树里的接口，或一份内联请求）、
             一条 JSONPath 抽取规则与一个缓存时长。
           </EmptyHint>
         )}
 
-        {variables.map((variable) => (
-          <DynamicVariableCard
-            // 卡片自带覆盖值编辑器的状态，而值是 (定义 × 取数环境) 的一格：换环境就是另一格，
-            // 卡片必须跟着重挂，否则 A 环境那行文本会跟着写进 B 环境。切环境时整个面板都重载了
-            // 列表，重挂这一次不额外付代价。
-            key={`${variable.id}:${activeEnvironmentId}`}
-            variable={variable}
-            projectId={projectId}
-            resolving={resolving}
-            editing={editingId === variable.id}
-            onEdit={() => beginEdit(variable)}
-            onCancelEdit={() => clearDraft(projectId)}
-            onFinishEdit={(submitted, saved, patch) =>
-              finishSave(projectId, submitted, saved, patch)
-            }
-            onRefresh={() => void handleRefresh(variable)}
-            onClearOverride={() => void handleClearOverride(variable)}
-            onDelete={() => void deleteDynamicVariable(variable.id)}
-          />
-        ))}
+        <div ref={listRef} className="flex flex-col gap-2">
+          {variables.map((variable) => (
+            <div key={`${variable.id}:${activeEnvironmentId}`} data-dynamic-card>
+              <DynamicVariableCard
+                // 卡片自带覆盖值编辑器的状态，而值是 (定义 × 取数环境) 的一格：换环境就是另一格，
+                // 卡片必须跟着重挂，否则 A 环境那行文本会跟着写进 B 环境。切环境时整个面板都重载了
+                // 列表，重挂这一次不额外付代价。
+                variable={variable}
+                projectId={projectId}
+                resolving={resolving}
+                editing={editingId === variable.id}
+                onEdit={() => beginEdit(variable)}
+                onCancelEdit={() => clearDraft(projectId)}
+                onFinishEdit={(submitted, saved, patch) =>
+                  finishSave(projectId, submitted, saved, patch)
+                }
+                onRefresh={() => void handleRefresh(variable)}
+                onClearOverride={() => void handleClearOverride(variable)}
+                onDelete={() => void deleteDynamicVariable(variable.id)}
+              />
+            </div>
+          ))}
+        </div>
 
         {creating && (
           <DynamicVariableForm
@@ -139,238 +180,3 @@ export function DynamicVariablesPanel() {
     </div>
   );
 }
-
-/** 一条定义 + 它的当前值与缓存状态。 */
-interface DynamicVariableCardProps {
-  variable: DynamicVariableView;
-  /** 归属项目。取值桶按项目分，故查失败原因时要用它当键。 */
-  projectId: string;
-  resolving: boolean;
-  editing: boolean;
-  onEdit: () => void;
-  onCancelEdit: () => void;
-  /** 编辑表保存成功：提交的那份草稿与落库的那份定义一起交回去。 */
-  onFinishEdit: (
-    submitted: DynamicVariableDraft,
-    saved: DynamicVariable,
-    patch: Partial<DynamicVariable>,
-  ) => void;
-  onRefresh: () => void;
-  onClearOverride: () => void;
-  onDelete: () => void;
-}
-
-function DynamicVariableCard({
-  variable,
-  projectId,
-  resolving,
-  editing,
-  onEdit,
-  onCancelEdit,
-  onFinishEdit,
-  onRefresh,
-  onClearOverride,
-  onDelete,
-}: DynamicVariableCardProps) {
-  const [expanded, setExpanded] = useState(false);
-  const [draft, setDraft] = useState(variable.value ?? '');
-  const setDynamicOverride = useAppStore((s) => s.setDynamicOverride);
-  // 取数失败的原因。列表视图本身不带它（那是一次纯读），故取数时记进 store 的那份。
-  // 失败原因也按 (项目 × 取数环境) 分桶：查的是当前环境那一格。
-  const activeEnvironmentId = useAppStore((s) => s.activeEnvironmentId);
-  const dynamicError = useAppStore(
-    (s) =>
-      s.dynamicErrors[dynamicValueScope(projectId, activeEnvironmentId || null)]?.[variable.name],
-  );
-  const error = variable.error ?? dynamicError;
-  // 这批「当前值」是不是当前这个环境拉到的。切换环境的那一刻列表还在路上，内容仍是上一个
-  // 环境的：此刻打开覆盖值编辑器，复制进框里的是 A 的值，保存却会写进 B。
-  const listScope = useAppStore((s) => s.dynamicVariablesScope);
-  const editor = overrideEditor(listScope, projectId, activeEnvironmentId || null, variable.value);
-
-  /** 打开编辑器：每次都把框里的内容重置成列表给出的那个值。 */
-  const openEditor = () => {
-    setDraft(editor.initialValue);
-    setExpanded(true);
-  };
-
-  // 两条入口（「编辑」按钮与「当前值」那行摘要）都走 `openEditor`：摘要那行若只切展开态，
-  // 框里留的还是这个组件挂载时的那份文本——切过环境之后它就是 A 的值。
-  const toggleEditor = () => {
-    if (expanded) {
-      setExpanded(false);
-      return;
-    }
-    openEditor();
-  };
-
-  // 数据源。两个来源字段都为空只有一个成因：引用的接口被删了（外键把它置成 NULL）——
-  // 界面不允许建一个没有数据源的定义，故「没有数据源」与「数据源已删除」是同一件事。
-  const sourceMissing = !variable.sourceEndpointId && !variable.sourceInlineJson;
-  const source = variable.sourceEndpointId
-    ? variable.sourceEndpointName
-      ? `引用接口：${variable.sourceEndpointName}${
-          variable.sourceProjectName ? `（${variable.sourceProjectName}）` : ''
-        }`
-      : '引用接口（已被删除）'
-    : variable.sourceInlineJson
-      ? '内联请求'
-      : '数据源已删除';
-
-  return (
-    <article className="rounded-md border border-border p-3">
-      <div className="flex items-center gap-2">
-        <span className="font-mono text-sm">{variable.name}</span>
-        <code className="rounded bg-muted px-1 py-0.5 font-mono text-micro text-muted-foreground">
-          {`{{${variable.name}}}`}
-        </code>
-        <StatusBadge source={variable.source} />
-        <span className="ml-auto flex items-center gap-1">
-          <Button
-            variant="ghost"
-            size="xs"
-            onClick={onRefresh}
-            disabled={resolving}
-            title={variable.isOverride ? '重新取数会放弃手动指定的值' : '跳过缓存，重新取一次数'}
-          >
-            刷新
-          </Button>
-          {variable.isOverride && (
-            <Button
-              variant="ghost"
-              size="xs"
-              onClick={onClearOverride}
-              disabled={!editor.editable}
-              title={
-                editor.editable
-                  ? '删掉这条手工指定的值，回到自动取数'
-                  : '列表还在换成当前环境的值：此刻恢复自动获取，删掉的是另一个环境的覆盖值'
-              }
-            >
-              恢复自动获取
-            </Button>
-          )}
-          <Button variant="ghost" size="xs" onClick={onEdit}>
-            编辑
-          </Button>
-          <Button variant="ghost" size="xs" onClick={onDelete}>
-            删除
-          </Button>
-        </span>
-      </div>
-
-      <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
-        <dt className="text-muted-foreground">数据源</dt>
-        <dd className={sourceMissing ? 'text-destructive' : undefined}>{source}</dd>
-        {variable.effectiveEnvironmentName && (
-          <>
-            <dt className="text-muted-foreground">取数环境</dt>
-            <dd>
-              {variable.effectiveEnvironmentName}
-              {variable.sourceEnvironmentId ? '' : '（继承当前环境）'}
-            </dd>
-          </>
-        )}
-        <dt className="text-muted-foreground">抽取规则</dt>
-        <dd className="font-mono">{variable.extractPath}</dd>
-        {variable.transformScript && (
-          <>
-            <dt className="text-muted-foreground">处理脚本</dt>
-            <dd className="font-mono text-micro">抽取之后跑，用 `return` 给出最终值</dd>
-          </>
-        )}
-        <dt className="text-muted-foreground">缓存时长</dt>
-        <dd>{variable.ttlSeconds} 秒</dd>
-      </dl>
-
-      <div className="mt-2">
-        <div className="flex items-center gap-2 text-xs">
-          <span className="text-muted-foreground">当前值</span>
-          <button
-            type="button"
-            className="truncate font-mono text-muted-foreground hover:text-foreground"
-            onClick={toggleEditor}
-            disabled={!editor.editable}
-          >
-            {variable.value ? summarize(variable.value) : '（没有值）'}
-          </button>
-          <Button
-            variant="ghost"
-            size="xs"
-            onClick={toggleEditor}
-            disabled={!editor.editable}
-            title={editor.editable ? undefined : '列表还在换成当前环境的值，此刻不该照着它写覆盖值'}
-          >
-            {expanded ? '收起' : '编辑'}
-          </Button>
-          {!editor.editable && <span className="text-nano text-faint">正在切换环境…</span>}
-        </div>
-        {expanded && editor.editable && (
-          <div className="mt-2 flex flex-col gap-2">
-            <textarea
-              className="min-h-24 w-full rounded-md border border-input bg-background px-2 py-1 font-mono text-xs"
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              spellCheck={false}
-            />
-            <div className="flex items-center gap-2">
-              <Button size="xs" onClick={() => void setDynamicOverride(variable.id, draft)}>
-                保存为覆盖值
-              </Button>
-              <span className="text-micro text-muted-foreground">
-                覆盖值优先于自动取回的值；过期时间默认沿用 TTL。
-              </span>
-            </div>
-          </div>
-        )}
-      </div>
-
-      <p className="mt-2 text-micro text-muted-foreground">
-        {variable.fetchedAt ? `取数于 ${formatTime(variable.fetchedAt)}` : '尚未取数'}
-        {variable.expiresAt ? ` · 过期于 ${formatTime(variable.expiresAt)}` : ''}
-      </p>
-      {error && (
-        <p className="mt-1 text-micro text-destructive">{`${error.kind}：${error.message}`}</p>
-      )}
-
-      {editing && (
-        <DynamicVariableForm
-          variable={variable}
-          projectId={projectId}
-          onCancel={onCancelEdit}
-          onDone={onFinishEdit}
-        />
-      )}
-    </article>
-  );
-}
-
-/** 当前值的来源。 */
-function StatusBadge({ source }: { source: DynamicVariableView['source'] }) {
-  const label =
-    source === 'override'
-      ? '手动改的'
-      : source === 'stale'
-        ? '已过期'
-        : source === 'auto'
-          ? '自动取回'
-          : '没有值';
-  return (
-    <span className="rounded bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">{label}</span>
-  );
-}
-
-/** 值的摘要：长度加开头。 */
-function summarize(value: string): string {
-  const head = value.length > 80 ? `${value.slice(0, 80)}…` : value;
-  return `${head}（${value.length} 字符）`;
-}
-
-/** 时间戳 → 本地时刻。 */
-function formatTime(ms: number): string {
-  const d = new Date(ms);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-}
-
-export type { ValueMode };

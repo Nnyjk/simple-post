@@ -133,11 +133,10 @@
     --chip: 0 0% 100%;
 
     /* Windows rounds top-level windows to 8px; everything inside is 6 or
-       less. Keeping these separate stops the window from inheriting the
-       card radius (and vice versa). */
+       less. That 8px is the native frame's, so nothing here paints it —
+       `--radius` is the top of the CSS ladder. */
     --edge-window: 0 0% 70.6%;
     --radius: 6px;
-    --radius-window: 8px;
     --radius-pill: 999px;
 
     /* Theme preview swatches. `AppearanceSection` paints a thumbnail of
@@ -232,7 +231,6 @@
 
     --edge-window: 0 0% 70.6%;
     --radius: 6px;
-    --radius-window: 8px;
     --radius-pill: 999px;
 
     /* Mirrors :root — light is the default. See the :root block for why
@@ -323,7 +321,6 @@
      * a dark surface and the window edge would otherwise disappear. */
     --edge-window: 0 0% 41.6%;
     --radius: 6px;
-    --radius-window: 8px;
     --radius-pill: 999px;
 
     /* Dark-mode hues: same angles as light, higher lightness so a 15%-alpha
@@ -409,10 +406,6 @@
 }
 
 @layer components {
-  .panel {
-    @apply bg-card border border-border rounded-lg;
-  }
-
   /* The focus ring is a single TypeScript constant (`focusRing` in
      src/lib/utils.ts), not a CSS class. A `.focus-ring` rule used to live
      here but nothing ever applied it — the 9 components that needed the
@@ -431,15 +424,6 @@
      (`--input`), rather than the old flat muted badge at 10px. */
   .kbd {
     @apply inline-flex items-center justify-center px-1.5 h-[22px] text-[11px] font-mono rounded border border-input bg-muted text-foreground;
-  }
-
-  /* Numbered key cap for "hold a modifier and press this" hints (Alt+1..9
-     and friends). 26×26 at radius 6, half-weight, matching how the two
-     reference apps size a keycap: big enough to read as an object rather
-     than as a character in a sentence. */
-  .keycap {
-    @apply inline-flex items-center justify-center w-[26px] h-[26px] rounded bg-muted border border-input font-mono text-sm font-semibold text-foreground;
-    border-radius: 6px;
   }
 
   /* Selection affordance for list rows: a filled surface plus a 3px accent
@@ -539,19 +523,11 @@
   .alert-warning-inline {
     @apply shrink-0 border-b bg-warning/5 px-2.5 py-1.5 text-xs text-warning-foreground;
   }
-  /* `.alert-error-inline` used to pair `bg-destructive/5` with
-     `text-destructive-foreground`. That is white-on-white in light mode,
-     and in dark mode it is near-white text on a barely-tinted near-black
-     surface — an invisible badge in both, with no error signal at all.
-     The fix is the shape AGENTS.md prescribes: a tinted surface with the
-     token that the scope actually lightens. `text-destructive` is a
-     saturated red in light and a light pink in dark, so it reads on the
-     5%-tinted surface either way. If you ever want the solid fill, it has
-     to be `bg-destructive text-destructive-foreground` with BOTH tokens
-     at once — never one without the other. */
-  .alert-error-inline {
-    @apply mt-2 flex items-start gap-1.5 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-1.5 text-xs text-destructive;
-  }
+  /* The inline error box used to be a `.alert-error-inline` class here and
+     a duplicated utility string at seven call sites. Both are gone: the
+     box is now `<InlineError />` (src/components/ui/inline-error.tsx), and
+     its token pairing — the reason this class existed — is documented
+     there. */
 }
 
 @layer components {

@@ -117,9 +117,9 @@ export default {
       // (`lg: var(--radius)`, `md: calc(-2px)`, `sm: calc(-4px)`) meant
       // rounding a card and rounding a button were always tied together,
       // which is the opposite of how native Windows does it: 8px for the
-      // window, 6px for cards and rows, 4px for controls.
+      // window (the native frame's, so no CSS stop for it), 6px for cards
+      // and rows, 4px for controls.
       borderRadius: {
-        window: 'var(--radius-window)',
         pill: 'var(--radius-pill)',
         lg: 'var(--radius)', // 6px — cards, rows, popovers, menus
         md: '4px', // 4px — buttons, inputs, chips

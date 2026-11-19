@@ -81,249 +81,268 @@ export function TopBar() {
   return (
     <header
       data-tauri-drag-region="true"
-      className="flex h-11 shrink-0 select-none items-center gap-2 border-b border-border bg-card/50 px-3"
+      className="grid h-11 shrink-0 select-none grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 border-b border-border bg-card/50 px-3"
     >
-      {/* 字标 —— 同时是回欢迎页的入口（`leaveProject`）。点产品名回首页是惯例，且它是
-          本条中唯一不控制别的东西的元素。 */}
-      <Tooltip content="返回欢迎页" side="bottom">
-        <button
-          {...NO_DRAG}
-          type="button"
-          onClick={leaveProject}
-          aria-label="返回欢迎页"
-          data-testid="back-to-welcome"
-          className={cn(
-            'flex items-center gap-2 rounded-md px-1.5 py-1 transition-colors hover:bg-overlay-hover',
-            focusRing,
-          )}
-        >
-          <AppIcon className="h-6 w-6" />
-          <span className="text-sm font-semibold tracking-tight">Simple Post</span>
-        </button>
-      </Tooltip>
-
-      {/* 项目切换器 —— 项目的入口（它不在树里）。只在 bootstrap 拿到列表前禁用；尚未
-          进入项目时显示「选择项目…」而非「加载中…」，因为全新启动正是欢迎页请用户挑选
-          的状态。 */}
-      <div ref={projRef} className="relative">
-        <Button
-          {...NO_DRAG}
-          variant="ghost"
-          size="sm"
-          onClick={() => setProjOpen((v) => !v)}
-          disabled={!loaded}
-          className="gap-1.5"
-        >
-          {activeProject ? (
-            <>
-              <span
-                className="h-2 w-2 rounded-sm"
-                style={{ backgroundColor: activeProject.color }}
-              />
-              {/* 用 `max-w` 而非固定 `w`：项目名在这里只是短标签，预留满 160px 会在条上
-                  留下刺眼的空隙。与环境位不同，它不会每次切换都变，故不值得为省白空间
-                  换来 `max-w` 遇短名就收窄的行为。长名仍会封顶并加省略号。 */}
-              <span className="max-w-[160px] truncate">{activeProject.name}</span>
-            </>
-          ) : (
-            <>
-              {loaded ? (
-                <span className="max-w-[160px] truncate">选择项目…</span>
-              ) : (
-                <>
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                  <span className="max-w-[160px] truncate">加载中…</span>
-                </>
-              )}
-            </>
-          )}
-          <ChevronDown className="h-3.5 w-3.5 opacity-60" />
-        </Button>
-        {projOpen && loaded && projects.length > 0 && (
-          <div
+      {/* 左簇：字标、项目切换器、环境切换器。它所在的列是 `minmax(0,1fr)`，两侧列等宽，
+          故中列的中心恒等于容器中心。`max-w-full` 把本簇夹在列宽内（否则
+          `justify-self-start` 会按内容宽度撑开、越过列界压到搜索框上）。两个切换器
+          各占本簇剩余空间的一半（`flex-1`），名字就在各自容器内 `truncate` 省略，
+          谁长谁短都不会把中列的搜索框挤走。 */}
+      <div className="flex min-w-0 max-w-full items-center gap-2 justify-self-start">
+        {/* 字标 —— 同时是回欢迎页的入口（`leaveProject`）。点产品名回首页是惯例，且它是
+            本条中唯一不控制别的东西的元素。 */}
+        <Tooltip content="返回欢迎页" side="bottom">
+          <button
+            {...NO_DRAG}
+            type="button"
+            onClick={leaveProject}
+            aria-label="返回欢迎页"
+            data-testid="back-to-welcome"
             className={cn(
-              'absolute left-0 top-full mt-1 w-64 animate-slide-in-from-top rounded-md border border-border bg-popover p-1 shadow-lg',
-              LAYER.popover,
+              'flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1 transition-colors hover:bg-overlay-hover',
+              focusRing,
             )}
           >
-            <div className="px-2 py-1 label-caps">项目</div>
-            {projects.map((p) => (
-              <button
-                {...NO_DRAG}
-                type="button"
-                key={p.id}
-                onClick={() => {
-                  openProject(p.id);
-                  setProjOpen(false);
-                }}
-                className={cn(
-                  'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-overlay-hover',
-                  p.id === activeProject?.id && 'bg-accent',
-                )}
-              >
-                <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: p.color }} />
-                <div className="min-w-0 flex-1">
-                  <div className="truncate">{p.name}</div>
-                  {p.description && (
-                    <div className="truncate text-micro text-muted-foreground">{p.description}</div>
-                  )}
-                </div>
-              </button>
-            ))}
-            <div className="mt-1 border-t border-border pt-1">
-              <button
-                {...NO_DRAG}
-                type="button"
-                onClick={() => {
-                  setProjOpen(false);
-                  openNewItem({ type: 'project' });
-                }}
-                className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-muted-foreground hover:bg-overlay-hover hover:text-foreground"
-              >
-                <span className="text-base leading-none">+</span>
-                新建项目
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
+            <AppIcon className="h-6 w-6 shrink-0" />
+            <span className="min-w-0 truncate text-sm font-semibold tracking-tight">
+              Simple Post
+            </span>
+          </button>
+        </Tooltip>
 
-      {/* 环境切换器。以已有项目为前提：列表是
-          `environments.filter(e => e.projectId === activeProjectId)`，没有项目时它为空，
-          下拉会对一个不存在的项目报「该项目暂无环境」，还给出必然失败的「新建环境」。
-          `WorkspaceShell` 通常只在项目激活后挂载，此守卫另覆盖只有设置页的情形。 */}
-      {activeProjectId !== '' && (
-        <div ref={envRef} className="relative">
+        {/* 项目切换器 —— 项目的入口（它不在树里）。只在 bootstrap 拿到列表前禁用；尚未
+          进入项目时显示「选择项目…」而非「加载中…」，因为全新启动正是欢迎页请用户挑选
+          的状态。 */}
+        <div ref={projRef} className="relative flex min-w-0 flex-1">
           <Button
             {...NO_DRAG}
             variant="ghost"
             size="sm"
-            onClick={() => setEnvOpen((v) => !v)}
-            className="gap-1.5"
+            onClick={() => setProjOpen((v) => !v)}
+            disabled={!loaded}
+            className="min-w-0 shrink"
           >
-            <span className="text-nano uppercase tracking-wider text-muted-foreground">env</span>
-            {/* 固定宽度而非 `max-w`：标题栏不得因当前环境名长短变化而改变尺寸。`max-w`
-              只封顶长名，短名反而会把整个控件收窄，切换环境时把它右侧的一切推来推去。
-              `truncate` 仍会在固定宽度内把过长名字省略。 */}
-            <span className="w-[80px] truncate font-mono text-xs">{activeEnv?.name ?? '—'}</span>
-            <ChevronDown className="h-3.5 w-3.5 opacity-60" />
+            {activeProject ? (
+              <>
+                <span
+                  className="h-2 w-2 shrink-0 rounded-sm"
+                  style={{ backgroundColor: activeProject.color }}
+                />
+                {/* 不设固定宽度：左簇所在列是 `minmax(0,1fr)`，宽度上限由网格给定，
+                    `min-w-0` + `truncate` 让长名字在本簇内省略，不会把中列的搜索框挤走。 */}
+                <span className="min-w-0 truncate">{activeProject.name}</span>
+              </>
+            ) : (
+              <>
+                {loaded ? (
+                  <span className="min-w-0 truncate">选择项目…</span>
+                ) : (
+                  <>
+                    <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
+                    <span className="min-w-0 truncate">加载中…</span>
+                  </>
+                )}
+              </>
+            )}
+            <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
           </Button>
-          {envOpen && (
+          {projOpen && loaded && projects.length > 0 && (
             <div
               className={cn(
-                'absolute left-0 top-full mt-1 w-56 animate-slide-in-from-top rounded-md border border-border bg-popover p-1 shadow-lg',
+                'absolute left-0 top-full mt-1 w-64 animate-slide-in-from-top rounded-md border border-border bg-popover p-1 shadow-lg',
                 LAYER.popover,
               )}
             >
-              <div className="px-2 py-1 label-caps">环境</div>
-              {envs.length === 0 ? (
-                <>
-                  <div className="px-2 py-3 text-center text-xs text-muted-foreground">
-                    该项目暂无环境
+              <div className="px-2 py-1 label-caps">项目</div>
+              {projects.map((p) => (
+                <button
+                  {...NO_DRAG}
+                  type="button"
+                  key={p.id}
+                  onClick={() => {
+                    openProject(p.id);
+                    setProjOpen(false);
+                  }}
+                  className={cn(
+                    'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-overlay-hover',
+                    p.id === activeProject?.id && 'bg-accent',
+                  )}
+                >
+                  <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: p.color }} />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate">{p.name}</div>
+                    {p.description && (
+                      <div className="truncate text-micro text-muted-foreground">
+                        {p.description}
+                      </div>
+                    )}
                   </div>
-                  <div className="mt-1 border-t border-border pt-1">
-                    <button
-                      {...NO_DRAG}
-                      type="button"
-                      onClick={() => {
-                        setEnvOpen(false);
-                        openSettingsTab('env');
-                      }}
-                      className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm text-muted-foreground hover:bg-overlay-hover hover:text-foreground"
-                    >
-                      <Plus className="h-3.5 w-3.5" />
-                      新建环境
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <>
-                  {envs.map((env) => (
-                    <button
-                      {...NO_DRAG}
-                      type="button"
-                      key={env.id}
-                      onClick={() => {
-                        // 只改本客户端的状态，不写库：「当前环境」是每个客户端自己的实时
-                        // 状态，桌面窗口与网页标签各一份，各切各的。落库会让 web 端
-                        // 多个人互相踩——一个人切了环境，另一个人发请求就换了地址与端口。
-                        setCurrentEnvironment(env.id);
-                        setEnvOpen(false);
-                      }}
-                      className={cn(
-                        'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-overlay-hover',
-                        env.id === activeEnv?.id && 'bg-accent',
-                      )}
-                    >
-                      <Circle
-                        className={cn(
-                          'h-2 w-2',
-                          env.id === activeEnv?.id
-                            ? 'fill-success text-success'
-                            : 'text-muted-foreground/40',
-                        )}
-                      />
-                      <span className="font-mono text-xs">{env.name}</span>
-                      {env.id === activeEnv?.id && (
-                        <span className="ml-auto text-nano text-success">active</span>
-                      )}
-                    </button>
-                  ))}
-                  <div className="mt-1 border-t border-border pt-1">
-                    <button
-                      {...NO_DRAG}
-                      type="button"
-                      onClick={() => {
-                        setEnvOpen(false);
-                        openSettingsTab('env');
-                      }}
-                      className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm text-muted-foreground hover:bg-overlay-hover hover:text-foreground"
-                    >
-                      <Plus className="h-3.5 w-3.5" />
-                      新建环境
-                    </button>
-                  </div>
-                </>
-              )}
+                </button>
+              ))}
+              <div className="mt-1 border-t border-border pt-1">
+                <button
+                  {...NO_DRAG}
+                  type="button"
+                  onClick={() => {
+                    setProjOpen(false);
+                    openNewItem({ type: 'project' });
+                  }}
+                  className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-muted-foreground hover:bg-overlay-hover hover:text-foreground"
+                >
+                  <span className="text-base leading-none">+</span>
+                  新建项目
+                </button>
+              </div>
             </div>
           )}
         </div>
-      )}
 
-      {/* 动态变量入口。定义挂在项目里，故它开的是**当前项目**的那一页。 */}
-      <Tooltip content="动态变量" side="bottom">
-        <Button
-          {...NO_DRAG}
-          variant="ghost"
-          size="icon"
-          onClick={() => openDynamicVariablesTab()}
-          aria-label="动态变量"
-        >
-          <Braces className="h-4 w-4" />
-        </Button>
-      </Tooltip>
-
-      {/* 搜索框 —— 点击打开命令面板。 */}
-      <button
-        {...NO_DRAG}
-        type="button"
-        onClick={() => setPaletteOpen(true)}
-        className={cn(
-          'ml-2 flex h-7 w-72 cursor-pointer items-center gap-1.5 rounded-md border border-input bg-background px-2 text-left text-muted-foreground transition-colors hover:bg-overlay-hover hover:text-foreground/80',
-          focusRing,
+        {/* 环境切换器。以已有项目为前提：列表是
+          `environments.filter(e => e.projectId === activeProjectId)`，没有项目时它为空，
+          下拉会对一个不存在的项目报「该项目暂无环境」，还给出必然失败的「新建环境」。
+          `WorkspaceShell` 通常只在项目激活后挂载，此守卫另覆盖只有设置页的情形。 */}
+        {activeProjectId !== '' && (
+          <div ref={envRef} className="relative flex min-w-0 flex-1">
+            <Button
+              {...NO_DRAG}
+              variant="ghost"
+              size="sm"
+              onClick={() => setEnvOpen((v) => !v)}
+              className="min-w-0 shrink"
+            >
+              <span className="shrink-0 text-nano uppercase tracking-wider text-muted-foreground">
+                env
+              </span>
+              {/* 固定宽度而非 `max-w`：标题栏不得因当前环境名长短变化而改变尺寸。`max-w`
+                  只封顶长名，短名反而会把整个控件收窄，切换环境时把它右侧的一切推来推去。
+                  `shrink` 让它在窗口过窄时仍能收窄，`truncate` 在其中把过长名字省略；
+                  `min-w-10` 留一段底宽，免得窗口极窄时环境名被压到看不见。 */}
+              <span className="w-20 min-w-10 shrink truncate font-mono text-xs">
+                {activeEnv?.name ?? '—'}
+              </span>
+              <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
+            </Button>
+            {envOpen && (
+              <div
+                className={cn(
+                  'absolute left-0 top-full mt-1 w-56 animate-slide-in-from-top rounded-md border border-border bg-popover p-1 shadow-lg',
+                  LAYER.popover,
+                )}
+              >
+                <div className="px-2 py-1 label-caps">环境</div>
+                {envs.length === 0 ? (
+                  <>
+                    <div className="px-2 py-3 text-center text-xs text-muted-foreground">
+                      该项目暂无环境
+                    </div>
+                    <div className="mt-1 border-t border-border pt-1">
+                      <button
+                        {...NO_DRAG}
+                        type="button"
+                        onClick={() => {
+                          setEnvOpen(false);
+                          openSettingsTab('env');
+                        }}
+                        className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm text-muted-foreground hover:bg-overlay-hover hover:text-foreground"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        新建环境
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    {envs.map((env) => (
+                      <button
+                        {...NO_DRAG}
+                        type="button"
+                        key={env.id}
+                        onClick={() => {
+                          // 只改本客户端的状态，不写库：「当前环境」是每个客户端自己的实时
+                          // 状态，桌面窗口与网页标签各一份，各切各的。落库会让 web 端
+                          // 多个人互相踩——一个人切了环境，另一个人发请求就换了地址与端口。
+                          setCurrentEnvironment(env.id);
+                          setEnvOpen(false);
+                        }}
+                        className={cn(
+                          'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-overlay-hover',
+                          env.id === activeEnv?.id && 'bg-accent',
+                        )}
+                      >
+                        <Circle
+                          className={cn(
+                            'h-2 w-2',
+                            env.id === activeEnv?.id
+                              ? 'fill-success text-success'
+                              : 'text-muted-foreground/40',
+                          )}
+                        />
+                        <span className="font-mono text-xs">{env.name}</span>
+                        {env.id === activeEnv?.id && (
+                          <span className="ml-auto text-nano text-success">active</span>
+                        )}
+                      </button>
+                    ))}
+                    <div className="mt-1 border-t border-border pt-1">
+                      <button
+                        {...NO_DRAG}
+                        type="button"
+                        onClick={() => {
+                          setEnvOpen(false);
+                          openSettingsTab('env');
+                        }}
+                        className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm text-muted-foreground hover:bg-overlay-hover hover:text-foreground"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        新建环境
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
         )}
-        data-testid="global-search"
-        aria-label="打开命令面板"
-      >
-        <Search className="h-3.5 w-3.5 shrink-0" />
-        <span className="flex-1 truncate text-sm text-faint">搜索命令、接口、项目…</span>
-        <span className="kbd shrink-0">Ctrl</span>
-        <span className="kbd shrink-0">K</span>
-      </button>
+      </div>
 
-      <div className="ml-auto flex items-center gap-2">
+      {/* 中簇：列宽 `auto`（搜索框自身 w-80）。两侧列都是等宽的 `1fr`，故本列中心恒等于
+          容器中心，与左右两簇的实际内容宽度无关。 */}
+      <div className="flex min-w-0 justify-center justify-self-center">
+        {/* 搜索框 —— 点击打开命令面板。 */}
+        <button
+          {...NO_DRAG}
+          type="button"
+          onClick={() => setPaletteOpen(true)}
+          className={cn(
+            'flex h-7 w-80 cursor-pointer items-center gap-1.5 rounded-md border border-input bg-background px-2 text-left text-muted-foreground transition-colors hover:bg-overlay-hover hover:text-foreground/80',
+            focusRing,
+          )}
+          data-testid="global-search"
+          aria-label="打开命令面板"
+        >
+          <Search className="h-3.5 w-3.5 shrink-0" />
+          <span className="flex-1 truncate text-sm text-faint">搜索命令、接口、项目…</span>
+          <span className="kbd shrink-0">Ctrl</span>
+          <span className="kbd shrink-0">K</span>
+        </button>
+      </div>
+
+      {/* 右簇：更新、MCP 状态、动态变量、设置、窗口按钮。动态变量定义挂在项目里，故它开的是
+          当前项目的那一页。整簇靠右缘贴齐，故与中列的居中互不影响。 */}
+      <div className="flex items-center gap-2 justify-self-end">
         <UpdatePill />
         <McpStatusPill />
+        <Tooltip content="动态变量" side="bottom">
+          <Button
+            {...NO_DRAG}
+            variant="ghost"
+            size="icon"
+            onClick={() => openDynamicVariablesTab()}
+            aria-label="动态变量"
+          >
+            <Braces className="h-4 w-4" />
+          </Button>
+        </Tooltip>
         <Tooltip content="设置" side="bottom">
           <Button
             {...NO_DRAG}
@@ -338,10 +357,10 @@ export function TopBar() {
             {updateAvailable && <UpdateDot />}
           </Button>
         </Tooltip>
-      </div>
 
-      {/* 最小化 / 最大化 / 关闭。钉在右缘，让窗口操作聚在桌面应用惯放的位置。 */}
-      <WindowControls />
+        {/* 最小化 / 最大化 / 关闭。钉在右缘，让窗口操作聚在桌面应用惯放的位置。 */}
+        <WindowControls />
+      </div>
 
       <Suspense fallback={null}>
         <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />

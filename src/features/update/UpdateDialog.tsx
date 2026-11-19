@@ -16,6 +16,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ArrowRight, Check, Copy, ExternalLink } from 'lucide-react';
 import { Dialog } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { InlineError } from '@/components/ui/inline-error';
 import { useAppStore } from '@/stores/app-store';
 import type { UpdateApplyResult } from '@/types/update';
 import { isUpdaterAvailable } from '@/lib/updater';
@@ -296,11 +297,7 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
 
         <ApplyResultBlock result={applyResult} />
 
-        {error && (
-          <p className="rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1.5 text-micro text-destructive">
-            {error}
-          </p>
-        )}
+        {error && <InlineError className="px-2 py-1.5 text-micro">{error}</InlineError>}
       </div>
     </Dialog>
   );
