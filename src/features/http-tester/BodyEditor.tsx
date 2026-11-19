@@ -6,9 +6,11 @@ import { oneDark } from '@codemirror/theme-one-dark';
 import type { BodyMode, RequestBody } from '@/types/domain';
 import { Tabs } from '@/components/ui/tabs';
 import { EmptyHint } from '@/components/ui/empty-hint';
-import { Button } from '@/components/ui/button';
-import { AlertTriangle, Wand2 } from 'lucide-react';
+import { FloatToolbar, type FloatToolbarAction } from '@/components/ui/float-toolbar';
+import { JsonTreeView } from '@/components/ui/json-tree-view';
+import { AlertTriangle, Check, Copy, Wand2, WrapText } from 'lucide-react';
 import { cn, tryFormatJson, type FormatResult } from '@/lib/utils';
+import { parseJsonTree } from '@/lib/json-tree';
 import { listVars } from '@/lib/url';
 import { useIsDark } from '@/lib/theme';
 import { lightCodeTheme } from '@/lib/codemirror-themes';
@@ -72,20 +74,22 @@ export function BodyEditor({
   varEntries,
   envName,
 }: Props) {
-  const handleFormat = () => {
-    // 带占位符的模板不能格式化：格式化会把文本改写成解析出来的值，而占位符在模板阶段
-    // 根本不是 JSON。
-    if (listVars(value.content).length > 0) {
-      onFormatResult?.({ ok: false, error: '带 {{变量}} 的模板不能格式化' });
+  const [bodyView, setBodyView] = useState<BodyViewMode>(() =>
+    parseJsonTree(value.content).ok ? 'tree' : 'raw',
+  );
+  // 用户是否自己选过视图。选过之后视图不再由内容的解析状态决定，否则用户刚在 Raw 里
+  // 把 JSON 改到合法就被拽去树视图，编辑器会从眼皮底下消失。
+  const userPickedBodyView = useRef(false);
+
+  // 内容改动后重新决定视图：解析不出来时只有 Raw 能改，视图落回 Raw。
+  useEffect(() => {
+    if (!parseJsonTree(value.content).ok) {
+      setBodyView('raw');
       return;
     }
-    const result = tryFormatJson(value.content);
-    if (result.ok) {
-      onChange({ ...value, content: result.formatted });
-    }
-    // 无论成败都上报：父组件据此「消徽标」或「钉住」，与 发送 / 保存 同一套规则。
-    onFormatResult?.(result);
-  };
+    if (userPickedBodyView.current) return;
+    setBodyView('tree');
+  }, [value.content]);
 
   return (
     <div className="flex h-full min-h-0 max-h-[70vh] gap-4 px-4 py-3">
@@ -99,17 +103,6 @@ export function BodyEditor({
               onChange({ ...value, mode: id as BodyMode });
             }}
           />
-          <Button
-            variant="outline"
-            size="sm"
-            className="ml-auto h-7"
-            disabled={value.mode !== 'json' || !value.content.trim()}
-            onClick={handleFormat}
-            data-testid="format-body-btn"
-          >
-            <Wand2 className="h-3.5 w-3.5" />
-            格式化
-          </Button>
         </div>
         <p className="text-nano text-muted-foreground">{contentTypeText(value.mode)}</p>
         {value.mode === 'none' ? (
@@ -132,6 +125,23 @@ export function BodyEditor({
           <BinaryBodyEditor
             content={value.content}
             onChange={(content) => onChange({ ...value, content })}
+          />
+        ) : value.mode === 'json' ? (
+          <JsonBody
+            value={value}
+            onChange={onChange}
+            validationError={validationError}
+            onFormatResult={onFormatResult}
+            varEntries={varEntries}
+            envName={envName}
+            view={bodyView}
+            onViewChange={(view) => {
+              userPickedBodyView.current = true;
+              setBodyView(view);
+            }}
+            onUserPick={() => {
+              userPickedBodyView.current = true;
+            }}
           />
         ) : (
           <BodyContent
@@ -176,6 +186,200 @@ function NoBodyHint() {
   );
 }
 
+/** 载荷区的两档视图：树只读，Raw 可编辑。 */
+type BodyViewMode = 'tree' | 'raw';
+
+/**
+ * json 载荷区 —— 树 / Raw 两档。
+ *
+ * 树只读展示这份载荷的结构，Raw 是可编辑的 CodeMirror，故写回只发生在 Raw。工具条挂在
+ * 本容器的右上角，两档共用同一排按钮。
+ */
+function JsonBody({
+  value,
+  onChange,
+  validationError,
+  onFormatResult,
+  varEntries,
+  envName,
+  view,
+  onViewChange,
+  onUserPick,
+}: {
+  value: RequestBody;
+  onChange: (body: RequestBody) => void;
+  validationError?: string | null;
+  onFormatResult?: (result: FormatResult) => void;
+  varEntries: VarEntry[];
+  envName?: string;
+  view: BodyViewMode;
+  onViewChange: (view: BodyViewMode) => void;
+  /** 用户动过 Raw 或挑过视图，此后视图不再自动切换。 */
+  onUserPick: () => void;
+}) {
+  // 自动换行默认关闭：树一旦折行，缩进层级就读不出来了。
+  const [wrap, setWrap] = useState(false);
+  // `busy` 是「剪贴板还没给结论」的那一段：这段时间里按钮要禁用，不然连点几次会排起
+  // 一串写入，最后落到哪一个结果上取决于它们完成的先后。
+  const [copyState, setCopyState] = useState<'idle' | 'busy' | 'ok' | 'fail'>('idle');
+  const flashTimer = useRef<number | null>(null);
+
+  // 卸载时清掉未到期的计时器，否则它会在已卸载的组件上 setState。
+  useEffect(
+    () => () => {
+      if (flashTimer.current !== null) window.clearTimeout(flashTimer.current);
+    },
+    [],
+  );
+
+  /** 先等剪贴板给出结论再点亮按钮：写失败却报成功，用户会以为载荷已经在剪贴板里。 */
+  const copyAll = async () => {
+    if (copyState === 'busy') return;
+    // 上一次的「已复制 / 复制失败」还没到期就重试：先撤掉它的计时器，否则它会在这次
+    // 结论之后到点，把刚点亮的按钮又抹回 idle。
+    if (flashTimer.current !== null) {
+      window.clearTimeout(flashTimer.current);
+      flashTimer.current = null;
+    }
+    setCopyState('busy');
+    try {
+      if (!navigator.clipboard) throw new Error('剪贴板不可用');
+      await navigator.clipboard.writeText(value.content);
+      setCopyState('ok');
+    } catch {
+      setCopyState('fail');
+    }
+    flashTimer.current = window.setTimeout(() => setCopyState('idle'), 1500);
+  };
+
+  const handleFormat = () => {
+    // 带占位符的模板不能格式化：格式化会把文本改写成解析出来的值，而占位符在模板阶段
+    // 根本不是 JSON。
+    if (listVars(value.content).length > 0) {
+      onFormatResult?.({ ok: false, error: '带 {{变量}} 的模板不能格式化' });
+      return;
+    }
+    const result = tryFormatJson(value.content);
+    if (result.ok) {
+      onChange({ ...value, content: result.formatted });
+    }
+    // 无论成败都上报：父组件据此「消徽标」或「钉住」，与 发送 / 保存 同一套规则。
+    onFormatResult?.(result);
+  };
+
+  const actions: FloatToolbarAction[] = [
+    {
+      id: 'copy',
+      label:
+        copyState === 'busy'
+          ? '正在复制…'
+          : copyState === 'ok'
+            ? '已复制'
+            : copyState === 'fail'
+              ? '复制失败'
+              : '复制请求体',
+      icon:
+        copyState === 'ok' ? (
+          <Check className="h-3.5 w-3.5 text-success" />
+        ) : (
+          <Copy className={cn('h-3.5 w-3.5', copyState === 'fail' && 'text-destructive')} />
+        ),
+      onClick: copyAll,
+      // 剪贴板还没回话：再点一次也只是排队，且可能以旧结论收尾。
+      disabled: copyState === 'busy',
+      testId: 'copy-body-btn',
+    },
+    {
+      id: 'wrap',
+      label: '自动换行',
+      activeLabel: '取消自动换行',
+      active: wrap,
+      icon: <WrapText className="h-3.5 w-3.5" />,
+      onClick: () => setWrap((v) => !v),
+      testId: 'wrap-body-btn',
+    },
+  ];
+  // 树本身已经是结构化的，格式化只对 Raw 里那段文本有意义。
+  if (view === 'raw') {
+    actions.push({
+      id: 'format',
+      label: '格式化',
+      icon: <Wand2 className="h-3.5 w-3.5" />,
+      onClick: handleFormat,
+      disabled: !value.content.trim(),
+      testId: 'format-body-btn',
+    });
+  }
+
+  // 树能不能渲染，判据必须与真正建树的那一个解析器同源。只调 `JSON.parse` 的话，
+  // `parseJsonTree` 拒掉的文本（比如结尾多一个字符）会先被判成合法，树于是空白一片。
+  // 一份文本只解析一次：`valid` 与树根都从这个结果取，解析开销落在内容变化那一刻。
+  const parsed = useMemo(() => parseJsonTree(value.content), [value.content]);
+  const valid = parsed.ok;
+  const treeRoot = parsed.ok ? parsed.root : null;
+
+  return (
+    <div className="relative flex min-h-0 flex-col gap-1.5">
+      <FloatToolbar actions={actions} />
+      {/* 这一行右端空着，工具条浮在那里；行高与工具条齐平，内容不会被它压住。 */}
+      <div className="flex h-10 items-center">
+        <Tabs
+          variant="segmented"
+          items={[
+            { id: 'tree', label: '树' },
+            { id: 'raw', label: 'Raw' },
+          ]}
+          value={view}
+          onChange={(id) => onViewChange(id as BodyViewMode)}
+        />
+      </div>
+      {/* 校验徽标住在 Raw 的编辑器顶部，树这一档看不到它。这里补一条同源的行内提示，
+          让「发送被拦下」的原因在只读视图里也读得到。 */}
+      {view === 'tree' && validationError && (
+        <div
+          role="status"
+          aria-live="polite"
+          data-testid="body-validation-inline"
+          title={`JSON 格式有误：${validationError}`}
+          className="flex items-start gap-1.5 rounded-md border border-destructive bg-destructive px-2.5 py-1 text-micro text-destructive-foreground"
+        >
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden />
+          <span className="truncate font-mono">JSON 格式有误：{validationError}</span>
+        </div>
+      )}
+      {/*
+        两档**都保持挂载**，靠 `display: none` 切显隐。窗口那一侧一卸载，CodeMirror 的
+        撤销栈连同编辑器状态一起没了 —— 在 Raw 里把 `{"a":1}` 改成 `{"a":2}`，切到树里
+        看一眼再回来，Ctrl+Z 就回不到 `1`。`display: none` 同时把不可见的一侧移出无障碍
+        树与 Tab 序。（这里写 `hidden` 类而不是 `hidden` 属性：`flex` 这类 display 工具类
+        属于作者样式表，按层叠规则会盖掉浏览器样式表里的 `[hidden] { display: none }`。）
+      */}
+      <div className={cn('min-h-0 flex-1 flex-col', view === 'tree' ? 'flex' : 'hidden')}>
+        {valid ? (
+          <JsonTreeView root={treeRoot} wrap={wrap} active={view === 'tree'} />
+        ) : (
+          <EmptyHint className="flex h-32 items-center justify-center text-sm">
+            {value.content.trim() ? 'JSON 格式有误，切到 Raw 修改' : '还没有内容，切到 Raw 输入'}
+          </EmptyHint>
+        )}
+      </div>
+      <div className={cn('min-h-0 flex-1 flex-col', view === 'raw' ? 'flex' : 'hidden')}>
+        <BodyContent
+          value={value}
+          onChange={(body) => {
+            onUserPick();
+            onChange(body);
+          }}
+          validationError={validationError}
+          varEntries={varEntries}
+          envName={envName}
+          wrap={wrap}
+        />
+      </div>
+    </div>
+  );
+}
+
 /**
  * 载荷编辑器 —— 左栏那个 CodeMirror。变量候选提示接在编辑器里：敲 `{{` 时浮出候选，
  * 选中即把 `{{key}}` 写进文档。编辑器不是普通输入框，故写回与键盘导航在这里自己实现。
@@ -186,12 +390,15 @@ function BodyContent({
   validationError,
   varEntries,
   envName,
+  wrap = false,
 }: {
   value: RequestBody;
   onChange: (body: RequestBody) => void;
   validationError?: string | null;
   varEntries: VarEntry[];
   envName?: string;
+  /** 长行是否折行；由扩展实现，编辑器据此重算行高。 */
+  wrap?: boolean;
 }) {
   const isDark = useIsDark();
   const pillRef = useRef<HTMLDivElement>(null);
@@ -352,9 +559,12 @@ function BodyContent({
       // json 与 xml 是两种语言，各自带高亮；其余模式是纯文本。
       ...(value.mode === 'json' ? [json()] : []),
       ...(value.mode === 'xml' ? [xml()] : []),
+      // 换行必须走扩展而不是 CSS：编辑器按扩展重算行高，样式表里的 `white-space` 与它
+      // 的测量对不上。
+      ...(wrap ? [EditorView.lineWrapping] : []),
       hintKeys,
     ],
-    [value.mode, hintKeys],
+    [value.mode, wrap, hintKeys],
   );
 
   // 浮层按光标位置定位：编辑器里没有「光标所在的那个输入框」，故按光标位置算出矩形。

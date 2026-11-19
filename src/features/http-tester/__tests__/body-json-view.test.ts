@@ -1,0 +1,121 @@
+/**
+ * 请求体 json 载荷区的接线回归网 —— 读源码，不渲染 React。
+ *
+ * 本 runner（`tsx --test` + `node:assert`）没有 DOM 与 React 渲染器，故测不了树的实际
+ * 交互；这里守的是**接线**，与 `src/features/response-viewer/__tests__/response-viewer-layout.test.ts`
+ * 同一套取舍。
+ *
+ * 钉住三件事：
+ *
+ *   1. 树那一档只读 —— 载荷只由 Raw 的编辑器写回，树一旦接上 onChange 就会变成两块
+ *      互相覆盖的编辑器。
+ *   2. 写回只发生在 raw 分支，且用户在 Raw 里动手之后视图不再自动切换，否则正在打字的
+ *      编辑器会从眼皮底下消失。
+ *   3. 自动换行走的是 CodeMirror 扩展，不是样式表 —— 它按扩展重算行高。
+ */
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+const SOURCE = readFileSync(
+  resolve(process.cwd(), 'src/features/http-tester/BodyEditor.tsx'),
+  'utf8',
+);
+
+/** 剥掉注释，只留代码，免得文件自己的散文满足下面某个模式。 */
+function code(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+}
+
+const CODE = code(SOURCE);
+
+/** 一个自闭合 JSX 元素的原文。 */
+function element(name: string): string {
+  const start = CODE.indexOf(`<${name}`);
+  assert.notEqual(start, -1, `找不到 <${name}>`);
+  const end = CODE.indexOf('/>', start);
+  assert.notEqual(end, -1, `<${name}> 必须是自闭合元素，否则这个切片要重写`);
+  return CODE.slice(start, end);
+}
+
+describe('请求体 json 载荷区：树 / Raw 两档', () => {
+  it('树只读：JsonTreeView 只吃解析好的树与换行开关', () => {
+    const tree = element('JsonTreeView');
+    // 解析在调用方做一次、结果传给树：树自己再解析一遍就是同一份文本解析两次。
+    assert.ok(tree.includes('root={treeRoot}'), '树要展示当前载荷解析出来的那棵树');
+    assert.ok(tree.includes('wrap={wrap}'), '树要跟随同一个换行开关');
+    assert.ok(tree.includes("active={view === 'tree'}"), '树要知道自己被切到了哪一档');
+    assert.ok(!tree.includes('onChange'), '树一旦能写回，载荷就有两个写入口');
+  });
+
+  it('一份载荷只解析一次，合法判定与树根同源', () => {
+    // 分成两次 `parseJsonTree(value.content)` 的话，同一份文本在每次按键上解析两遍。
+    assert.ok(
+      /const parsed = useMemo\(\(\) => parseJsonTree\(value\.content\), \[value\.content\]\);/.test(
+        CODE,
+      ),
+      '解析结果要 memo 成一份',
+    );
+    assert.ok(/const valid = parsed\.ok;/.test(CODE), '是否合法取自同一份解析结果');
+    assert.ok(/const treeRoot = parsed\.ok \? parsed\.root : null;/.test(CODE), '树根也取自它');
+  });
+
+  it('剪贴板没回话时复制按钮禁用', () => {
+    // 连点会排起一串写入，最后落到哪个结果上取决于完成先后。
+    assert.ok(/disabled: copyState === 'busy'/.test(CODE), 'busy 期间要挡住重复点击');
+    assert.ok(/if \(copyState === 'busy'\) return;/.test(CODE), '回调自己也要挡住');
+  });
+
+  it('默认视图由载荷能否解析成 JSON 决定', () => {
+    // 判据必须与真正建树的是同一个解析器：只调 `JSON.parse` 的 `isJsonPayload` 会放行
+    // 建不出来的载荷（数字原文那条路），树于是落进空态。
+    assert.ok(
+      /parseJsonTree\(value\.content\)\.ok\s*\?\s*'tree'\s*:\s*'raw'/.test(CODE),
+      '能解析就进树，解析不出来或空就落在 Raw',
+    );
+    assert.equal(CODE.includes('isJsonPayload'), false, '不要留第二份解析判定');
+  });
+
+  it('用户手选过视图之后不再自动切换', () => {
+    assert.ok(
+      /if \(userPickedBodyView\.current\) return;/.test(CODE),
+      '没有这道守卫，Raw 里刚改到合法就会被拽去树视图',
+    );
+    assert.ok(
+      /onUserPick\(\);\s*\n\s*onChange\(body\);/.test(CODE),
+      '在 Raw 里编辑也算用户选过视图',
+    );
+  });
+
+  it('格式化只出现在 Raw 档，且由工具条承接', () => {
+    const rawAt = CODE.indexOf("if (view === 'raw') {");
+    assert.notEqual(rawAt, -1, '格式化按钮的档位条件不见了');
+    assert.ok(
+      CODE.slice(rawAt, rawAt + 400).includes("testId: 'format-body-btn'"),
+      '工具条里那个格式化按钮要沿用它原来的 testid',
+    );
+    assert.ok(
+      !CODE.includes('data-testid="format-body-btn"'),
+      '左栏顶部那个独立格式化按钮必须已经删掉，能力只在工具条里有一份',
+    );
+  });
+
+  it('自动换行走 CodeMirror 扩展而不是 CSS', () => {
+    assert.ok(CODE.includes('EditorView.lineWrapping'), '换行要靠扩展，编辑器据它重算行高');
+  });
+
+  it('树渲染不出来时给可见说明，不留空白', () => {
+    const messageAt = CODE.indexOf('JSON 格式有误，切到 Raw 修改');
+    assert.notEqual(messageAt, -1, '载荷非法时树返回 null，必须有一句替代说明');
+    // 先确认这句话外面真有一个 EmptyHint：只比「开标签位置小于消息位置」的话，在没有
+    // 开标签（-1）时同样成立。
+    const openAt = CODE.lastIndexOf('<EmptyHint', messageAt);
+    assert.notEqual(openAt, -1, '那句说明要渲染在 EmptyHint 里');
+    // 闭合标签从开标签处往后找：从消息处找会把后面的另一个 `</EmptyHint>` 当成这一个
+    // 的闭合，消息落在两个无关标签之间也能过。
+    const closeAt = CODE.indexOf('</EmptyHint>', openAt);
+    assert.notEqual(closeAt, -1, 'EmptyHint 必须闭合');
+    assert.ok(openAt < messageAt && messageAt < closeAt, '那句说明要落在 EmptyHint 的开闭标签之间');
+  });
+});
