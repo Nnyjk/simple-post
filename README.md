@@ -8,7 +8,7 @@
 
 Claude Desktop、Cursor、Cline 等 AI 客户端可以直接读取并改写这里的接口定义，读到的就是用户正在维护的那份数据。
 
-[![版本](https://img.shields.io/badge/version-v0.1.36-6366f1?style=flat-square)](https://github.com/Nnyjk/simple-post/releases)
+[![版本](https://img.shields.io/badge/version-v0.1.37-6366f1?style=flat-square)](https://github.com/Nnyjk/simple-post/releases)
 [![CI](https://github.com/Nnyjk/simple-post/actions/workflows/ci.yml/badge.svg)](https://github.com/Nnyjk/simple-post/actions/workflows/ci.yml)
 [![平台](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D4?style=flat-square)](#)
 [![MCP 工具](https://img.shields.io/badge/MCP-48%20tools-8A2BE2?style=flat-square)](#mcp-server)
@@ -134,11 +134,11 @@ MCP 桥接二进制 `simple-post-mcp` 只以编译产物的形式发布：GitHub
 容器：
 
 ```bash
-docker pull ghcr.io/nnyjk/simple-post:0.1.36
+docker pull ghcr.io/nnyjk/simple-post:0.1.37
 docker run -d --name simple-post -p 4173:4173 \
   -e SIMPLE_POST_WEB_PASSWORD=换成一句长随机口令 \
   -v simple-post-data:/data \
-  ghcr.io/nnyjk/simple-post:0.1.36
+  ghcr.io/nnyjk/simple-post:0.1.37
 ```
 
 浏览器访问 `http://localhost:4173/`；设了口令时第一次用 `http://localhost:4173/?token=<口令>` 打开，页面把口令存进浏览器的 localStorage，之后直接访问根路径即可。
@@ -181,7 +181,7 @@ compose 相关命令都在仓库根执行。`--project-directory .` 不能省：
 cp .env.example .env
 ```
 
-至少把 `SP_WEB_PASSWORD` 改成一句长随机口令。不设置它时 `/api/*` 与 `/mcp` 对所有能连到该端口的调用方开放。镜像来源二选一：用发布镜像就在 `.env` 里写 `SP_IMAGE=ghcr.io/nnyjk/simple-post:0.1.36`；本地构建就执行 `docker build -f docker/Dockerfile -t simple-post:local .`，`SP_IMAGE` 留空即可。
+至少把 `SP_WEB_PASSWORD` 改成一句长随机口令。不设置它时 `/api/*` 与 `/mcp` 对所有能连到该端口的调用方开放。镜像来源二选一：用发布镜像就在 `.env` 里写 `SP_IMAGE=ghcr.io/nnyjk/simple-post:0.1.37`；本地构建就执行 `docker build -f docker/Dockerfile -t simple-post:local .`，`SP_IMAGE` 留空即可。
 
 启动与验证：
 
