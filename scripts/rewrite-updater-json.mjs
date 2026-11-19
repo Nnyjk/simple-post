@@ -35,10 +35,19 @@ const API_ASSET_URL =
 const DOWNLOAD_PREFIX = 'https://github.com/';
 
 /**
+ * 草案的资产挂在 `…/releases/download/untagged-<hash>/` 下。
+ *
+ * 草案还没有公开的 tag，GitHub 只给这种临时地址；它在本 asset 上不算稳定地址，
+ * 发布后 latest.json 里留着它等于给用户一个不再指向本包的链接。
+ */
+const UNTAGGED_DOWNLOAD = /\/releases\/download\/untagged-[^/]+\//;
+
+/**
  * 改写 latest.json 里每个平台的 url，返回新对象，入参一个字节也不改。
  *
- * `release` 是 `gh api repos/<repo>/releases/tags/<tag>` 的响应：`assets` 提供 id →
- * `browser_download_url` 的对照，`tag_name` 在资产没有 `browser_download_url` 时用来拼地址。
+ * `release` 是 `gh api repos/<repo>/releases?per_page=100` 列表里的一项（见 `findRelease`）：
+ * `assets` 提供 id → `browser_download_url` 的对照，`tag_name` 在资产没有
+ * `browser_download_url` 时用来拼地址。
  *
  * 认不出的 url（未知资产 id，或既不是 API 端点也不是 github.com 地址）直接抛错：
  * 静默留下一个坏 url，等于把 403 留给装下一版的用户。
@@ -77,7 +86,12 @@ function rewritePlatformUrl(key, url, assets, tag) {
     throw new Error(`platforms.${key} 的 url 指向未知资产 id ${id}，资产表里没有它：${url}`);
   }
 
-  if (typeof asset.browser_download_url === 'string' && asset.browser_download_url !== '') {
+  if (
+    typeof asset.browser_download_url === 'string' &&
+    asset.browser_download_url !== '' &&
+    // 草案的 browser_download_url 是 `download/untagged-<hash>/…`，发布后失效，故按 tag 拼。
+    !UNTAGGED_DOWNLOAD.test(asset.browser_download_url)
+  ) {
     return asset.browser_download_url;
   }
 
@@ -103,6 +117,34 @@ const USAGE = `用法：
 /** 用 gh 跑一条命令，返回它的 stdout。 */
 function runGh(args) {
   return execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] });
+}
+
+/** 列表一页取多少条 release；`releases` 端点最大 100。 */
+const RELEASES_PER_PAGE = 100;
+
+/**
+ * 按 tag 找 release：列 `repos/<repo>/releases` 再比对 `tag_name`。
+ *
+ * 不用 `releases/tags/<tag>`：草案在那条端点上返回 404（`{"message":"Not Found"}`），
+ * 而本脚本的调用方 `fix-updater-json` 必然在草案阶段运行（`needs: release` +
+ * `releaseDraft: true`），走 by-tag 会让改写作业每次发布都红。列表端点对草案可见。
+ *
+ * 只翻两页：目标 tag 是刚推的，不可能落在更后面；多翻等于为几乎不会发生的情形拖慢作业。
+ * 找不到返回 `null`，由调用方当作「无事可做」处理。
+ */
+function findRelease(repo, tag) {
+  const fetchPage = (page) =>
+    JSON.parse(runGh(['api', `repos/${repo}/releases?per_page=${RELEASES_PER_PAGE}&page=${page}`]));
+
+  const pick = (list) =>
+    Array.isArray(list) ? (list.find((item) => item?.tag_name === tag) ?? null) : null;
+
+  const first = fetchPage(1);
+  const hit = pick(first);
+  if (hit !== null) return hit;
+  if (!Array.isArray(first) || first.length < RELEASES_PER_PAGE) return null;
+
+  return pick(fetchPage(2));
 }
 
 /** 解析 CLI 参数；未知参数直接抛错，免得拼错一个开关就静默跑错分支。 */
@@ -135,7 +177,13 @@ function main(argv) {
   }
 
   const bareTag = tag.replace(/^refs\/tags\//, '');
-  const release = JSON.parse(runGh(['api', `repos/${repo}/releases/tags/${bareTag}`]));
+  const release = findRelease(repo, bareTag);
+
+  // release 还没建出来（tag 推了但矩阵作业没到发布那一步）时没有可改写的东西。
+  if (release === null) {
+    process.stderr.write(`找不到 release，改写作业无事可做：${repo} ${bareTag}\n`);
+    return;
+  }
 
   // 没有签名私钥时工作流关掉 `createUpdaterArtifacts`，这次发布不产 latest.json。
   // 那种发布里没有可改写的东西，跳过而不是报错，发布流水线要保持绿。
