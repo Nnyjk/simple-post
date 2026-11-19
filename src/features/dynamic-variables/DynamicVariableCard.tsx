@@ -61,10 +61,6 @@ export function DynamicVariableCard({
   onDelete,
 }: DynamicVariableCardProps) {
   const [valueOpen, setValueOpen] = useState(false);
-  const [draft, setDraft] = useState(variable.value ?? '');
-  // 用户是否亲手改过框里的文本。关面板、失焦、Esc 都走保存，但只有改过才发写入：取数刷新会
-  // 换掉列表里的值，框里还留着旧文本，不该把旧值写成覆盖值。
-  const [dirty, setDirty] = useState(false);
   const setDynamicOverride = useAppStore((s) => s.setDynamicOverride);
   // 取数失败的原因。列表视图本身不带它（那是一次纯读），故取数时记进 store 的那份。
   // 失败原因也按 (项目 × 取数环境) 分桶：查的是当前环境那一格。
@@ -81,21 +77,64 @@ export function DynamicVariableCard({
   const pillRef = useRef<HTMLDivElement>(null);
   const pillButtonRef = useRef<HTMLButtonElement>(null);
   const clearButtonRef = useRef<HTMLButtonElement>(null);
+  const valueInputRef = useRef<HTMLTextAreaElement>(null);
+  // 归还焦点的动画帧 id：关闭面板时排一帧，卸载时要能取消它。
+  const restoreFocusRaf = useRef<number | null>(null);
+
+  // 草稿只在「列表已属于当前环境」时用当前值起步：切环境后列表还在路上时留空，否则上一个
+  // 环境的值会被写进这个环境。
+  const [draft, setDraft] = useState(editor.editable ? editor.initialValue : '');
+  // 用户是否亲手改过框里的文本。关面板、失焦、Esc 都走保存，但只有改过才发写入：取数刷新会
+  // 换掉列表里的值，框里还留着旧文本，不该把旧值写成覆盖值。
+  const [dirty, setDirty] = useState(false);
+  // 最近一次写覆盖值失败的原因。与取数失败分开：它说的是「这次保存没有落地」。
+  const [commitError, setCommitError] = useState<string | null>(null);
+  // 提交是异步的，「提交后用户有没有接着改」只能拿最新草稿比，故每次渲染都写进 ref。
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+
+  // 可编辑的草稿只在「列表已属于当前环境」时用当前值播种：切环境时列表到货前 editor 是只读，
+  // 到货后这里补上当前环境的值。用户一旦开始输入（dirty），同环境的刷新不再覆盖他的文本。
+  useEffect(() => {
+    if (!editor.editable || dirty) return;
+    setDraft(editor.initialValue);
+  }, [editor.editable, editor.initialValue, dirty]);
+
+  useEffect(
+    () => () => {
+      if (restoreFocusRaf.current !== null) cancelAnimationFrame(restoreFocusRaf.current);
+    },
+    [],
+  );
 
   /**
-   * 离开输入框即保存。提交空串表示「清掉覆盖值，回到自动取数」：后端把 `null` 读成删除那条
-   * 覆盖值记录，把空串读成一条值为空的覆盖值——后者会永久盖住取数结果，用户删光文本多半不
-   * 是这个意思。
+   * 离开输入框即保存为覆盖值。
+   *
+   * 提交空串表示「清掉覆盖值，回到自动取数」：后端把 `null` 读成删除那条覆盖值记录，把空串
+   * 读成一条值为空的覆盖值——后者会永久盖住取数结果。故清空就是回到自动取数，本编辑器不再
+   * 提供「长度为零的覆盖值」这个入口。
+   *
+   * 写入失败时保留用户的文本与脏标记：下一次失焦会原样再提交一次，输入不因为一次失败丢掉。
    */
   const commitValue = async () => {
     if (!editor.editable || !dirty) return;
-    setDirty(false);
-    await setDynamicOverride(variable.id, draft === '' ? null : draft);
+    const submitted = draft;
+    const ok = await setDynamicOverride(variable.id, submitted === '' ? null : submitted);
+    if (!ok) {
+      setDirty(true);
+      // store 已经把异常归一化成可显示的文本（`errorText`），这里直接取那一份。
+      setCommitError(useAppStore.getState().dynamicError ?? '写入覆盖值失败，请重试。');
+      return;
+    }
+    setCommitError(null);
+    // 提交在路上时用户又改了文本：那份新编辑还是脏的，这里清掉标记会让下一次失焦不再保存。
+    if (draftRef.current === submitted) setDirty(false);
   };
 
   const openValuePanel = () => {
-    setDraft(editor.initialValue);
-    setDirty(false);
+    // 脏草稿留着：上一次写入失败时它就是用户没存上的那份文本，再失焦即重试。
+    if (!dirty) setDraft(editor.initialValue);
+    setCommitError(null);
     setValueOpen(true);
   };
 
@@ -109,7 +148,9 @@ export function DynamicVariableCard({
     void commitValue();
     setValueOpen(false);
     if (!restoreFocus) return;
-    requestAnimationFrame(() => {
+    if (restoreFocusRaf.current !== null) cancelAnimationFrame(restoreFocusRaf.current);
+    restoreFocusRaf.current = requestAnimationFrame(() => {
+      restoreFocusRaf.current = null;
       const active = document.activeElement;
       // 这一帧里焦点已经落到别的按钮或输入框（用户点了另一条胶囊、另一个表单）就不抢。
       if (active && active !== document.body && active !== pillButtonRef.current) return;
@@ -166,13 +207,13 @@ export function DynamicVariableCard({
           >
             {variable.name}
           </span>
-          {/* 常驻一段宽度：取数失败时才出图标，出现时名字不跟着挪。 */}
+          {/* 常驻一段宽度：取数失败或写入失败时才出图标，出现时名字不跟着挪。 */}
           <span className="flex w-3.5 shrink-0 items-center justify-center">
-            {error && (
+            {(error || commitError) && (
               <AlertCircle
                 className="h-3.5 w-3.5 text-destructive"
                 role="img"
-                aria-label={`取数失败：${error.kind}`}
+                aria-label={error ? `取数失败：${error.kind}` : '写入覆盖值失败'}
               />
             )}
           </span>
@@ -223,7 +264,12 @@ export function DynamicVariableCard({
         </span>
       </div>
 
-      <ValuePanel anchorRef={pillRef} open={valueOpen} onClose={() => closeValuePanel(true)}>
+      <ValuePanel
+        anchorRef={pillRef}
+        initialFocusRef={valueInputRef}
+        open={valueOpen}
+        onClose={() => closeValuePanel(true)}
+      >
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-2">
             <span className="text-xs font-medium">当前值</span>
@@ -255,6 +301,7 @@ export function DynamicVariableCard({
             )}
           </div>
           <textarea
+            ref={valueInputRef}
             value={draft}
             onChange={(e) => {
               setDraft(e.target.value);
@@ -262,12 +309,11 @@ export function DynamicVariableCard({
             }}
             onBlur={(e) => {
               // 焦点交给「恢复自动获取」时别先存一遍：那次保存会在清覆盖值之后落地，把值又写回
-              // 成覆盖值。
-              if (e.relatedTarget === clearButtonRef.current) return;
+              // 成覆盖值。按钮不存在时两边的 ref 同为 null，别把「没有转移目标」当成转移。
+              if (clearButtonRef.current && e.relatedTarget === clearButtonRef.current) return;
               void commitValue();
             }}
             readOnly={!editor.editable}
-            autoFocus={editor.editable}
             spellCheck={false}
             aria-label="当前值"
             className={cn(
@@ -295,6 +341,9 @@ export function DynamicVariableCard({
               {`${error.kind}：${error.message}`}
             </p>
           )}
+          {commitError && (
+            <p className="min-w-0 break-words text-nano text-destructive">{commitError}</p>
+          )}
         </div>
       </ValuePanel>
 
@@ -314,6 +363,8 @@ export function DynamicVariableCard({
 
 interface ValuePanelProps {
   anchorRef: RefObject<HTMLDivElement | null>;
+  /** 打开且定位完成后要拿焦点的元素（面板里的文本框）。 */
+  initialFocusRef?: RefObject<HTMLElement | null>;
   open: boolean;
   onClose: () => void;
   children: ReactNode;
@@ -324,9 +375,11 @@ interface ValuePanelProps {
  *
  * 位置在挂载后按锚点与面板实测尺寸算：下方放不下就翻到上方，左右收进视口。
  */
-function ValuePanel({ anchorRef, open, onClose, children }: ValuePanelProps) {
+function ValuePanel({ anchorRef, initialFocusRef, open, onClose, children }: ValuePanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number; width: number } | null>(null);
+  // 每次打开只聚焦一次：面板开着时 `pos` 还会随滚动与重排变，不能每变一次就抢一次焦点。
+  const focusedRef = useRef(false);
   // 关闭回调每次渲染都换新（它要读到最新的输入框文本），而监听器只在打开时挂一次：故经 ref
   // 取最新那一份。
   const onCloseRef = useRef(onClose);
@@ -349,11 +402,23 @@ function ValuePanel({ anchorRef, open, onClose, children }: ValuePanelProps) {
 
   useLayoutEffect(() => {
     if (!open) {
+      focusedRef.current = false;
       setPos(null);
       return;
     }
     place();
   }, [open, place]);
+
+  // 浮层的位置落地之后才聚焦：`pos` 之前整块是 `visibility: hidden`，React 的 `autoFocus`
+  // 在那之前就派了焦点，之后不会再重试。
+  useEffect(() => {
+    if (!open || pos === null || focusedRef.current) return;
+    const raf = requestAnimationFrame(() => {
+      focusedRef.current = true;
+      initialFocusRef?.current?.focus();
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [open, pos, initialFocusRef]);
 
   // 面板的位置由 `pos` 决定，`pos` 之前那一帧还整块藏着（`visibility: hidden`）：入场动画等
   // 它落地后再播，否则补间会先在一个贴在左上角的空壳上跑完。
@@ -369,7 +434,7 @@ function ValuePanel({ anchorRef, open, onClose, children }: ValuePanelProps) {
         );
       });
     },
-    { dependencies: [open, placed], scope: panelRef },
+    { dependencies: [open, placed], scope: panelRef, revertOnUpdate: true },
   );
 
   useEffect(() => {
@@ -384,7 +449,14 @@ function ValuePanel({ anchorRef, open, onClose, children }: ValuePanelProps) {
       onCloseRef.current();
     };
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onCloseRef.current();
+      // 输入法组合期间的 Esc 属于候选词，不属于面板。
+      if (e.key !== 'Escape' || e.isComposing) return;
+      // 两条卡片可以各开一个浮层：只关焦点所在的那一层。否则一次按键会关掉两层，各自再触发
+      // 一次保存。
+      const active = document.activeElement;
+      const owns = panelRef.current?.contains(active) || anchorRef.current?.contains(active);
+      if (!owns) return;
+      onCloseRef.current();
     };
     window.addEventListener('pointerdown', handlePointerDown, true);
     window.addEventListener('keydown', handleKeyDown);

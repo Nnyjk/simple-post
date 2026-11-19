@@ -47,9 +47,18 @@ import { TabContextMenu } from './TabContextMenu';
  *
  * 缓动还是直接就位，由标签在 `openTabs` 里的**下标距离**与 compact 模式是否翻转决定，
  * 不看像素距离：横条压不压住中间标签的名字是标签相邻性问题，不是距离问题。
+ * 用户要求减弱动效时一律直接就位，不论下标距离。
  */
 const BAR_APPROACH = 0.24;
 const BAR_SETTLE_MS = 480;
+
+/**
+ * 用户是否向系统要求减弱动效。
+ *
+ * 只在调用点判一次：给每个补间套 `motionSafe` 会为每个标签建一个 `matchMedia` 实例。
+ * 渲染器里 `window.matchMedia` 恒可用，故不加 `typeof window` 守卫。
+ */
+const prefersReducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 export function WorkspaceTabs() {
   const openTabs = useAppStore((s) => s.openTabs);
@@ -162,8 +171,9 @@ export function WorkspaceTabs() {
     const entering = Array.from(targets).filter((el) => !known.has(el));
     if (entering.length > 0) previous.add(Flip.getState(entering));
     interruptedRef.current = false;
+    // 减弱动效时时长走 0：补间仍然成立，`onComplete` 照常跑，标签照样回到文档流并滚动。
     const tween = Flip.from(previous, {
-      duration: 0.28,
+      duration: prefersReducedMotion() ? 0 : 0.28,
       ease: 'power2.out',
       absolute: true,
       // 补间结束后标签才回到文档流，那一刻才算得出它们最终在哪，故滚动放在这里。
@@ -253,7 +263,7 @@ export function WorkspaceTabs() {
   //
   // 但缓动只用于**相邻标签**：跨过中间标签的缓动，那条 92px 的横条会依次压过它们
   // 的名字，读起来就是「效果条乱跑 + 卡」，故换到非相邻标签就直接就位；宽度只在
-  // normal ⇄ compact 翻转时直接就位。
+  // normal ⇄ compact 翻转时直接就位。用户要求减弱动效时一律直接就位，不看相邻性。
   //
   // 循环不是常驻的：任何能移动标签的东西变化时（激活标签、标签集、compact 模式）重跑一个
   // 有时限的窗口，窗口结束即停。窗口长到覆盖 280ms Flip 与 200ms 标题截断上限过渡。
@@ -268,65 +278,74 @@ export function WorkspaceTabs() {
     compact: false,
   });
 
-  const placeBar = useCallback(() => {
-    const strip = stripRef.current;
-    const bar = barRef.current;
-    if (!strip || !bar) {
-      // 标签在最后一个关闭时整条卸载（上面的 `descriptors.length === 0` 返回 null）。此处
-      // 忘掉上一位置，下一条出现的条就会直接就位到自己的标签上，而不是从过期坐标滑进来。
-      barState.current.started = false;
-      prevBarKey.current = { tabId: null, compact: isCompact };
-      return;
-    }
-    const activeEl = activeTabId
-      ? strip.querySelector<HTMLElement>(`[data-tab-id="${activeTabId}"]`)
-      : null;
-    if (!activeEl) {
-      // 没有任何激活项（全部关闭）—— 收起条，而不是让它停在一个已经不存在的标签下。
-      barState.current.started = false;
-      prevBarKey.current = { tabId: null, compact: isCompact };
-      gsap.set(bar, { width: 0, opacity: 0 });
-      return;
-    }
-    const stripRect = strip.getBoundingClientRect();
-    const tabRect = activeEl.getBoundingClientRect();
-    // 条是绝对定位在滚动容器**内部**的，故它的 x 是内容坐标系 —— 必须把滚动偏移加回来，
-    // 否则条正好偏移一个已滚动的量。
-    const targetX = tabRect.left - stripRect.left + strip.scrollLeft;
-    const targetW = tabRect.width;
-    const cur = barState.current;
-    const prev = prevBarKey.current;
-    const compactChanged = prev.compact !== isCompact;
-    const prevIndex = prev.tabId ? openTabs.findIndex((t) => t.id === prev.tabId) : -1;
-    const nextIndex = openTabs.findIndex((t) => t.id === activeTabId);
-    // 相邻（含同一个）才缓动：跨两个以上标签的缓动 = 横条擦过中间标签。
-    const adjacent = prevIndex >= 0 && nextIndex >= 0 && Math.abs(nextIndex - prevIndex) <= 1;
-    if (cur.started) {
-      const dx = targetX - cur.x;
-      const dw = targetW - cur.width;
-      if (adjacent && !compactChanged) cur.x += dx * BAR_APPROACH;
-      else cur.x = targetX;
-      // 宽度只在两种模式（160 / 92）间跳，模式没变就没有值得动画的宽度差。
-      if (compactChanged) cur.width = targetW;
-      else cur.width += dw * BAR_APPROACH;
-      if (Math.abs(targetX - cur.x) < 0.25 && Math.abs(targetW - cur.width) < 0.25) {
+  const placeBar = useCallback(
+    (reduced: boolean) => {
+      const strip = stripRef.current;
+      const bar = barRef.current;
+      if (!strip || !bar) {
+        // 标签在最后一个关闭时整条卸载（上面的 `descriptors.length === 0` 返回 null）。此处
+        // 忘掉上一位置，下一条出现的条就会直接就位到自己的标签上，而不是从过期坐标滑进来。
+        barState.current.started = false;
+        prevBarKey.current = { tabId: null, compact: isCompact };
+        return;
+      }
+      const activeEl = activeTabId
+        ? strip.querySelector<HTMLElement>(`[data-tab-id="${activeTabId}"]`)
+        : null;
+      if (!activeEl) {
+        // 没有任何激活项（全部关闭）—— 收起条，而不是让它停在一个已经不存在的标签下。
+        barState.current.started = false;
+        prevBarKey.current = { tabId: null, compact: isCompact };
+        gsap.set(bar, { width: 0, opacity: 0 });
+        return;
+      }
+      const stripRect = strip.getBoundingClientRect();
+      const tabRect = activeEl.getBoundingClientRect();
+      // 条是绝对定位在滚动容器**内部**的，故它的 x 是内容坐标系 —— 必须把滚动偏移加回来，
+      // 否则条正好偏移一个已滚动的量。
+      const targetX = tabRect.left - stripRect.left + strip.scrollLeft;
+      const targetW = tabRect.width;
+      const cur = barState.current;
+      const prev = prevBarKey.current;
+      const compactChanged = prev.compact !== isCompact;
+      const prevIndex = prev.tabId ? openTabs.findIndex((t) => t.id === prev.tabId) : -1;
+      const nextIndex = openTabs.findIndex((t) => t.id === activeTabId);
+      // 相邻（含同一个）才缓动：跨两个以上标签的缓动 = 横条擦过中间标签。
+      const adjacent = prevIndex >= 0 && nextIndex >= 0 && Math.abs(nextIndex - prevIndex) <= 1;
+      if (cur.started && !reduced) {
+        const dx = targetX - cur.x;
+        const dw = targetW - cur.width;
+        if (adjacent && !compactChanged) cur.x += dx * BAR_APPROACH;
+        else cur.x = targetX;
+        // 宽度只在两种模式（160 / 92）间跳，模式没变就没有值得动画的宽度差。
+        if (compactChanged) cur.width = targetW;
+        else cur.width += dw * BAR_APPROACH;
+        if (Math.abs(targetX - cur.x) < 0.25 && Math.abs(targetW - cur.width) < 0.25) {
+          cur.x = targetX;
+          cur.width = targetW;
+        }
+      } else {
         cur.x = targetX;
         cur.width = targetW;
+        cur.started = true;
       }
-    } else {
-      cur.x = targetX;
-      cur.width = targetW;
-      cur.started = true;
-    }
-    prevBarKey.current = { tabId: activeTabId, compact: isCompact };
-    gsap.set(bar, { x: cur.x, width: cur.width, opacity: 1 });
-  }, [activeTabId, openTabs, isCompact]);
+      prevBarKey.current = { tabId: activeTabId, compact: isCompact };
+      gsap.set(bar, { x: cur.x, width: cur.width, opacity: 1 });
+    },
+    [activeTabId, openTabs, isCompact],
+  );
 
   useEffect(() => {
+    // 减弱动效时条只需放一次，不进逐帧窗口；仍排到下一个动画帧，读到的才是 Flip 落定后的
+    // 最终位置。
+    if (prefersReducedMotion()) {
+      const raf = requestAnimationFrame(() => placeBar(true));
+      return () => cancelAnimationFrame(raf);
+    }
     let raf = 0;
     const startedAt = performance.now();
     const tick = (now: number) => {
-      placeBar();
+      placeBar(false);
       if (now - startedAt < BAR_SETTLE_MS) raf = requestAnimationFrame(tick);
     };
     // 首帧排到下一个动画帧而非同步执行：那是 Flip 真正开始的第一个时刻，条读到的才是真实
@@ -361,6 +380,12 @@ export function WorkspaceTabs() {
       // 激活标签本来就在可视范围里，但上一次滚动可能还在往别处跑：停掉它，否则条会
       // 继续滑，把刚点开的标签带出视野。
       gsap.killTweensOf(strip);
+      captureFlipState();
+      return;
+    }
+    if (prefersReducedMotion()) {
+      // 减弱动效时直接就位：滚动量在这里仍然要落到目标值，只是不补间。
+      gsap.set(strip, { scrollLeft: target });
       captureFlipState();
       return;
     }

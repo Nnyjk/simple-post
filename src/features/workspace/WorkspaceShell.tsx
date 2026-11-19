@@ -100,7 +100,6 @@ export function WorkspaceShell() {
   // 本地的分隔条状态 —— HttpTester（上）/ ResponseViewer（下）的比例。仅在当前标签是接口
   // 时有意义；项目 / 模块 / 集合标签的内容区是单一滚动区。
   const [basis, setBasis] = useState<string>('50%');
-  const containerRef = useRef<HTMLDivElement>(null);
   const resetBasis = useCallback(() => setBasis('50%'), []);
 
   // 这个 effect 在 bootstrap 窗口内预热编辑器 chunk。本外壳本身是 lazy，所以它挂载时模块图已在
@@ -130,14 +129,11 @@ export function WorkspaceShell() {
   const shapeNow = contentShape(activeTab, activeProtocol);
   const shapeDeferred = contentShape(contentTab, contentProtocol);
 
-  // 形状不一致时**直接用立即值渲染**，不再挂「正在切换视图…」的空白占位。
-  //
-  // deferred 值是低优先级那一轮才提交的：形状变化时（动态变量 → 接口、设置 → 接口…）若先
-  // 提交一帧占位，用户看到的是整栏被清空 + 居中 spinner，然后新内容才出现。实测 6 倍 CPU
-  // 降速下这段空白持续 317ms —— 正是用户报的「切标签严重卡顿」。
-  //
-  // 形状一致时仍走 deferred：相邻标签共用同一棵子树，React 不换层，deferred 只是把一次
-  // 重渲染降级，不会有中间空白帧。
+  // `shapeMismatch` 决定 `shownTab` 取立即值还是 deferred 值，两条规则分别对应两种形状关系。
+  // 形状不同时用立即值渲染，不挂占位：deferred 值要等低优先级那一轮才提交，先提交一帧占位
+  // 就把整栏清空成居中 spinner 再换上新内容。
+  // 形状相同时沿用 deferred 值：相邻标签共用同一棵子树，React 不换层，deferred 只把这次
+  // 重渲染降一档，不产生空白帧。
   const shapeMismatch = shapeNow !== shapeDeferred;
   const shownTab = shapeMismatch ? activeTab : contentTab;
   const shownProtocol = shapeMismatch ? activeProtocol : contentProtocol;
@@ -153,6 +149,11 @@ export function WorkspaceShell() {
   // 容器上 —— 标签条的 Flip 有自己的通道，左侧树的长列表也不该每次切标签重绘。
   // 补间结束后清掉 transform：留下的 translate(0,0) 会给内容列造一个包含块，里面的
   // fixed / sticky 后代就改以它为准而不认视口。
+  //
+  // 依赖取 `activeTabId` 而非 `shownTab?.id`：`shownTab` 是 deferred 派生值，相邻标签之间
+  // 可能多保留一帧旧值，用立即的 `activeTabId` 才能保证每次切标签都跑一次淡入。
+  // `revertOnUpdate: true` 让每次依赖变化先释放上一份 `motionSafe` 上下文，而不是攒到卸载；
+  // `killTweensOf` 仍然必要 —— 释放上下文不会停掉已在跑的那条补间。
   const contentRef = useRef<HTMLDivElement>(null);
   useGSAP(
     () => {
@@ -167,7 +168,7 @@ export function WorkspaceShell() {
         );
       });
     },
-    { scope: contentRef, dependencies: [shownTab?.id] },
+    { scope: contentRef, dependencies: [activeTabId], revertOnUpdate: true },
   );
 
   // `renderActiveContent` 按内容标签的类型决定右栏渲染什么：
@@ -210,7 +211,7 @@ export function WorkspaceShell() {
             <>
               <Splitter
                 direction="horizontal"
-                containerRef={containerRef}
+                containerRef={contentRef}
                 basis={basis}
                 onResize={setBasis}
                 onReset={resetBasis}
@@ -250,7 +251,7 @@ export function WorkspaceShell() {
   };
 
   // 形状不同 → 旧子树已经没有意义（分栏的 tester 换成设置面板，或反之），换成新形状的子树。
-  // 这里不挂「正在切换视图…」的占位：那会让整栏先空一帧再出现内容，正是用户报的卡顿。
+  // 这里不挂「正在切换视图…」的占位，整栏因此不会先空一帧再出现内容。
   // 数据还没回来的那一档由各面板自己的加载态负责（如 DynamicVariablesPanel 的
   // 「正在读取动态变量…」），外加这里的 LoadingChip。
   const content = renderActiveContent(shownTab, shownProtocol);
@@ -261,9 +262,15 @@ export function WorkspaceShell() {
       <main className="flex min-h-0 flex-1">
         {/* 没有项目 → 没有树。占位列为何还不如什么都没有，见模块头部的说明。 */}
         {activeProjectId !== '' && <ProjectTree />}
-        <div ref={containerRef} className="flex min-w-0 flex-1 flex-col">
+        <div className="flex min-w-0 flex-1 flex-col">
           <WorkspaceTabs />
-          <div ref={contentRef} className="relative flex min-h-0 flex-1 flex-col">
+          {/* `aria-busy` 挂在这一列：它是内容区容器，`LoadingChip` 也在列内广播，广播元素本身
+              因此不必再标忙碌。 */}
+          <div
+            ref={contentRef}
+            aria-busy={dataPending}
+            className="relative flex min-h-0 flex-1 flex-col"
+          >
             {dataPending && <LoadingChip label="正在同步数据…" />}
             {content}
           </div>

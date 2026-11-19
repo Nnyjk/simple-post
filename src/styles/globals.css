@@ -519,15 +519,10 @@
     @apply text-[11px] font-semibold uppercase tracking-wider text-foreground;
   }
 
-  /* Inline alert bar — auto-adapts to light/dark via semantic tokens. */
+  /* 页面顶部的警示条：靠语义 token 自动适配深浅主题。 */
   .alert-warning-inline {
     @apply shrink-0 border-b bg-warning/5 px-2.5 py-1.5 text-xs text-warning-foreground;
   }
-  /* The inline error box used to be a `.alert-error-inline` class here and
-     a duplicated utility string at seven call sites. Both are gone: the
-     box is now `<InlineError />` (src/components/ui/inline-error.tsx), and
-     its token pairing — the reason this class existed — is documented
-     there. */
 }
 
 @layer components {

@@ -33,6 +33,8 @@ export function DynamicVariablesPanel() {
   // 面板不能先说「还没有动态变量」。
   const listScope = useAppStore((s) => s.dynamicVariablesScope);
   const resolving = useAppStore((s) => s.dynamicInFlight > 0);
+  // 列表请求本身还在路上。只看条数判断不了：请求失败时列表不会再来，加载态得跟着请求收。
+  const pending = useAppStore((s) => s.dynamicListPending);
   const error = useAppStore((s) => s.dynamicError);
   const loadDynamicVariables = useAppStore((s) => s.loadDynamicVariables);
   const resolveDynamicVariables = useAppStore((s) => s.resolveDynamicVariables);
@@ -63,13 +65,18 @@ export function DynamicVariablesPanel() {
     projectId,
     activeEnvironmentId || null,
   );
-  const loading = !listMatches && variables.length === 0;
+  const loading = !listMatches && pending;
+  // 请求已经收场、这一格仍没有列表：那是一次失败的读取，不是「还没有变量」。原因由上方
+  // 那条 `InlineError` 说，这里只说明这一屏缺的是什么。
+  const readFailed = !listMatches && !pending && variables.length === 0 && error !== null;
 
   useEffect(() => {
     void loadDynamicVariables(projectId);
   }, [loadDynamicVariables, projectId, activeEnvironmentId]);
 
-  // 依赖是项目与条数：换项目、以及条数一变（含首批数据到达）都会整体重播一次这一轮淡入。
+  // 依赖是「项目、取数环境、条数」：换项目、切环境、以及条数一变（含首批数据到达）都会整体
+  // 重播一次这一轮淡入。切环境时卡片会按新 key 重挂，条数不变也得重播，否则新卡片直接出现在
+  // 终态。`revertOnUpdate` 让上一份上下文连同它捕获的节点一起释放。
   // 错峰用的是固定总预算（amount），无论多少条都在四分之一秒内摊完，条数再多也不会把
   // 末项拖到一秒之后。
   useGSAP(
@@ -91,7 +98,11 @@ export function DynamicVariablesPanel() {
         ),
       );
     },
-    { scope: listRef, dependencies: [projectId, variables.length] },
+    {
+      scope: listRef,
+      dependencies: [projectId, activeEnvironmentId, variables.length],
+      revertOnUpdate: true,
+    },
   );
 
   const handleResolveAll = useCallback(async () => {
@@ -138,14 +149,18 @@ export function DynamicVariablesPanel() {
 
         {loading && <LoadingState className="py-6" label="正在读取动态变量…" />}
 
-        {!loading && variables.length === 0 && !creating && (
+        {!loading && variables.length === 0 && !creating && listMatches && (
           <EmptyHint className="py-6 text-xs">
             还没有动态变量。新建一条：给它一个名字、一个数据源（引用树里的接口，或一份内联请求）、
             一条 JSONPath 抽取规则与一个缓存时长。
           </EmptyHint>
         )}
 
-        <div ref={listRef} className="flex flex-col gap-2">
+        {readFailed && (
+          <p className="text-micro text-muted-foreground">暂时读不到这个项目的动态变量</p>
+        )}
+
+        <div ref={listRef} aria-busy={pending} className="flex flex-col gap-2">
           {variables.map((variable) => (
             <div key={`${variable.id}:${activeEnvironmentId}`} data-dynamic-card>
               <DynamicVariableCard

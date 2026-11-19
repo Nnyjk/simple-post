@@ -91,7 +91,7 @@ export function CollectionScriptDialog({
       }
     >
       {error && (
-        <InlineError className="mb-2 mt-2 flex items-start gap-1.5 border-destructive/30 bg-destructive/5 px-2.5 py-1.5 text-xs">
+        <InlineError className="mb-2 mt-2 flex items-start gap-1.5 px-2.5 py-1.5 text-xs">
           {error}
         </InlineError>
       )}
