@@ -175,6 +175,23 @@ test('资产的 browser_download_url 缺失时按 tag 与名字拼地址', () =>
   assert.equal(out.platforms['windows-x86_64'].url, WINDOWS_SETUP_URL);
 });
 
+test('草案的 untagged 下载地址按 tag 与名字重拼', () => {
+  // 草案没有公开的 tag，GitHub 给的是 `download/untagged-<hash>/…`，发布后不再指向本包。
+  const draft: Release = {
+    tag_name: 'v0.1.36',
+    assets: [
+      {
+        id: 757141760,
+        name: 'simple-post_0.1.36_x64-setup.exe',
+        browser_download_url:
+          'https://github.com/Nnyjk/simple-post/releases/download/untagged-bbdf9805d791e3fe0735/simple-post_0.1.36_x64-setup.exe',
+      },
+    ],
+  };
+  const out = rewriteUpdaterJson(LATEST, draft);
+  assert.equal(out.platforms['windows-x86_64'].url, WINDOWS_SETUP_URL);
+});
+
 test('未知资产 id 抛错，信息里带平台键名与那个 url', () => {
   const unknownUrl = 'https://api.github.com/repos/Nnyjk/simple-post/releases/assets/999';
   assert.throws(
