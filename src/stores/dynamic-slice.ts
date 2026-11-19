@@ -262,6 +262,13 @@ export interface DynamicSliceState {
    */
   dynamicInFlight: number;
   /**
+   * 最近一次列表请求还在路上。面板据此显示加载态：请求失败时列表不会再来，故不能只按
+   * 「条数与环境戳」判断是否还在读。
+   *
+   * 只有最后发出的那一次请求（`seq === listSeq`）能改这个标志，过期请求的成败都不落地。
+   */
+  dynamicListPending: boolean;
+  /**
    * 正在保存的东西（请求在路上）：已存定义用它的 id，新建用 `creatingDraftKey(projectId)`。
    *
    * 放在 store 而不是表单的 `useState` 里：切走标签表单就卸载，`busy` 随之归零，用户切回来
@@ -349,12 +356,16 @@ export interface DynamicSliceActions {
     projectId?: string,
     force?: boolean,
   ) => Promise<{ values: Record<string, string>; errors: DynamicError[] }>;
-  /** 写覆盖值。`value` 为 null 表示清除。 */
+  /**
+   * 写覆盖值。`value` 为 null 表示清除。
+   *
+   * 返回这次写入是否成功：失败原因写在 `dynamicError` 里，调用方据此决定要不要保留用户的输入。
+   */
   setDynamicOverride: (
     id: string,
     value: string | null,
     options?: { expiresAt?: number | null; forever?: boolean },
-  ) => Promise<void>;
+  ) => Promise<boolean>;
   /** 强制重新取一次数。 */
   refreshDynamicVariable: (id: string) => Promise<void>;
   /** 把一个变量名从取值桶里剔除。停用或删除之后调用它：留着旧值就等于停用之后仍然在替换。 */
@@ -462,6 +473,7 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
     dynamicValues: {},
     dynamicErrors: {},
     dynamicInFlight: 0,
+    dynamicListPending: false,
     savingDynamicVariableIds: new Set<string>(),
     dynamicError: null,
 
@@ -584,6 +596,8 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
       // 用户碰巧站着的那个。
       const environmentId = callerEnvironmentId(get());
       const seq = ++listSeq;
+      // 请求发出前就翻成「在读」：这一次的结果回来（成功或失败）才翻回去。
+      set({ dynamicListPending: true });
       try {
         const views = await invokeCmd<DynamicVariableView[]>(COMMANDS.dynamicVariablesList, {
           // 空串与缺席同义：不点名项目就是跨项目那一路（列出全部）。
@@ -598,12 +612,13 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
           dynamicVariables: views,
           dynamicVariablesScope: dynamicValueScope(projectId ?? '', environmentId),
           dynamicError: null,
+          dynamicListPending: false,
         });
       } catch (e) {
         console.error('[store] dynamic_variables_list failed', e);
         // 期间又发过一次：这一份的失败属于旧项目或旧环境，别把它盖到新的那一屏上。
         if (seq !== listSeq) return;
-        set({ dynamicError: errorText(e) });
+        set({ dynamicError: errorText(e), dynamicListPending: false });
       }
     },
 
@@ -788,9 +803,11 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
           });
         }
         await get().loadDynamicVariables(scopeOf(get(), id));
+        return true;
       } catch (e) {
         console.error('[store] dynamic_variables_set_override failed', e);
         set({ dynamicError: errorText(e) });
+        return false;
       }
     },
 
