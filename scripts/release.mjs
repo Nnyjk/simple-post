@@ -708,22 +708,25 @@ async function draftNotes(tag, titles, next) {
 }
 
 async function publishRelease(tag, titles, next, { publish }) {
-  const { notes, draft } = await draftNotes(tag, titles, next);
+  const { notes } = await draftNotes(tag, titles, next);
 
   const dir = mkdtempSync(join(tmpdir(), 'simple-post-release-'));
   const file = join(dir, 'notes.md');
+  let url;
   try {
     writeFileSync(file, notes);
     const args = ['release', 'edit', tag, '--notes-file', file];
     if (publish) args.push('--draft=false');
-    must('gh', args);
+    // `gh release edit` 把发布页地址写在 stdout，那是唯一可靠的地址：草稿期
+    // `gh release view <tag> --json url` 返回的是 `…/releases/tag/untagged-<hash>`，
+    // 那个标签名根本不存在，点开就是 404（v0.1.40 实测）。
+    url = must('gh', args, { capture: true }).stdout.trim().split('\n').pop() ?? '';
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 
   log(publish ? `已公布 ${tag}` : `草案 ${tag} 的说明已填好（仍是草案）`);
-  if (publish)
-    log(`发布页：${draft.url ?? `https://github.com/Nnyjk/simple-post/releases/tag/${tag}`}`);
+  if (publish && url.length > 0) log(`发布页：${url}`);
 }
 
 /**
