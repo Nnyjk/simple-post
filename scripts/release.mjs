@@ -294,6 +294,9 @@ function inspectVersionSources(from) {
   return found;
 }
 
+/** 数一处来源的匹配次数。`pattern()` 每次新建带 `g` 的正则，故不踩 `lastIndex` 的状态。 */
+const countMatches = (text, source, version) => (text.match(source.pattern(version)) ?? []).length;
+
 function applyVersionSources(from, to) {
   for (const source of inspectVersionSources(from)) {
     const abs = join(ROOT, source.file);
@@ -302,12 +305,17 @@ function applyVersionSources(from, to) {
     if (next === src) fail(`${source.file} 没有发生替换（${from} → ${to}）`);
     writeFileSync(abs, next);
 
-    // 写完再核一遍：旧版本号必须没了、新版本号必须在了。
+    // 写完再核一遍：旧版本号一处不剩、新版本号恰好一处 —— 与 `inspectVersionSources` 同一口径。
+    //
+    // 不能拿 `includes` 判：`0.1.390` 里含 `0.1.39`，`written.includes(from)` 照样为真，核对
+    // 会放行一个还留着旧引用的文件，发出去的就是个版本号自相矛盾的包。
     const written = readFileSync(abs, 'utf8');
-    if (written.includes(from) || !written.includes(to)) {
+    const stale = countMatches(written, source, from);
+    const fresh = countMatches(written, source, to);
+    if (stale !== 0 || fresh !== 1) {
       fail(
-        `${source.file} 写完核对失败（${source.describe}）`,
-        `检查这个文件里的 ${from} 与 ${to}`,
+        `${source.file} 写完核对失败（${source.describe}）：旧版本还剩 ${stale} 处、新版本 ${fresh} 处`,
+        `预期 0 与 1 —— 检查这个文件里的 ${from} 与 ${to}`,
       );
     }
   }
@@ -616,8 +624,13 @@ async function awaitWorkflow(tag, sha) {
   log('全部作业成功，含 fix-updater-json —— 现在公布才不会让应用内更新拿到 403');
 }
 
-/** 草案出现后，把生成的改动小节嵌进它现有的正文（安装说明要留着）。 */
-async function publishRelease(tag, titles, next, { publish }) {
+/**
+ * 等草案出现，把生成的改动小节嵌进它现有的正文（安装说明要留着）。
+ *
+ * `--publish` 与手动收尾共用这一份 —— 两条路径对同一份草案必须给出同一个正文。
+ * 少了它，手动收尾会把 `release.yml` 写进草案的安装说明整段冲掉。
+ */
+async function draftNotes(tag, titles, next) {
   const draft = await poll(
     `草案 ${tag}`,
     () => {
@@ -641,6 +654,11 @@ async function publishRelease(tag, titles, next, { publish }) {
   const notes = draft.body
     ? mergeReleaseBody(draft.body, section)
     : renderReleaseNotes(titles, next);
+  return { notes, draft };
+}
+
+async function publishRelease(tag, titles, next, { publish }) {
+  const { notes, draft } = await draftNotes(tag, titles, next);
 
   const dir = mkdtempSync(join(tmpdir(), 'simple-post-release-'));
   const file = join(dir, 'notes.md');
@@ -788,14 +806,20 @@ async function main() {
     return;
   }
 
+  // 手动收尾也走 `draftNotes`：只打印未合并的说明，操作者手抄一遍就等于把草案里的安装
+  // 说明整段丢掉。写成文件（`git status` 看得见、不在 `.scratch/`），再把命令指向它。
   const notes = readTitles(`${prevTag}..${pushedTag}`);
+  const { notes: merged } = await draftNotes(pushedTag, notes, next);
+  const file = join(ROOT, `release-notes-${next}.md`);
+  writeFileSync(file, merged);
+
   console.log('');
   log(`${pushedTag} 已推送，release.yml 正在构建（含 fix-updater-json）。`);
   log('草案不会自己公开 —— 等它全部作业成功后再公布，否则应用内更新会拿到 403：');
   console.log('  gh run list --workflow=release.yml --limit 5');
-  console.log(`  gh release edit ${pushedTag} --notes-file <说明文件> --draft=false`);
-  console.log('\n这一版的发布说明（存成文件后 --notes-file 指向它）：\n');
-  console.log(renderReleaseNotes(notes, next));
+  console.log(`\n草案正文已合并好并写到：${file}`);
+  console.log('（草案里的安装说明与容器镜像段落都在里面；核对后执行下面这条，然后删掉这个文件）\n');
+  console.log(`  gh release edit ${pushedTag} --notes-file "${file}" --draft=false`);
 }
 
 main().catch((err) => {
