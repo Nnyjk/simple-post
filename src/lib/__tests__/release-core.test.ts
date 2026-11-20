@@ -199,12 +199,29 @@ test('标题在最前、安装说明在占位节之后：合并后安装说明�
   assert.equal(merged.split('### 修复').length, 2);
 });
 
-test('模板里没有占位节时，改动小节放最前而不是丢掉安装说明', () => {
+test('模板里没有占位节时，改动小节连标题一起放最前，安装说明不丢', () => {
   const merged = mergeReleaseBody(
     '## Simple Post v0.1.36\n\n### Install\n- x',
     '### 修复\n\n- 修好了',
   );
-  assert.equal(merged.startsWith('### 修复'), true);
+  // 连标题一起前置：下一次合并靠它找到位置，否则会再前置一份。
+  assert.equal(merged.startsWith('### 这一版的改动\n\n### 修复'), true);
+  assert.equal(merged.includes('## Simple Post v0.1.36'), true);
   assert.equal(merged.includes('### Install'), true);
-  assert.equal(mergeReleaseBody('', '### 修复\n\n- 修好了'), '### 修复\n\n- 修好了\n');
+  assert.equal(
+    mergeReleaseBody('', '### 修复\n\n- 修好了'),
+    '### 这一版的改动\n\n### 修复\n\n- 修好了\n',
+  );
+});
+
+test('没有占位节时连续合并两次：只剩最新那一份，原文仍在', () => {
+  const body = '## Simple Post v0.1.37\n\n### Install\n- x';
+  const once = mergeReleaseBody(body, '### 修复\n\n- 第一次的小节');
+  const twice = mergeReleaseBody(once, '### 修复\n\n- 第二次的小节');
+  assert.equal(twice.split('### 这一版的改动').length, 2, '标题只应有一个');
+  assert.equal(twice.split('### 修复').length, 2, '旧小节必须被换掉，不能留两份');
+  assert.equal(twice.includes('- 第一次的小节'), false);
+  assert.equal(twice.includes('- 第二次的小节'), true);
+  assert.equal(twice.includes('### Install'), true);
+  assert.equal(twice.includes('## Simple Post v0.1.37'), true);
 });

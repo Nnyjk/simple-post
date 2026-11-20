@@ -200,8 +200,9 @@ export function renderReleaseNotes(titles, version) {
  * 占位（本节由这个脚本填）还有安装说明与容器镜像段落，那是用户真正要照着做的部分。
  * `gh release edit --notes-file` 是整份覆盖，故先把占位一节换掉再交出去。
  *
- * 占位节的边界是「`### 这一版的改动` 那一行」到「下一个 `## ` 标题之前」。
- * 找不到那个标题（模板改过）时不猜，把改动小节放在正文最前面，保证说明在手。
+ * 占位节的边界是「`### 这一版的改动` 那一行」到「下一个真标题之前」。
+ * 找不到那个标题（模板改过）时不猜，把改动小节连同标题放在正文最前面 —— 连标题一起写，
+ * 下一次合并才找得到它、把它换掉，而不是再前置一份。
  *
  * @param {string} body 现有正文
  * @param {string} section `renderReleaseSection` 的输出
@@ -212,7 +213,11 @@ export function mergeReleaseBody(body, section) {
   const lines = text.split('\n');
   const start = lines.findIndex((line) => /^###\s+这一版的改动\s*$/.test(line));
 
-  if (start < 0) return `${section}\n\n${text}`.trimEnd() + '\n';
+  if (start < 0) {
+    // 前置小节时**也写标题**：否则下一次合并仍找不到 `start`，会把第二份再前置一遍，
+    // 同一份正文连合两次就出现两份 `### 修复`。
+    return `### 这一版的改动\n\n${section}\n\n${text}`.trimEnd() + '\n';
+  }
 
   // 下一个真标题：`### 修复` 这类**我们自己生成的组标题**不算边界（上一轮合并后它们就在
   // 占位节内部），任何别的 1–3 级标题才是。只看 `^## ` 会漏掉「标题在最前、安装说明在
