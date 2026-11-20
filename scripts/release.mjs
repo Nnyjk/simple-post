@@ -174,6 +174,16 @@ function exec(cmd, args, { capture = false, timeoutMs = 0, quiet = false } = {})
   return { ok: res.status === 0, status: res.status ?? 1, stdout, stderr };
 }
 
+/**
+ * 只判存在 / 只判成功的探针：输出一律丢弃。
+ *
+ * 这类调用问的是「这个 ref 在不在」而不是「它指向什么」，非 capture 模式下
+ * `git rev-parse --verify` 会把 sha 直接写到脚本 stdout，混进人用来核对的
+ * dry-run 计划与 `--notes` 打出来的可复制命令里。`quiet` 同时吞掉 stderr ——
+ * 探针失败时那是 `fatal: Needed a single revision` 这类预期噪声。
+ */
+const probe = (cmd, args) => exec(cmd, args, { capture: true, quiet: true }).ok;
+
 function must(cmd, args, opts) {
   const res = exec(cmd, args, opts);
   if (!res.ok) {
@@ -445,16 +455,16 @@ function assertPreconditions() {
  */
 function assertFreeName(branch, tag) {
   const hint = '先确认上一次发版走到哪一步（gh pr list / gh release view），再人工决定怎么收拾';
-  if (exec('git', ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`]).ok) {
+  if (probe('git', ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`])) {
     fail(`本地分支 ${branch} 已存在`, `${hint}；要重来先 git branch -D ${branch}`);
   }
-  if (exec('git', ['ls-remote', '--exit-code', '--heads', 'origin', branch]).ok) {
+  if (probe('git', ['ls-remote', '--exit-code', '--heads', 'origin', branch])) {
     fail(`origin 上已有分支 ${branch}`, hint);
   }
-  if (exec('git', ['rev-parse', '--verify', '--quiet', `refs/tags/${tag}`]).ok) {
+  if (probe('git', ['rev-parse', '--verify', '--quiet', `refs/tags/${tag}`])) {
     fail(`本地标签 ${tag} 已存在`, hint);
   }
-  if (exec('git', ['ls-remote', '--exit-code', '--tags', 'origin', `refs/tags/${tag}`]).ok) {
+  if (probe('git', ['ls-remote', '--exit-code', '--tags', 'origin', `refs/tags/${tag}`])) {
     fail(`origin 上已有标签 ${tag}`, `${hint}；标签已推送就不能重打`);
   }
 }
@@ -746,7 +756,7 @@ function previousTag(version) {
  */
 async function writeMergedNotes(tag) {
   if (!/^v\d+\.\d+\.\d+$/.test(tag)) fail(`--notes 要一个版本标签（v0.1.40），收到：${tag}`, USAGE);
-  if (!exec('git', ['rev-parse', '--verify', '--quiet', `refs/tags/${tag}`]).ok) {
+  if (!probe('git', ['rev-parse', '--verify', '--quiet', `refs/tags/${tag}`])) {
     fail(`本地没有标签 ${tag}`, 'git fetch --tags origin 之后再试');
   }
 
@@ -802,7 +812,6 @@ function printPlan({ current, next, bump, branch, tag, prevTag, publish }) {
   }
 
   const label = bump === 'patch' ? 'patch（末位 +1）' : `显式版本 ${bump}（逃生口）`;
-  console.log('');
   log(`当前 ${current} → 目标 ${next}（${label}）`);
   log(`分支 ${branch}；标签 ${tag}；上一个标签 ${prevTag}`);
   log('dry-run：不建分支、不提交、不打标签、不调 gh 写命令。');
@@ -855,7 +864,7 @@ async function main() {
 
   if (args.dryRun) {
     inspectVersionSources(current);
-    if (!exec('git', ['rev-parse', '--verify', '--quiet', `refs/tags/${prevTag}`]).ok) {
+    if (!probe('git', ['rev-parse', '--verify', '--quiet', `refs/tags/${prevTag}`])) {
       fail(`上一个版本的标签 ${prevTag} 不存在`, '发布说明的区间就是它，缺了就没法生成');
     }
     const dirty = exec('git', ['status', '--porcelain'], { capture: true }).stdout.trim();
@@ -866,7 +875,7 @@ async function main() {
 
   log(`${current} → ${next}（${tag}）`);
   assertPreconditions();
-  if (!exec('git', ['rev-parse', '--verify', '--quiet', `refs/tags/${prevTag}`]).ok) {
+  if (!probe('git', ['rev-parse', '--verify', '--quiet', `refs/tags/${prevTag}`])) {
     fail(`上一个版本的标签 ${prevTag} 不存在`, '发布说明的区间就是它，缺了就没法生成');
   }
   assertFreeName(branch, tag);
