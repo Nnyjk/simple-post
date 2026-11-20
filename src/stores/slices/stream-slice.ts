@@ -95,6 +95,8 @@ export interface StreamActions {
   wsError: (tabId: string, error: StreamErrorEvent) => void;
   /** 记下待触发的重连；`null` = 没有待触发的重连。 */
   wsRetry: (tabId: string, attempt: number, at: number | null) => void;
+  /** 开一次新连接：清掉上一次的重连倒计时，再把相位推回「连接中」。 */
+  wsConnecting: (tabId: string) => void;
   setWsReconnect: (tabId: string, enabled: boolean) => void;
   clearWs: (tabId: string) => void;
 
@@ -309,6 +311,19 @@ export const createStreamSlice: StateCreator<AppState, [], [], StreamSlice> = (s
         lastStreams: writeTabStream(s.lastStreams, tabId, (prev) => ({
           ...prev,
           ws: { ...view, retryAttempt: attempt, retryAt: at },
+        })),
+      };
+    }),
+
+  wsConnecting: (tabId) =>
+    set((s) => {
+      const view = s.lastStreams[tabId]?.ws;
+      if (!view) return {};
+      // 相位与倒计时一起写：分两次的话中间那一刻「已经连上、但还挂着第 N 次重试」。
+      return {
+        lastStreams: writeTabStream(s.lastStreams, tabId, (prev) => ({
+          ...prev,
+          ws: { ...view, phase: 'connecting', retryAttempt: 0, retryAt: null },
         })),
       };
     }),

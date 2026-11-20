@@ -66,6 +66,13 @@ export interface UiNewItemActions {
    */
   submitNewItem: () => Promise<string | null>;
   /**
+   * 提交草稿并立刻清空它——三个创建对话框按的那一下「创建」。
+   *
+   * 顺序是语义的一部分：`submitNewItem` 在第一个 await 之前同步取走草稿，故清空排在它之后
+   * 才开始跑，创建拿到的仍是用户填的那份。对话框不等创建返回：创建还在飞时对话框已经关了。
+   */
+  submitNewItemAndClose: () => Promise<string | null>;
+  /**
    * 在 `parentId`（一个 module 或 collection）下建一个 endpoint，不用对话框，并在工作区打开它。
    *
    * `parentId` 就是你点的那个节点，所以没有父节点**选择**可做：endpoint 可以直接挂在 module 下，
@@ -177,6 +184,14 @@ export const createUiNewItem: StateCreator<AppState, [], [], UiNewItem> = (set, 
     });
     set({ lastCreatedId: id });
     return id;
+  },
+
+  // 提交与清空同序：`submitNewItem` 在第一个 await 之前取走草稿，故这里先起它、再清空。
+  // 顺序反过来，创建会读到空草稿，落成默认名（或根本不建），而对话框照旧关掉。
+  submitNewItemAndClose: () => {
+    const pending = get().submitNewItem();
+    get().closeNewItem();
+    return pending;
   },
 
   createEndpointAt: async (parentId) => {

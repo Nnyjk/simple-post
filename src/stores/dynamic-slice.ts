@@ -368,6 +368,16 @@ export interface DynamicSliceActions {
   ) => Promise<boolean>;
   /** 强制重新取一次数。 */
   refreshDynamicVariable: (id: string) => Promise<void>;
+  /**
+   * 全部刷新：当前项目的全部启用定义各强制重取一次，然后重载列表。
+   *
+   * 走的是 `force` —— 与卡片上的单条「刷新」同一条语义。发送时那次解析不强制（TTL 内命中
+   * 缓存是它的本分），而「刷新」按钮的职责就是让缓存失效；少了 `force`，按钮按下去值不动。
+   *
+   * `force` 也跳过手动指定的值，故手写的值会变回自动取回（徽标随之变化，可再写一次）。
+   * 批量的行为刻意与逐条刷新一致：同一句话在单条与批量上说两套语义，下一个人必然记错一套。
+   */
+  refreshAllDynamicVariables: (projectId: string) => Promise<void>;
   /** 把一个变量名从取值桶里剔除。停用或删除之后调用它：留着旧值就等于停用之后仍然在替换。 */
   dropDynamicValue: (projectId: string, name: string) => void;
 }
@@ -809,6 +819,18 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
         set({ dynamicError: errorText(e) });
         return false;
       }
+    },
+
+    refreshAllDynamicVariables: async (projectId) => {
+      // 只取这个项目的启用定义：停用的那些后端在按名解析时也会跳过，送上去只是多几次查找。
+      const names = get()
+        .dynamicVariables.filter((v) => v.projectId === projectId && v.enabled)
+        .map((v) => v.name);
+      if (names.length === 0) return;
+      // `force` 是这条动作的全部意义：不带它，后端在 TTL 内命中缓存，按钮按下去值不动。
+      await get().resolveDynamicVariables(names, projectId, true);
+      // 值落在取值桶里，而卡片读的是列表：不重载，值、来源徽标与取数时间都不动。
+      await get().loadDynamicVariables(projectId);
     },
 
     refreshDynamicVariable: async (id) => {

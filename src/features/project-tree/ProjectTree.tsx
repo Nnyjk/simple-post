@@ -157,13 +157,11 @@ export function ProjectTree() {
   // ---------- 导入 / 导出 ----------
   // 弹窗状态住在 hook 里而非 store：只有本组件能打开它，不存在第二个入口要读它的状态。
   const transfer = useTransfer({
+    // 展开目标模块：新集合挂在它下面，父级折叠着的话用户看不到自己刚导入了什么。
+    // 新建的集合本身保持折叠 —— 一次导入几十个分组，全展开等于把树推到看不见底。
+    // 「先重载、后展开」由那条 store 动作负责，这里不再自己拼两下。
     onImported: async (moduleId) => {
-      await useAppStore.getState().reloadWorkspace();
-      // 展开目标模块：新集合挂在它下面，父级折叠着的话用户看不到自己刚导入了什么。
-      // 新建的集合本身保持折叠 —— 一次导入几十个分组，全展开等于把树推到看不见底。
-      useAppStore.setState((s) => ({
-        nodes: s.nodes.map((n) => (n.id === moduleId ? { ...n, expanded: true } : n)),
-      }));
+      await useAppStore.getState().reloadWorkspaceAndExpand(moduleId);
     },
   });
 

@@ -316,8 +316,7 @@ function connectWs(tabId: string, entry: WsEntry): void {
   if (entry.disposed) return;
   // 每次尝试都是新连接：旧句柄已经不在了，但 sessionId 换了，后端据此建新会话。
   entry.args.sessionId = uid();
-  useAppStore.getState().wsRetry(tabId, 0, null);
-  useAppStore.getState().wsState(tabId, 'connecting');
+  useAppStore.getState().wsConnecting(tabId);
   entry.handle = openWsSession(
     { ...entry.args },
     {

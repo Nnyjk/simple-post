@@ -133,7 +133,6 @@ function makeHarness(nodeList: ResourceNode[]) {
   };
   // 在真实 store 里动作是通过 `get()` 够到兄弟动作的，所以组合出来的动作必须挂在
   // `get` 返回的那个对象上，而不是摆在旁边。
-  // beside it.
   Object.assign(bag, slice);
   return { bag, calls, slice };
 }
@@ -328,5 +327,52 @@ describe('ui-new-item: a new project is entered, not just created', () => {
     // 还没有 endpoint 属于这个新项目——上一个项目留下的最近响应缓存
     // 不能被交给它。
     assert.deepEqual(h.calls.activeEndpoint, [null]);
+  });
+});
+
+/**
+ * 三个创建对话框按「创建」时只调这一条动作。
+ *
+ * 拆成「提交 + 清空」两步写在 JSX 里时，顺序没有任何东西守着：`closeNewItem` 先跑，创建
+ * 就会读到空草稿（落成默认名，或干脆不建），而对话框照旧关掉——界面上看不出少了什么。
+ */
+describe('ui-new-item: 提交并收起对话框是同一条动作', () => {
+  it('用清空之前的那份草稿建东西，然后收起它', async () => {
+    const h = makeHarness([makeNode('m1', null, 'module')]);
+    h.bag.newItem = draft({ parentModuleId: 'm1', name: '订单中心' });
+
+    const id = await h.slice.submitNewItemAndClose();
+
+    assert.equal(id, 'node-new');
+    assert.equal(h.calls.addNode.length, 1, '这条动作必须真的去建');
+    assert.equal(h.calls.addNode[0].name, '订单中心', '名字要来自用户填的那份草稿');
+    assert.equal(h.calls.addNode[0].parentId, 'm1');
+    assert.equal(h.bag.newItem.open, false, '提交之后草稿要收起');
+    assert.equal(h.bag.newItem.name, '', '提交之后草稿要清空');
+  });
+
+  it('创建用的是按下那一刻的草稿：之后再打字改不动这一次的名字', async () => {
+    const h = makeHarness([makeNode('m1', null, 'module')]);
+    h.bag.newItem = draft({ parentModuleId: 'm1', name: '' });
+    h.slice.setNewItemName('A');
+
+    const pending = h.slice.submitNewItemAndClose();
+    // 对话框已经收起，用户接着在（下一份）草稿里打字——这一次创建不该跟着变。
+    h.slice.setNewItemName('B');
+
+    assert.equal(h.calls.addNode[0]?.name, 'A', '`submitNewItem` 必须在第一个 await 之前取走草稿');
+    await pending;
+  });
+
+  it('对话框立刻关掉，创建还在飞', () => {
+    const h = makeHarness([makeNode('m1', null, 'module')]);
+    h.bag.newItem = draft({ parentModuleId: 'm1', name: '订单中心' });
+    // 写库挂住不返回：这条动作要是等它才清空，下面两条断言看到的草稿就还是开着的。
+    h.bag.addNode = () => new Promise<string>(() => undefined);
+
+    h.slice.submitNewItemAndClose();
+
+    assert.equal(h.bag.newItem.open, false, '创建还没返回，对话框就该收起');
+    assert.equal(h.bag.newItem.name, '', '创建还没返回，草稿就该清空');
   });
 });
