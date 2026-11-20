@@ -134,12 +134,14 @@ MCP 桥接二进制 `simple-post-mcp` 只以编译产物的形式发布：GitHub
 容器：
 
 ```bash
-docker pull ghcr.io/nnyjk/simple-post:0.1.38
+docker pull ghcr.io/nnyjk/simple-post:0.1
 docker run -d --name simple-post -p 4173:4173 \
   -e SIMPLE_POST_WEB_PASSWORD=换成一句长随机口令 \
   -v simple-post-data:/data \
-  ghcr.io/nnyjk/simple-post:0.1.38
+  ghcr.io/nnyjk/simple-post:0.1
 ```
+
+`:0.1` 跟随 0.1.x 的最新构建；要固定版本就用完整标签（和 git tag 同名、去掉 `v`）。
 
 浏览器访问 `http://localhost:4173/`；设了口令时第一次用 `http://localhost:4173/?token=<口令>` 打开，页面把口令存进浏览器的 localStorage，之后直接访问根路径即可。
 
@@ -171,7 +173,7 @@ MCP 的端点是守护进程自己的监听端口，主端口上不提供 MCP。
 
 compose 相关命令都在仓库根执行。`--project-directory .` 不能省：compose 文件在 `docker/` 下，不带它时 Compose 会把 `docker/` 当成项目目录，于是读不到根目录的 `.env`，项目名也从 `simple-post` 变成 `docker`，数据卷跟着改名成 `docker_simple-post-data`（已有的卷就“消失”了）。用旧写法（项目名为 `docker`）起的部署，换到带 `--project-directory .` 的命令前先核对项目名，迁移步骤见 `docker/README.md` 的「更新」。
 
-镜像地址是 `ghcr.io/nnyjk/simple-post`，只提供 linux/amd64，每个 `v*` 标签发布一次。常用标签：`0.1.36`（具体版本）、`0.1`（次版本）、`latest`（最新正式版）。
+镜像地址是 `ghcr.io/nnyjk/simple-post`，只提供 linux/amd64，每个 `v*` 标签发布一次。常用标签：`0.1`（跟随 0.1.x 的最新构建）、`latest`（最新正式版），以及每次发布的具体版本标签（与 git tag 同名、去掉 `v`）。
 
 ### Docker Compose 部署
 
@@ -181,7 +183,7 @@ compose 相关命令都在仓库根执行。`--project-directory .` 不能省：
 cp .env.example .env
 ```
 
-至少把 `SP_WEB_PASSWORD` 改成一句长随机口令。不设置它时 `/api/*` 与 `/mcp` 对所有能连到该端口的调用方开放。镜像来源二选一：用发布镜像就在 `.env` 里写 `SP_IMAGE=ghcr.io/nnyjk/simple-post:0.1.38`；本地构建就执行 `docker build -f docker/Dockerfile -t simple-post:local .`，`SP_IMAGE` 留空即可。
+至少把 `SP_WEB_PASSWORD` 改成一句长随机口令。不设置它时 `/api/*` 与 `/mcp` 对所有能连到该端口的调用方开放。镜像来源二选一：用发布镜像就在 `.env` 里写 `SP_IMAGE=ghcr.io/nnyjk/simple-post:0.1`；本地构建就执行 `docker build -f docker/Dockerfile -t simple-post:local .`，`SP_IMAGE` 留空即可。
 
 启动与验证：
 

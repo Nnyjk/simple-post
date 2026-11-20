@@ -796,7 +796,8 @@ function printPlan({ current, next, bump, branch, tag, prevTag, publish }) {
     );
   } else {
     steps.push(
-      `# 不公布。等 release.yml（含 fix-updater-json）成功后再手动 gh release edit ${tag} --notes-file <file> --draft=false`,
+      'gh run list --workflow=release.yml --limit 5   # 等到整轮（含 fix-updater-json）成功',
+      `npm run release -- --notes ${tag}  # 事后生成说明，并打印 gh release edit … --draft=false`,
     );
   }
 
