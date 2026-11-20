@@ -169,6 +169,36 @@ test('说明嵌进草案正文：保留安装说明，只替换 `### 这一版�
   assert.equal(merged.split('### 新功能').length, 2);
 });
 
+test('标题在最前、安装说明在占位节之后：合并后安装说明仍在（v0.1.39 的真实形状）', () => {
+  // 上一轮手工收尾过的正文就是「`## Simple Post v…` 在最前、安装说明在改动小节之后」，
+  // 全篇没有第二个 `## ` 标题。只看 `^## ` 当边界会把 `### Install` 到文件尾整段截掉，
+  // 用户照着发布页装不了。
+  const body = [
+    '## Simple Post v0.1.39',
+    '',
+    '### 这一版的改动',
+    '',
+    '**修复**',
+    '',
+    '- 手下写的一条',
+    '',
+    '### Install',
+    '- **Windows**: run the `.exe`',
+    '',
+    '### Container image',
+    'docker pull ghcr.io/nnyjk/simple-post:v0.1.39',
+  ].join('\n');
+  const merged = mergeReleaseBody(body, '### 修复\n\n- 脚本生成的一条');
+  assert.equal(merged.includes('### Install'), true);
+  assert.equal(merged.includes('### Container image'), true);
+  assert.equal(merged.includes('docker pull ghcr.io/nnyjk/simple-post:v0.1.39'), true);
+  assert.equal(merged.includes('- 手下写的一条'), false);
+  assert.equal(merged.includes('- 脚本生成的一条'), true);
+  // 上一轮合并留下的组标题在占位节内部，不能当成边界把正文截断。
+  assert.equal(merged.startsWith('## Simple Post v0.1.39'), true);
+  assert.equal(merged.split('### 修复').length, 2);
+});
+
 test('模板里没有占位节时，改动小节放最前而不是丢掉安装说明', () => {
   const merged = mergeReleaseBody(
     '## Simple Post v0.1.36\n\n### Install\n- x',
