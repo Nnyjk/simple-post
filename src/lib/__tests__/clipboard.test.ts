@@ -113,4 +113,23 @@ describe('copyText', () => {
     assert.equal(await copyText('hello', doc), true);
     assert.equal(state.execCalls, 1);
   });
+
+  it('回退路径上的空文本报失败：execCommand 对空选区也说成功', async () => {
+    const { doc, state } = fakeDoc({ execResult: true });
+    assert.equal(await copyText('', doc), false);
+    assert.equal(state.execCalls, 0);
+  });
+
+  it('异步剪贴板可用时空文本照常写进去', async () => {
+    const written: string[] = [];
+    const { doc } = fakeDoc({
+      clipboard: {
+        writeText: async (text: string) => {
+          written.push(text);
+        },
+      },
+    });
+    assert.equal(await copyText('', doc), true);
+    assert.deepEqual(written, ['']);
+  });
 });

@@ -43,15 +43,27 @@ export function TreeChildren({ expanded, children }: { expanded: boolean; childr
   // `useGSAP` 除每次依赖变化外，挂载时也会跑一次回调。不加守卫的话，初始即展开的分支会
   // 在首帧从 height: 0 补间到 'auto'，闪一下折叠态。
   const isFirstRun = useRef(true);
+  // 上一次注册的偏好监听清理函数。`useGSAP` 在依赖变化时只在卸载才跑上一轮的清理
+  // （没开 `revertOnUpdate`），故由本组件自己撤。
+  const stopMotion = useRef<(() => void) | null>(null);
 
   useGSAP(
     () => {
       const el = containerRef.current;
       if (!el) return;
 
+      // 批量动作那条分支直接 return，没有机会交回清理函数：不在这里撤，上一次注册的
+      // 监听会留到卸载，偏好翻转时它会把已经收起的容器重新展开。
+      stopMotion.current?.();
+      stopMotion.current = null;
+
       // 落到终态：`height` 是 GSAP 拥有的内联样式，跳过补间时也必须写一个确定的值，
       // 否则减弱动效下的展开会停在 `height: 0`。
+      //
+      // 先杀掉本容器在跑的补间：`gsap.set` 不取消它，收起补间跑到一半时点「全部展开」，
+      // 那支补间会在下一帧继续写 `height: 0`，把这里的终态覆盖回去。
       const settle = (open: boolean) => {
+        gsap.killTweensOf(el);
         gsap.set(el, { height: open ? 'auto' : 0, opacity: open ? 1 : 0, willChange: 'auto' });
       };
 
@@ -68,7 +80,7 @@ export function TreeChildren({ expanded, children }: { expanded: boolean; childr
       }
 
       if (!expanded) {
-        return motionSafe(
+        stopMotion.current = motionSafe(
           () => {
             // `overwrite: 'auto'`：快速连点时上一次补间可能还在跑，两条抢同一个 height 会抖。
             gsap.to(el, {
@@ -81,11 +93,12 @@ export function TreeChildren({ expanded, children }: { expanded: boolean; childr
           },
           () => settle(false),
         );
+        return stopMotion.current;
       }
 
       const rows = directRows(el, REVEAL_MAX_ROWS);
       const plan = revealPlan(rows.length);
-      return motionSafe(
+      stopMotion.current = motionSafe(
         () => {
           // 层化提示只覆盖补间本身：留着它，这个容器会一直占一层合成层。
           gsap.set(el, { willChange: 'height' });
@@ -117,6 +130,7 @@ export function TreeChildren({ expanded, children }: { expanded: boolean; childr
           gsap.set(rows, { opacity: 1, y: 0 });
         },
       );
+      return stopMotion.current;
     },
     { dependencies: [expanded], scope: containerRef },
   );

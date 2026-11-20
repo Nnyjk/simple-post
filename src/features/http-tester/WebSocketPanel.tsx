@@ -55,6 +55,13 @@ export function WebSocketPanel({
   const frameCount = view?.frames.length ?? 0;
   const retryAt = view?.retryAt ?? null;
 
+  // 连接边界清掉上一条发送失败：它说的是上一次连接（或上一个页签）里的事，留着会顶掉
+  // 这次连接的 `view.error` —— 渲染里是 `sendError ?? view.error`。连接存活期间的发送
+  // 失败照旧可见，发送动作不改变 `phase`。
+  useEffect(() => {
+    setSendError(null);
+  }, [phase, tabId]);
+
   useEffect(() => {
     if (retryAt === null) return;
     setNow(Date.now());
