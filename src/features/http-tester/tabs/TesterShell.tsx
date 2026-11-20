@@ -75,6 +75,7 @@ export function TesterShell({
   envName,
   vars,
   onProtocolChange,
+  wsUrlBar,
   wsSurface,
   responseSurface,
 }: {
@@ -140,8 +141,14 @@ export function TesterShell({
   /** 变量池：取 OAuth2 token 时送给后端，让它替换配置里那四个字段的 `{{var}}`。 */
   vars: Record<string, string>;
   /**
-   * WebSocket 面板：协议是 websocket 时它替换「响应页」的内容（地址、连接与帧都在那里），
-   * URL 栏因此隐藏；其它页签照旧是 `RequestTabPanels`，鉴权 / TLS / 路径参数仍可编辑。
+   * WebSocket 的地址栏：协议、地址、子协议与连接动作。它占住 HTTP `RequestUrlBar` 的那个
+   * 槽位（页签条之上），故两种协议的纵向次序相同；在场时不再渲染 `RequestUrlBar` —— 同一条
+   * 地址不许有两个输入框。
+   */
+  wsUrlBar?: ReactNode;
+  /**
+   * WebSocket 面板：协议是 websocket 时它替换「响应页」的内容（帧、发送框、Headers 都在那里），
+   * 鉴权 / TLS / 路径参数仍可编辑。
    */
   wsSurface?: ReactNode;
   /** SSE 面板：协议是 sse 时它替换「响应页」的内容，URL 栏与其它页签仍是 HTTP 那一套。 */
@@ -170,9 +177,9 @@ export function TesterShell({
       />
 
       {/* URL 栏：方法、地址来源选择器、地址输入框与发送 / 保存 / 复制 cURL。
-          WebSocket 面板自带地址输入与连接按钮（在响应页），故这一栏不出现，免得同一条
-          地址有两个输入框；切到其它页签时也仍由面板那一份负责，地址不会丢。 */}
-      {!wsSurface && (
+          WebSocket 自带一条地址栏（`wsUrlBar`）占这里，故两种协议的纵向次序都是
+          面包屑 → 接口头 → 地址栏 → 页签条 → 面板；同一槽位只出现一个。 */}
+      {wsUrlBar ?? (
         <RequestUrlBar
           protocol={protocol}
           method={method}
@@ -235,7 +242,7 @@ export function TesterShell({
       )}
 
       {/* 页签条 —— 与下方面板相连：本行独占那条分隔线（条内不再有），激活标签以面板底色
-          填充自己，盖住分隔线并与之圆角相接。`bg-card/30` 与上方 URL 栏一致，
+          填充自己，盖住分隔线并与之圆角相接。`bg-card/30` 与上方地址栏一致，
           `pt-1.5` 不配 `pb`，使条的下沿与分隔线齐平。WS 协议下也保留这条：帧挂在「响应」
           页，Auth / TLS / 路径参数仍是同一份请求定义，必须点得到。 */}
       <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card/30 px-4 pt-1.5">
@@ -246,9 +253,13 @@ export function TesterShell({
           value={tab}
           onChange={(id) => onTabChange(id as TesterTabId)}
         />
-        <div className="ml-auto text-nano text-muted-foreground">
-          <span className="kbd">Ctrl</span> + <span className="kbd">Enter</span> 发送
-        </div>
+        {/* WS 不走 Send（`sendActionFor('websocket') === 'none'`，连接按钮在地址栏里），
+            这条快捷键提示挂在这里只会指向一个不存在的动作。 */}
+        {protocol !== 'websocket' && (
+          <div className="ml-auto text-nano text-muted-foreground">
+            <span className="kbd">Ctrl</span> + <span className="kbd">Enter</span> 发送
+          </div>
+        )}
       </div>
 
       {/* 页签内容区。WS / SSE 只替换「响应页」的内容 —— 事件流与帧不是响应定义编辑器该

@@ -22,6 +22,7 @@ import { sendActionFor } from './model/send-action';
 import { TesterShell } from './tabs/TesterShell';
 import { SseStreamPanel } from './SseStreamPanel';
 import { WebSocketPanel } from './WebSocketPanel';
+import { WsUrlBar } from './WsUrlBar';
 import { disposeSession, startSse } from './stream/stream-sessions';
 import { useGraphQlSchema } from './graphql/use-graphql-schema';
 import { pickQueryHistory, type QueryHistoryEntry } from './graphql/query-history';
@@ -588,24 +589,34 @@ export function HttpTester() {
         onTabChange: setTab,
       }}
       {...{
-        wsSurface:
+        // WS 的地址栏与面板分两处：地址栏占 HTTP `RequestUrlBar` 的槽位（页签条之上），
+        // 面板只替换「响应页」的内容。两者共用同一个 `prepared`。
+        wsUrlBar:
           protocol === 'websocket' ? (
-            <WebSocketPanel
+            <WsUrlBar
               tabId={endpoint.id}
               protocol={protocol}
               onProtocolChange={handleProtocolChange}
               url={liveUrl}
               onUrlChange={urlHint.change}
-              headers={effective.headers}
-              onHeadersChange={(headers) => patchDraft({ headers })}
-              headerSuggestions={headerSuggestions}
-              prepared={prepared}
               varEntries={varEntries}
               envName={endpointEnv?.name}
+              prepared={prepared}
               onPathParamsMissing={handlePathParamGate}
               tls={requestSettings.tls}
               tlsOverride={effective.tls}
               auth={effective.auth}
+            />
+          ) : undefined,
+        wsSurface:
+          protocol === 'websocket' ? (
+            <WebSocketPanel
+              tabId={endpoint.id}
+              headers={effective.headers}
+              onHeadersChange={(headers) => patchDraft({ headers })}
+              headerSuggestions={headerSuggestions}
+              varEntries={varEntries}
+              envName={endpointEnv?.name}
             />
           ) : undefined,
         responseSurface: protocol === 'sse' ? <SseStreamPanel /> : undefined,

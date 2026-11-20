@@ -1,76 +1,47 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowDown, ArrowLeftRight, Plug, Plus, Send, Unplug } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
+import { ArrowDown, ArrowLeftRight, Plus, Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { KeyValueEditor, type KeySuggestion } from './KeyValueEditor';
-import { ProtocolPicker } from './ProtocolPicker';
-import { VarHintInput, type VarEntry } from './var-hint';
+import { type VarEntry } from './var-hint';
 import { useAppStore } from '@/stores/app-store';
 import { formatBytes } from '@/lib/utils';
-import { pathParamsBlocked, pathParamsReady } from './model/path-param-gate';
-import { closeWs, sendWsFrame, setWsReconnect, startWs } from './stream/stream-sessions';
+import { sendWsFrame, setWsReconnect } from './stream/stream-sessions';
 import { WS_MAX_RETRIES } from './stream/ws-reconnect';
-import type { AuthConfig, KeyValue, RequestProtocol, TlsSettings } from '@/types/domain';
-import type { PreparedRequest } from '@/lib/http-build/types';
+import type { KeyValue } from '@/types/domain';
 
 /** 距离底部小于这个像素数就算「跟着最新」，与 SSE 面板同一个口径。 */
 const FOLLOW_THRESHOLD_PX = 24;
 
 /**
- * WebSocket 面板：连接、帧收发、关闭。
+ * WebSocket 面板：自动重连、Headers、帧收发与关闭。
  *
- * 它替换请求/响应分栏，因为 WS 没有「一次请求对应一次响应」这回事 —— 连接活着，两个方向
- * 的帧随时进出。URL 与 Headers 仍写草稿，和 HTTP 端点共用同一份字段与同一套变量替换；
- * 变量替换在点击「连接」时取自 `prepared`（`prepareRequest` 的结果），面板不另写一套。
+ * 它占住「响应页」的位置，因为 WS 没有「一次请求对应一次响应」这回事 —— 连接活着，两个
+ * 方向的帧随时进出。地址、子协议与连接动作住在 `WsUrlBar`（页签条之上那个槽位），本组件
+ * 只说「连上之后发生了什么」。
  *
- * 边界：不跑请求脚本（帧的前后没有请求完成这个时刻）。鉴权复用 HTTP 那条规则：Bearer /
- * Basic / API key 已由 `prepareRequest` 折算进 `prepared.headers`（query 档的 key 折进 URL），
- * OAuth2 的 token 在点击「连接」后、握手之前取好并注入 —— 与 `sendPreparedRequest` 用的是同一
- * 对 `fetchOAuth2Token` / `applyOAuth2Token` 与同一份变量池。TLS 与 HTTP 同一套合成规则：
- * 全局设置在前，端点自己那份整体取代它。
+ * 边界：不跑请求脚本（帧的前后没有请求完成这个时刻）。鉴权与 TLS 的合成规则由 `WsUrlBar`
+ * 交给 `startWs`，与 `sendPreparedRequest` 用的是同一套。
  */
 export function WebSocketPanel({
   tabId,
-  protocol,
-  onProtocolChange,
-  url,
-  onUrlChange,
   headers,
   onHeadersChange,
   headerSuggestions,
-  prepared,
   varEntries,
   envName,
-  onPathParamsMissing,
-  tls,
-  tlsOverride,
-  auth,
 }: {
   tabId: string;
-  protocol: RequestProtocol;
-  onProtocolChange: (next: RequestProtocol) => void;
-  url: string;
-  onUrlChange: (value: string) => void;
   headers: KeyValue[];
   onHeadersChange: (headers: KeyValue[]) => void;
   headerSuggestions: KeySuggestion[];
-  /** 变量替换之后的地址与 header，点击「连接」时原样交给后端。 */
-  prepared: PreparedRequest;
+  /** 变量候选：环境变量与动态变量并进同一份列表。 */
   varEntries: VarEntry[];
+  /** 当前环境名，显示在候选浮层的标题上。 */
   envName: string | undefined;
-  /** 路径参数缺值时交给标签切到「路径参数」页；与 HTTP 发送走同一个回调。 */
-  onPathParamsMissing: (missing: string[]) => void;
-  /** 全局默认的 HTTPS 出站设置；与 HTTP 发送同一份。 */
-  tls: TlsSettings;
-  /** 端点自己那份，`null` = 继承全局。 */
-  tlsOverride: TlsSettings | null;
-  /** 端点的鉴权配置：只有 OAuth2 需要在握手前取 token，其余已在 `prepared` 里。 */
-  auth: AuthConfig | undefined;
 }) {
   const view = useAppStore((s) => s.lastStreams[tabId]?.ws ?? null);
-  const [protocolsInput, setProtocolsInput] = useState('');
   const [text, setText] = useState('');
   const [sendError, setSendError] = useState<string | null>(null);
   const [following, setFollowing] = useState(true);
@@ -81,8 +52,6 @@ export function WebSocketPanel({
 
   const phase = view?.phase ?? 'closed';
   const open = phase === 'open';
-  const blocked = prepared.missingVars.length > 0;
-  const pathBlocked = pathParamsBlocked(prepared);
   const frameCount = view?.frames.length ?? 0;
   const retryAt = view?.retryAt ?? null;
 
@@ -100,35 +69,6 @@ export function WebSocketPanel({
     if (!el) return;
     el.scrollTop = el.scrollHeight;
   }, [frameCount, following]);
-
-  const connect = () => {
-    setSendError(null);
-    // 组装期才发现的问题（`validateRequest` 看到的是替换前的模板，占位符照例放行）：
-    // 带着坏掉的描述去握手只会换回一个与真实原因无关的失败，故与 HTTP 发送一样先拦下。
-    const problem = prepared.problems[0];
-    if (problem) {
-      setSendError(problem.message);
-      return;
-    }
-    // 与 HTTP 发送、SSE 建连同一道路径参数闸门：带着 `{id}` 去握手，服务端只会回 404。
-    if (!pathParamsReady(prepared, onPathParamsMissing)) return;
-    void startWs(tabId, {
-      request: prepared,
-      // 子协议按逗号分隔，与浏览器 WebSocket 构造函数的写法一致。
-      protocols: protocolsInput
-        .split(',')
-        .map((p) => p.trim())
-        .filter((p) => p !== ''),
-      tls,
-      tlsOverride,
-      auth,
-    });
-  };
-
-  const disconnect = () => {
-    setSendError(null);
-    void closeWs(tabId);
-  };
 
   const send = async (kind: 'text' | 'binary', data: string, base64?: string) => {
     setSendError(null);
@@ -154,67 +94,8 @@ export function WebSocketPanel({
     reader.readAsDataURL(file);
   };
 
-  const statusLabel =
-    phase === 'open'
-      ? '已连接'
-      : phase === 'connecting'
-        ? '连接中'
-        : phase === 'error'
-          ? '连接失败'
-          : '未连接';
-
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-3 py-2">
-        {/* 协议选择器只住在 `RequestUrlBar` 里，而 WS 下那整栏被面板取代 —— 不带一个进来，
-            用户切到 websocket 就再也回不去（端点仍存着 websocket）。宽度与 URL 栏那份对齐。 */}
-        <ProtocolPicker
-          value={protocol}
-          onChange={onProtocolChange}
-          className="w-[7.5rem] shrink-0"
-        />
-        <div className="min-w-0 flex-1">
-          <VarHintInput
-            value={url}
-            onChange={onUrlChange}
-            entries={varEntries}
-            envName={envName}
-            placeholder="ws:// 或 wss:// 地址（支持 {{var}}）"
-            className="h-8 font-mono text-sm"
-            data-testid="ws-url"
-          />
-        </div>
-        <Input
-          value={protocolsInput}
-          onChange={(e) => setProtocolsInput(e.target.value)}
-          placeholder="子协议（逗号分隔，可选）"
-          className="h-8 w-56 font-mono text-sm"
-          aria-label="WebSocket 子协议"
-        />
-        {open || phase === 'connecting' ? (
-          <Button variant="outline" size="sm" className="h-8 gap-1" onClick={disconnect}>
-            <Unplug className="h-3.5 w-3.5" />
-            断开
-          </Button>
-        ) : (
-          <Button
-            size="sm"
-            className="h-8 gap-1"
-            onClick={connect}
-            // 缺变量不拦：与 HTTP / SSE 一致照发，未替换的 `{{var}}` 原样交给服务端
-            // （面板上有提示）。只有路径参数缺值需要拦 —— 带着 `{id}` 握手只会 404。
-            disabled={pathBlocked}
-          >
-            <Plug className="h-3.5 w-3.5" />
-            连接
-          </Button>
-        )}
-        <Badge variant={phase === 'open' ? 'success' : phase === 'error' ? 'destructive' : 'muted'}>
-          {statusLabel}
-          {view?.closeCode !== null && view?.closeCode !== undefined && ` · ${view.closeCode}`}
-        </Badge>
-      </div>
-
       <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border px-3 py-1.5 text-xs text-muted-foreground">
         <label className="flex items-center gap-1.5">
           <Switch
@@ -233,26 +114,6 @@ export function WebSocketPanel({
           WS 不跑请求脚本；鉴权与 HTTP 同一套规则（OAuth2 在建连前取 token）
         </span>
       </div>
-
-      {blocked && (
-        <p className="shrink-0 border-b border-border px-3 py-1.5 text-xs text-warning-foreground">
-          有未替换的变量：{prepared.missingVars.join('、')}（仍会按原样连接，与 HTTP 一致）
-        </p>
-      )}
-
-      {pathBlocked && (
-        <p className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-1.5 text-xs text-destructive">
-          路径参数 {prepared.missingPathParams.join('、')} 没有填值，填好才能连接
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-6 px-2 text-xs"
-            onClick={() => onPathParamsMissing(prepared.missingPathParams)}
-          >
-            去填路径参数
-          </Button>
-        </p>
-      )}
 
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
         <div className="min-h-0 shrink-0 overflow-y-auto border-b border-border md:w-80 md:border-b-0 md:border-r">
