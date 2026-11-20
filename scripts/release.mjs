@@ -513,6 +513,11 @@ function createPr(branch, next, titles, current) {
  * `no checks reported on the '<branch>' branch` 退出非零，而 `gh pr create` 刚返回的那几秒
  * 正是这个窗口 —— 直接 `--watch` 会把「还没开始」当成「失败了」。故先静默轮询到真有检查，
  * 再进 watch；watch 期间 pending 归零才退出，故退出码非零就是真有红勾。
+ *
+ * **调用处必须 `await`。** 本体的等待全在 `poll` 里（`await sleep`），漏掉 await 时函数返回
+ * 的那一刻一个检查都还没等；而下一步的 `mergePr` 全是 `spawnSync`（同步阻塞），会直接冲过去
+ * —— 要么被保护规则拒在「PR 已建、代码没合」的半途，要么静默绕过「CI 红就停」。
+ * `.mjs` 没有 `checkJs`，`tsc` 抓不到这个。
  */
 async function awaitChecks(prNumber) {
   await poll(
@@ -898,7 +903,7 @@ async function main() {
   const titles = readTitles(`${prevTag}..HEAD`);
   const pr = createPr(branch, next, titles, current);
   log(`PR #${pr.number}：${pr.url}`);
-  awaitChecks(pr.number);
+  await awaitChecks(pr.number);
   mergePr(pr.number);
 
   const { tag: pushedTag } = tagRelease(next);
