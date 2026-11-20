@@ -296,10 +296,13 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
         nodes: s.nodes.map((n) => (n.id === id ? { ...n, expanded: !n.expanded } : n)),
       })),
     // `setAllNodesExpanded` 只改当前项目里的模块与集合：别的项目的节点与接口都不动。
+    // 已经是目标值的节点原样返回同一个对象 —— 身份不变，订阅它的行不必重渲染。
     setAllNodesExpanded: (expanded) =>
       set((s) => ({
         nodes: s.nodes.map((n) =>
-          n.rootId === s.activeProjectId && n.kind !== 'endpoint' ? { ...n, expanded } : n,
+          n.rootId === s.activeProjectId && n.kind !== 'endpoint' && n.expanded !== expanded
+            ? { ...n, expanded }
+            : n,
         ),
       })),
 

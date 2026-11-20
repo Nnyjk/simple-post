@@ -46,15 +46,35 @@ const FADE_BORDER_STYLE: CSSProperties = {
 const SLOT_W = 'w-[16px]';
 
 /**
+ * 边框的显隐：模块级选一次实现，整棵树共用。
+ *
+ * 动效下补间；用户要求减弱动效时直接落到终态 —— 边框的显隐是状态，不能停在透明。
+ * 判定只走 `@/lib/gsap` 里那一个媒体查询实例，不再为每一行建一个 `gsap.matchMedia()`。
+ */
+let fadeBorder = (border: HTMLSpanElement, opacity: number): void => {
+  gsap.set(border, { opacity });
+};
+
+// motionSafe 的第一个参数是「播动画」的分支，第二个是「落到终态」的分支：两个分支放反了，
+// 默认动效下就只剩直落，边框等于没有淡入淡出。
+motionSafe(
+  () => {
+    fadeBorder = (border, opacity) =>
+      gsap.to(border, { opacity, duration: 0.15, ease: 'power2.out', overwrite: 'auto' });
+  },
+  () => {
+    fadeBorder = (border, opacity) => gsap.set(border, { opacity });
+  },
+);
+
+/**
  * 那些块的边框：鼠标悬在哪一块上，哪一块的边框才显出来，离开时收回。
  *
  * 边框与阴影画在一层覆盖上（覆盖层平时透明），故动画只动 `opacity` —— 边框的颜色留在
  * CSS 里，不搬到 JS 里再补间一遍。
  *
  * 悬停的判定挂在覆盖层所在的按钮上：覆盖层自己不吃指针事件，鼠标进出按钮才是这一块
- * 的进出。
- *
- * 减弱动效时不播补间，直接落到终态：边框该显出来就显出来。
+ * 的进出。每块一对监听，判定与实现都是共用的，行数再多也不多建媒体查询。
  */
 function useHoverBorders(borderRefs: RefObject<HTMLSpanElement | null>[]) {
   useGSAP(() => {
@@ -63,26 +83,11 @@ function useHoverBorders(borderRefs: RefObject<HTMLSpanElement | null>[]) {
       .filter((el): el is HTMLSpanElement => el !== null);
     if (!targets.length) return;
 
-    // 边框的显隐是状态，不是装饰：监听无条件注册，只决定「怎么改 opacity」。
-    // motionSafe 的第一个参数是「播动画」的分支，第二个是「落到终态」的分支：
-    // 默认动效下走补间，用户要求减弱动效时走直落。两个分支放反了，默认动效下就
-    // 只剩直落，动画等于没写。
-    let fade = (border: HTMLSpanElement, opacity: number) => gsap.set(border, { opacity });
-    const cleanup = motionSafe(
-      () => {
-        fade = (border, opacity) =>
-          gsap.to(border, { opacity, duration: 0.15, ease: 'power2.out', overwrite: 'auto' });
-      },
-      () => {
-        fade = (border, opacity) => gsap.set(border, { opacity });
-      },
-    );
-
     const offs = targets.map((border) => {
       // 覆盖层画在按钮里面，它的父元素就是那一块的按钮 —— 鼠标进出按钮即是进出这一块。
       const host = border.parentElement;
-      const enter = () => fade(border, 1);
-      const leave = () => fade(border, 0);
+      const enter = () => fadeBorder(border, 1);
+      const leave = () => fadeBorder(border, 0);
       host?.addEventListener('mouseenter', enter);
       host?.addEventListener('mouseleave', leave);
       return () => {
@@ -92,10 +97,7 @@ function useHoverBorders(borderRefs: RefObject<HTMLSpanElement | null>[]) {
       };
     });
 
-    return () => {
-      cleanup();
-      offs.forEach((off) => off());
-    };
+    return () => offs.forEach((off) => off());
   });
 }
 

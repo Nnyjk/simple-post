@@ -15,6 +15,8 @@ export interface CollectionRowProps {
   onContextMenu: (e: ReactMouseEvent) => void;
   onPlusClick: (e: ReactMouseEvent) => void;
   dragContext: DragContextValue;
+  /** 这一行是否带 `data-tree-row` 标记 —— 父级展开动画按它逐行淡入。 */
+  dataRow?: boolean;
 }
 
 /**
@@ -34,6 +36,7 @@ export function CollectionRow({
   onContextMenu,
   onPlusClick,
   dragContext,
+  dataRow,
 }: CollectionRowProps) {
   return (
     <TreeRow
@@ -49,6 +52,7 @@ export function CollectionRow({
       onCancelEdit={onCancelEdit}
       onContextMenu={onContextMenu}
       dragContext={dragContext}
+      dataRow={dataRow}
       buttonClassName="hover:bg-overlay-hover"
     />
   );
