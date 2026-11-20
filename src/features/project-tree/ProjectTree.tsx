@@ -19,6 +19,7 @@ import { ModuleRow } from './rows/ModuleRow';
 import { TreeChildren } from './rows/TreeChildren';
 import { EndpointList } from './rows/EndpointList';
 import { CollectionBranch } from './rows/CollectionBranch';
+import { markBulkExpand } from './tree-motion';
 
 // 项目内两类实体的创建对话框。两者既 `lazy()` **又**挂在 store 的 open 标志上：
 // `lazy()` 组件一被渲染就触发 import，无条件挂载会在打开项目时就把对话框基础组件拉进
@@ -303,10 +304,15 @@ export function ProjectTree() {
         )}
         {/* 全部展开 / 全部收起 —— 树深了以后逐层点开很费事，两个按钮各做一件事。
             每个按钮在无事可做时自己变灰：全部展开在树已经全开着时无事可做，
-            全部收起在没有展开的分支时无事可做。 */}
+            全部收起在没有展开的分支时无事可做。
+            两个动作在写 store 之前先 `markBulkExpand()`：整棵树同时改展开状态时，每个容器
+            补间自己的 height 会让一帧里排上几百个补间，故这些容器直落终态。 */}
         <button
           type="button"
-          onClick={() => setAllNodesExpanded(true)}
+          onClick={() => {
+            markBulkExpand();
+            setAllNodesExpanded(true);
+          }}
           disabled={!canExpandAll}
           title="全部展开"
           aria-label="全部展开"
@@ -321,7 +327,10 @@ export function ProjectTree() {
         </button>
         <button
           type="button"
-          onClick={() => setAllNodesExpanded(false)}
+          onClick={() => {
+            markBulkExpand();
+            setAllNodesExpanded(false);
+          }}
           disabled={!canCollapseAll}
           title="全部收起"
           aria-label="全部收起"

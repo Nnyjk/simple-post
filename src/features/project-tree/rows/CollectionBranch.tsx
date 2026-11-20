@@ -60,7 +60,9 @@ export function CollectionBranch(props: CollectionBranchProps) {
     >
       {branches.map(
         ({ collection, endpoints: colEndpoints, endpointDetails, children: subCols }) => (
-          <div key={collection.id} className="mb-0.5" data-tree-row>
+          // 标记挂在行本身而不是这个包装上：包装里还有嵌套的 `TreeChildren`，父级展开时
+          // 若整体淡入，里面已经展开的行会跟着再淡一次。
+          <div key={collection.id} className="mb-0.5">
             <CollectionRow
               collection={collection}
               isEditing={editing?.kind === 'collection' && editing.id === collection.id}
@@ -72,6 +74,7 @@ export function CollectionBranch(props: CollectionBranchProps) {
               onContextMenu={(e) => onContextMenu(e, 'collection', collection.id)}
               onPlusClick={onPlusClick(collection.id)}
               dragContext={dragContext}
+              dataRow
             />
             {(colEndpoints.length > 0 || subCols.length > 0) && (
               <TreeChildren expanded={!!collection.expanded}>

@@ -1,75 +1,133 @@
 import { useRef, type ReactNode } from 'react';
 import { gsap, motionSafe, useGSAP } from '@/lib/gsap';
+import { REVEAL_MAX_ROWS, isBulkExpandFresh, revealPlan } from '../tree-motion';
+
+/** 容器展开的时长：`height` 与 `opacity` 一起走完。 */
+const EXPAND_DURATION = 0.25;
+/** 容器收起的时长：收起比展开快，手指离开时不必等。 */
+const COLLAPSE_DURATION = 0.2;
+/** 逐行淡入的时长与位移。 */
+const REVEAL_DURATION = 0.2;
+const REVEAL_Y = 4;
+
+/**
+ * 本容器**自己的**直接行，最多 `limit` 个。
+ *
+ * 不下潜进嵌套的 `TreeChildren`：那里面的行由各自的容器负责，再淡入一次就是重复动画。
+ * 行数只决定「一次浮现多少行」，与数据量无关 —— 200 个接口的集合也只取前几个。
+ */
+function directRows(el: HTMLElement, limit: number): HTMLElement[] {
+  const rows: HTMLElement[] = [];
+  const visit = (parent: Element) => {
+    for (const child of Array.from(parent.children)) {
+      if (rows.length >= limit) return;
+      if (child.hasAttribute('data-tree-children')) continue;
+      if (child.hasAttribute('data-tree-row')) {
+        rows.push(child as HTMLElement);
+        continue;
+      }
+      visit(child);
+    }
+  };
+  visit(el);
+  return rows;
+}
 
 /**
  * 包裹树节点的子级（模块 → CollectionBranch，或 CollectionRow → 接口 + 子集合），使展开 /
  * 折叠能用 GSAP 动画而非硬挂载 / 卸载。子级始终留在 DOM 中；可见性由容器的 `height` +
- * `opacity` 驱动。展开时还对其直接行后代做错峰淡入，让新内容逐行浮现而不是一次性弹出。
+ * `opacity` 驱动。展开时另取前几行做一次总时长封顶的错峰淡入，让新内容逐行浮现。
  */
 export function TreeChildren({ expanded, children }: { expanded: boolean; children: ReactNode }) {
   const containerRef = useRef<HTMLDivElement>(null);
   // `useGSAP` 除每次依赖变化外，挂载时也会跑一次回调。不加守卫的话，初始即展开的分支会
-  // 在首帧从 height: 0 补间到 'auto'，闪一下折叠态。故首次运行直接同步到当前状态，之后
-  // 每次变化才做动画。
+  // 在首帧从 height: 0 补间到 'auto'，闪一下折叠态。
   const isFirstRun = useRef(true);
 
   useGSAP(
     () => {
       const el = containerRef.current;
       if (!el) return;
+
+      // 落到终态：`height` 是 GSAP 拥有的内联样式，跳过补间时也必须写一个确定的值，
+      // 否则减弱动效下的展开会停在 `height: 0`。
+      const settle = (open: boolean) => {
+        gsap.set(el, { height: open ? 'auto' : 0, opacity: open ? 1 : 0, willChange: 'auto' });
+      };
+
       if (isFirstRun.current) {
         isFirstRun.current = false;
-        gsap.set(el, expanded ? { height: 'auto', opacity: 1 } : { height: 0, opacity: 0 });
+        settle(expanded);
         return;
       }
-      // 这个过渡既是动效，也是本容器在开合之间唯一的位移来源，故 reduced motion 必须落到
-      // 终态而不是跳过 —— 折叠高度是 GSAP 拥有的内联样式，跳过补间会让用户刚展开的分支停在
-      // `height: 0`。
-      const rows = el.querySelectorAll<HTMLElement>(':scope > * > [data-tree-row]');
-      if (expanded) {
+      // 「全部展开 / 全部收起」让整棵树的展开状态在同一个依赖变化里一起变：容器各自补间
+      // 自己的 `height` 时，一帧里就是几百个补间、每帧重新布局整棵子树。窗口内直接落终态。
+      if (isBulkExpandFresh()) {
+        settle(expanded);
+        return;
+      }
+
+      if (!expanded) {
         return motionSafe(
           () => {
-            gsap.fromTo(
-              el,
-              { height: 0, opacity: 0 },
-              {
-                height: 'auto',
-                opacity: 1,
-                duration: 0.25,
-                ease: 'power2.out',
-              },
-            );
-            gsap.from(rows, {
+            // `overwrite: 'auto'`：快速连点时上一次补间可能还在跑，两条抢同一个 height 会抖。
+            gsap.to(el, {
+              height: 0,
               opacity: 0,
-              y: 4,
-              duration: 0.2,
-              stagger: 0.025,
-              ease: 'power2.out',
+              duration: COLLAPSE_DURATION,
+              ease: 'power2.in',
+              overwrite: 'auto',
             });
           },
-          () => {
-            gsap.set(el, { height: 'auto', opacity: 1 });
-            gsap.set(rows, { opacity: 1, y: 0 });
-          },
+          () => settle(false),
         );
       }
+
+      const rows = directRows(el, REVEAL_MAX_ROWS);
+      const plan = revealPlan(rows.length);
       return motionSafe(
         () => {
-          gsap.to(el, {
-            height: 0,
-            opacity: 0,
-            duration: 0.2,
-            ease: 'power2.in',
-          });
+          // 层化提示只覆盖补间本身：留着它，这个容器会一直占一层合成层。
+          gsap.set(el, { willChange: 'height' });
+          gsap.fromTo(
+            el,
+            { height: 0, opacity: 0 },
+            {
+              height: 'auto',
+              opacity: 1,
+              duration: EXPAND_DURATION,
+              ease: 'power2.out',
+              overwrite: 'auto',
+              onComplete: () => gsap.set(el, { willChange: 'auto' }),
+            },
+          );
+          if (plan.rows > 1) {
+            gsap.from(rows, {
+              opacity: 0,
+              y: REVEAL_Y,
+              duration: REVEAL_DURATION,
+              stagger: { each: plan.each, amount: plan.amount },
+              ease: 'power2.out',
+              overwrite: 'auto',
+            });
+          }
         },
-        () => gsap.set(el, { height: 0, opacity: 0 }),
+        () => {
+          settle(true);
+          gsap.set(rows, { opacity: 1, y: 0 });
+        },
       );
     },
     { dependencies: [expanded], scope: containerRef },
   );
 
   return (
-    <div ref={containerRef} style={{ overflow: 'hidden' }} aria-hidden={!expanded}>
+    <div
+      ref={containerRef}
+      data-tree-children=""
+      style={{ overflow: 'hidden' }}
+      aria-hidden={!expanded}
+    >
       {children}
     </div>
   );
