@@ -25,6 +25,9 @@ export async function copyText(text: string, doc: Document = document): Promise<
 
 /** 同步回退。`execCommand` 返回它自己是否成功，故失败也是这条路径的结论，不是异常。 */
 function copyByExecCommand(text: string, doc: Document): boolean {
+  // Chromium 对空选区也返回 true，却不动剪贴板：这条通道证明不了自己写了空值，如实报
+  // 失败，免得界面点亮「已复制」而剪贴板里还是上一条。非空文本不受影响。
+  if (text === '') return false;
   // 键盘用户点了复制不该丢掉焦点：`select()` 会把焦点抢到那个 textarea 上。
   const previous = doc.activeElement as HTMLElement | null;
   let textarea: HTMLTextAreaElement | null = null;

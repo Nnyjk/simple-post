@@ -43,17 +43,30 @@ export function prefersReducedMotion(): boolean {
  *   用户展开后仍然不可见：装饰可以跳过，状态必须落到某个值上。
  * - 判定只走 `prefersReducedMotion()` 背后那一个媒体查询，并订阅它的 `change`：用户
  *   中途改系统设置时，正在播的那一套立刻换成另一套，不用重新挂载组件。
+ * - 每次注册自己持有一个 `gsap.context`：偏好翻转时先杀掉上一支还在跑的补间。不杀的话
+ *   `jumpToEnd` 写好终态之后，那支补间会在下一帧继续往自己的终值写（`gsap.set` 不取消
+ *   在跑的补间）。用 `kill()` 而不是 `revert()`：终态由 `jumpToEnd` 显式写，回滚内联
+ *   样式只会让元素先闪一下补间之前的样子。
  * - 默认播动画：查询不被支持的浏览器 `matches` 为假，走 `animate` 那一支。
  */
 export function motionSafe(animate: () => void, jumpToEnd?: () => void): () => void {
   const query = reducedMotion();
+  let ctx: gsap.Context | null = null;
+  const stop = () => {
+    ctx?.kill();
+    ctx = null;
+  };
   const apply = () => {
+    stop();
     if (query.matches) jumpToEnd?.();
-    else animate();
+    else ctx = gsap.context(animate);
   };
   apply();
   query.addEventListener('change', apply);
-  return () => query.removeEventListener('change', apply);
+  return () => {
+    query.removeEventListener('change', apply);
+    stop();
+  };
 }
 
 export { gsap, useGSAP, Flip };
