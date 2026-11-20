@@ -40,6 +40,14 @@ export const GROUP_TITLES = {
 };
 
 /**
+ * 生成小节自己的三级标题。
+ *
+ * 合并时用它们区分「占位节内部的组标题」与「真正的下一节」：上一轮合并过的正文里
+ * `### 修复` 就在占位节里头，而 `### Install` / `## Simple Post v…` 才是边界。
+ */
+const SECTION_HEADINGS = new Set(Object.values(GROUP_TITLES));
+
+/**
  * 解析 `x.y.z`。解析不了返回 `null`（不是抛错）：调用方对「当前版本读不出来」
  * 与「用户手输的版本号非法」要给出不同的提示。
  *
@@ -206,13 +214,16 @@ export function mergeReleaseBody(body, section) {
 
   if (start < 0) return `${section}\n\n${text}`.trimEnd() + '\n';
 
-  // 下一个 `## ` 标题：`###` 不会被 `^##\s` 命中（第三格是 `#`）。
+  // 下一个真标题：`### 修复` 这类**我们自己生成的组标题**不算边界（上一轮合并后它们就在
+  // 占位节内部），任何别的 1–3 级标题才是。只看 `^## ` 会漏掉「标题在最前、安装说明在
+  // 后面」的正文 —— 那里根本没有第二个 `## `，于是 `### Install` 到文件尾被整段截掉。
   let end = lines.length;
   for (let i = start + 1; i < lines.length; i += 1) {
-    if (/^##\s/.test(lines[i])) {
-      end = i;
-      break;
-    }
+    const heading = /^#{1,3}\s+(.+?)\s*$/.exec(lines[i]);
+    if (heading === null) continue;
+    if (lines[i].startsWith('### ') && SECTION_HEADINGS.has(heading[1])) continue;
+    end = i;
+    break;
   }
 
   const head = lines.slice(0, start).join('\n').trimEnd();
