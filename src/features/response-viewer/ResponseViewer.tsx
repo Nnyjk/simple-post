@@ -22,6 +22,7 @@ import {
   tryFormatJson,
 } from '@/lib/utils';
 import { gsap, motionSafe, useGSAP } from '@/lib/gsap';
+import { copyText } from '@/lib/clipboard';
 import { ResponseHistory } from './ResponseHistory';
 import { PrettyView } from './PrettyView';
 import { HeadersView } from './HeadersView';
@@ -247,7 +248,7 @@ export function ResponseViewer() {
               size="icon"
               className="h-7 w-7"
               disabled={kind === 'binary'}
-              onClick={() => navigator.clipboard?.writeText(response.body)}
+              onClick={() => void copyText(response.body)}
             >
               <Copy className="h-3.5 w-3.5" />
             </Button>

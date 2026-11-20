@@ -10,6 +10,7 @@
  */
 import { IS_TAURI_SHELL } from './tauri-commands';
 import { errorText } from './error-text';
+import { copyText } from './clipboard';
 import type { ExportDocument } from './interchange-types';
 
 export type SaveOutcome = 'saved' | 'cancelled';
@@ -81,7 +82,8 @@ function baseName(path: string): string {
 
 /** 复制到剪贴板。次要出口：原生保存对话框被取消时，用户仍然拿得到内容。 */
 export async function copyGeneratedDocument(doc: ExportDocument): Promise<void> {
-  await navigator.clipboard.writeText(doc.content);
+  // 失败要抛：调用方据此留在预览页并显示错误，静默吞掉会让对话框关掉却什么也没复制。
+  if (!(await copyText(doc.content))) throw new Error('无法访问剪贴板');
 }
 
 /**

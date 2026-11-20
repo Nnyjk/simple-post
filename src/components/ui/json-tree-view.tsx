@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
 import { Braces, ChevronRight, Copy, KeyRound, Route } from 'lucide-react';
 import { cn, focusRingBare } from '@/lib/utils';
+import { copyText } from '@/lib/clipboard';
 import {
   defaultExpandedPaths,
   flattenTree,
@@ -91,17 +92,17 @@ export function JsonTreeView({ root, wrap = false, active = true }: JsonTreeView
   };
 
   /**
-   * 复制一项。剪贴板是异步的，且可能整条不可用（非安全上下文、权限被拒）—— 失败时如实
-   * 报失败，不能先点亮「已复制」再让内容留在旧剪贴板里。
+   * 复制一项。剪贴板是异步的，且可能整条不可用（非安全上下文、权限被拒）—— `copyText`
+   * 自带同步回退且从不抛，两条通道都失败时才如实报失败，不能先点亮「已复制」再让内容
+   * 留在旧剪贴板里。
    */
   const copy = (value: string) => {
     const id = ++attempt.current;
     void (async () => {
-      try {
-        if (!navigator.clipboard) throw new Error('剪贴板不可用');
-        await navigator.clipboard.writeText(value);
-        // 这一次已经被后来的尝试顶掉：提示归那一次管，这里不许再改。
-        if (id !== attempt.current) return;
+      const copied = await copyText(value);
+      // 这一次已经被后来的尝试顶掉：提示归那一次管，这里不许再改。
+      if (id !== attempt.current) return;
+      if (copied) {
         // 重试成功了，上一轮那条失败提示连同它的计时器一起作废 —— 留着它会在成功后
         // 继续挂 2.4s，用户刚复制成功却仍看到「复制失败」。
         if (failTimer.current !== null) {
@@ -109,13 +110,12 @@ export function JsonTreeView({ root, wrap = false, active = true }: JsonTreeView
           failTimer.current = null;
         }
         setCopyFailed(false);
-      } catch {
-        if (id !== attempt.current) return;
-        // 菜单选中即关闭，提示必须落在菜单之外 —— 故挂在树的滚动区上方。
-        setCopyFailed(true);
-        if (failTimer.current !== null) window.clearTimeout(failTimer.current);
-        failTimer.current = window.setTimeout(() => setCopyFailed(false), 2400);
+        return;
       }
+      // 菜单选中即关闭，提示必须落在菜单之外 —— 故挂在树的滚动区上方。
+      setCopyFailed(true);
+      if (failTimer.current !== null) window.clearTimeout(failTimer.current);
+      failTimer.current = window.setTimeout(() => setCopyFailed(false), 2400);
     })();
   };
 
