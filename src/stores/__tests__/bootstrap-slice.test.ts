@@ -703,4 +703,29 @@ describe('bootstrap-slice 聚合加载契约', () => {
       '记住过的那个环境优先于默认环境——刷新后该停在同一个环境',
     );
   });
+
+  it('reloadWorkspaceAndExpand 先重载再展开：展开落在读回来的那份树上', async () => {
+    const bag = makeBootstrapHarness();
+    // 导入之前树里只有老的模块；导入之后多出一行，它的 id 在上一次列表里不存在，
+    // 故 `mergeExpanded` 会让它保留后端的折叠值。
+    let trees: ResourceNode[] = [{ ...moduleNode, expanded: false }];
+    installIpcMock(async (cmd) => (cmd === 'nodes_list' ? trees : []));
+    await bag.loadWorkspace();
+    const imported: ResourceNode = {
+      ...collectionNode,
+      id: 'c-new',
+      name: '导入进来的集合',
+      expanded: false,
+    };
+    trees = [{ ...moduleNode, expanded: false }, imported];
+
+    await bag.reloadWorkspaceAndExpand('c-new');
+
+    const rows = bag.nodes as ResourceNode[];
+    // 名字取自重载后的那份：先展开、后重载的话，展开会打在一个还不存在的 id 上，
+    // 导入成功而界面上什么都没多出来。
+    assert.equal(rows.find((n) => n.id === 'c-new')?.name, '导入进来的集合');
+    assert.equal(rows.find((n) => n.id === 'c-new')?.expanded, true, '刚导入的那一行要展开');
+    assert.equal(rows.find((n) => n.id === 'm1')?.expanded, false, '别的节点不动');
+  });
 });

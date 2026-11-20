@@ -254,12 +254,11 @@ describe('dynamic slice', () => {
 
     assert.equal(seen.length, 1);
     // 取数环境随命令一起送上去：继承取数环境的定义按调用方选中的环境取值。
-    assert.deepEqual(seen[0], {
-      names: ['sns'],
-      projectId: 'p1',
-      environmentId: 'env1',
-      force: false,
-    });
+    assert.deepEqual(seen[0].names, ['sns']);
+    assert.equal(seen[0].projectId, 'p1');
+    assert.equal(seen[0].environmentId, 'env1');
+    // 发送与预览读 TTL 缓存：这里不该顺手带上强制重取。
+    assert.equal(seen[0].force, false);
   });
 
   it('解析不带项目就是跨项目取值', async () => {
@@ -276,12 +275,10 @@ describe('dynamic slice', () => {
     await bag.resolveDynamicVariables(['sns']);
 
     assert.equal(seen.length, 1);
-    assert.deepEqual(seen[0], {
-      names: ['sns'],
-      projectId: null,
-      environmentId: 'env1',
-      force: false,
-    });
+    assert.deepEqual(seen[0].names, ['sns']);
+    assert.equal(seen[0].projectId, null, '不带项目就是跨项目取值');
+    assert.equal(seen[0].environmentId, 'env1');
+    assert.equal(seen[0].force, false);
   });
 
   it('切了环境，解析带上的是新环境', async () => {
@@ -305,6 +302,57 @@ describe('dynamic slice', () => {
       seen.map((a) => a.environmentId),
       ['env1', 'env2'],
     );
+  });
+
+  it('全部刷新强制重取本项目的启用定义，并重载列表', async () => {
+    // 「全部刷新」的职责是让缓存失效。少了 `force`，后端在 TTL 内命中缓存直接回旧值，
+    // 按钮按下去界面一动不动——这正是发版后暴露的那条缺陷。
+    const bag = makeHarness();
+    bag.dynamicVariables = [
+      view('sns'),
+      view('points'),
+      { ...view('off'), enabled: false },
+      view('other', 'p2'),
+    ];
+    const seen: Array<[string, any]> = [];
+    installIpcMock((cmd, args) => {
+      seen.push([cmd, args]);
+      if (cmd === 'dynamic_variables_resolve')
+        return resolution(['sns', 'points'], { sns: 'a', points: 'b' });
+      if (cmd === 'dynamic_variables_list') return [view('sns'), view('points')];
+      return null;
+    });
+
+    await bag.refreshAllDynamicVariables('p1');
+
+    const resolve = seen.find(([cmd]) => cmd === 'dynamic_variables_resolve');
+    assert.ok(resolve, '全部刷新必须真的发一次解析');
+    assert.equal(resolve![1].force, true, '不带 force 就只是读缓存，值不会变');
+    assert.deepEqual(
+      resolve![1].names,
+      ['sns', 'points'],
+      '只送本项目的启用定义：别的项目的同名变量不归这一批管，停用的后端也会跳过',
+    );
+    assert.equal(bag.dynamicValues[scope1]?.sns?.value, 'a');
+    // 值落在取值桶里，而卡片读的是列表：不重载，值、徽标与取数时间都不动。
+    assert.ok(
+      seen.some(([cmd]) => cmd === 'dynamic_variables_list'),
+      '刷新之后必须重载列表',
+    );
+  });
+
+  it('全部刷新没有可刷新的定义时不发请求', async () => {
+    const bag = makeHarness();
+    bag.dynamicVariables = [{ ...view('off'), enabled: false }];
+    const seen: string[] = [];
+    installIpcMock((cmd) => {
+      seen.push(cmd);
+      return null;
+    });
+
+    await bag.refreshAllDynamicVariables('p1');
+
+    assert.deepEqual(seen, [], '一条可刷新的定义都没有时不该白跑一次解析与列表');
   });
 
   it('刷新与写覆盖值也带上调用方的环境', async () => {
@@ -352,7 +400,8 @@ describe('dynamic slice', () => {
     await bag.loadDynamicVariables('p1');
 
     assert.equal(seen.length, 1);
-    assert.deepEqual(seen[0], { projectId: 'p1', environmentId: 'env1' });
+    assert.equal(seen[0].projectId, 'p1');
+    assert.equal(seen[0].environmentId, 'env1', '列表按「定义 × 生效环境」取值');
     assert.equal(bag.dynamicVariables.length, 1);
     assert.equal(bag.dynamicVariables[0].name, 'sns');
   });
@@ -370,7 +419,8 @@ describe('dynamic slice', () => {
 
     await bag.loadDynamicVariables();
 
-    assert.deepEqual(seen[0], { projectId: null, environmentId: 'env1' });
+    assert.equal(seen[0].projectId, null, '不带项目就是跨项目那一路');
+    assert.equal(seen[0].environmentId, 'env1');
   });
 
   it('新建定义带上归属项目', async () => {

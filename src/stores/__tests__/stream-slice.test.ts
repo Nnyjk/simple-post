@@ -65,3 +65,35 @@ describe('stream-slice 的 sseEvents', () => {
     assert.deepEqual(bag.lastStreams, {});
   });
 });
+
+describe('stream-slice 的 wsConnecting', () => {
+  it('开新连接时清掉上一次的重连倒计时，帧与重连开关原样留着', () => {
+    const { bag, slice } = makeHarness();
+    slice.beginWs(TAB);
+    slice.setWsReconnect(TAB, true);
+    slice.wsFrame(TAB, {
+      type: 'frame',
+      direction: 'in',
+      kind: 'text',
+      data: 'hi',
+      bytes: 2,
+      at: 1,
+    });
+    slice.wsRetry(TAB, 3, 1_700_000_000_000);
+
+    slice.wsConnecting(TAB);
+
+    const ws = bag.lastStreams[TAB]!.ws!;
+    assert.equal(ws.phase, 'connecting');
+    assert.equal(ws.retryAttempt, 0, '倒计时没清，「第 3 次重试」会挂在一条正在连的会话上');
+    assert.equal(ws.retryAt, null);
+    assert.equal(ws.frameCount, 1, '重连不该把已收到的帧丢掉');
+    assert.equal(ws.reconnectEnabled, true);
+  });
+
+  it('没有这条流的视图时不凭空造一条', () => {
+    const { bag, slice } = makeHarness();
+    slice.wsConnecting(TAB);
+    assert.deepEqual(bag.lastStreams, {});
+  });
+});

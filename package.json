@@ -38,7 +38,8 @@
     "tauri:build:debug": "tauri build --debug",
     "tauri:check": "cargo check --manifest-path src-tauri/Cargo.toml",
     "test": "node scripts/run-tests.mjs",
-    "test:watch": "node scripts/run-tests.mjs --watch"
+    "test:watch": "node scripts/run-tests.mjs --watch",
+    "release": "node scripts/release.mjs"
   },
   "dependencies": {
     "@codemirror/lang-javascript": "^6.2.5",

@@ -37,7 +37,7 @@ export function DynamicVariablesPanel() {
   const pending = useAppStore((s) => s.dynamicListPending);
   const error = useAppStore((s) => s.dynamicError);
   const loadDynamicVariables = useAppStore((s) => s.loadDynamicVariables);
-  const resolveDynamicVariables = useAppStore((s) => s.resolveDynamicVariables);
+  const refreshAllDynamicVariables = useAppStore((s) => s.refreshAllDynamicVariables);
   const setDynamicOverride = useAppStore((s) => s.setDynamicOverride);
   const refreshDynamicVariable = useAppStore((s) => s.refreshDynamicVariable);
   const deleteDynamicVariable = useAppStore((s) => s.deleteDynamicVariable);
@@ -106,12 +106,9 @@ export function DynamicVariablesPanel() {
   );
 
   const handleResolveAll = useCallback(async () => {
-    const names = variables.map((v) => v.name);
-    await resolveDynamicVariables(names, projectId);
-    // 解析的结果落在 store 的取值桶里，而卡片读的是列表——故这里要重载一次列表，
-    // 否则值、来源徽标与取数时间都不动，看着像按钮坏了。
-    await loadDynamicVariables(projectId);
-  }, [variables, projectId, resolveDynamicVariables, loadDynamicVariables]);
+    // 语义在 store 里：这条动作强制重取（跳过缓存）并重载列表。面板只负责触发。
+    await refreshAllDynamicVariables(projectId);
+  }, [refreshAllDynamicVariables, projectId]);
 
   const handleRefresh = useCallback(
     async (variable: DynamicVariableView) => {
@@ -136,7 +133,14 @@ export function DynamicVariablesPanel() {
             在请求里写 {'{{变量名}}'}，发送时自动取数并替换。变量名在本项目内唯一。
           </span>
           <div className="ml-auto flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => void handleResolveAll()}>
+            <Button
+              variant="outline"
+              size="sm"
+              // 这一批还在取数时再点一次只是把同一批请求叠上去；结果正确（世代号挡掉旧的），
+              // 但没必要付两次取数的代价。
+              disabled={resolving}
+              onClick={() => void handleResolveAll()}
+            >
               全部刷新
             </Button>
             <Button size="sm" onClick={() => beginCreate(projectId)}>

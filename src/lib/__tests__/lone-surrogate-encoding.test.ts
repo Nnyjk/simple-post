@@ -80,11 +80,6 @@ describe('percentEncode', () => {
 });
 
 describe('请求体：form 模式的字段值带落单代理项', () => {
-  it('组装正文时不抛异常', () => {
-    const content = JSON.stringify([{ key: 'q', value: LONE_HIGH, enabled: true }]);
-    assert.doesNotThrow(() => resolveBody({ mode: 'form', content }, {}));
-  });
-
   it('落单的代理项按 U+FFFD 编码进正文', () => {
     const content = JSON.stringify([{ key: 'q', value: LONE_HIGH, enabled: true }]);
     assert.equal(resolveBody({ mode: 'form', content }, {}).text, 'q=%EF%BF%BD');

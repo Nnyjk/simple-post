@@ -129,12 +129,6 @@ describe('the `type` field', () => {
 });
 
 describe('buildClientConfig', () => {
-  it('emits valid JSON for the preset it ships', () => {
-    const json = buildClientConfig(onlyPreset(), RUNNING);
-    assert.ok(json);
-    assert.doesNotThrow(() => JSON.parse(json));
-  });
-
   it('names the port the daemon is actually on', () => {
     // 片段每次渲染都由实时快照生成，所以不会漂到上一次会话的端口上。
     assert.deepEqual(parse(), {

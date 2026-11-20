@@ -14,14 +14,13 @@ export function CreateModuleDialog() {
   const closeNewItem = useAppStore((s) => s.closeNewItem);
   const setNewItemName = useAppStore((s) => s.setNewItemName);
   const setNewItemDescription = useAppStore((s) => s.setNewItemDescription);
-  const submitNewItem = useAppStore((s) => s.submitNewItem);
+  const submitNewItemAndClose = useAppStore((s) => s.submitNewItemAndClose);
 
   const nameInputRef = useRef<HTMLInputElement>(null);
   const open = draft.open && draft.type === 'module';
 
   const submit = () => {
-    void submitNewItem();
-    closeNewItem();
+    void submitNewItemAndClose();
   };
 
   return (

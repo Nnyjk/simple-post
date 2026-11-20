@@ -165,6 +165,14 @@ export interface BootstrapSliceActions {
    */
   reloadWorkspace: () => Promise<void>;
 
+  /**
+   * 重新载入工作区，再把这个节点展开出来 —— 导入之后「让刚进树的内容落在眼前」。
+   *
+   * 顺序是语义的一部分：重载整份替换 `nodes`，故展开必须排在它之后；反过来那次展开会被
+   * 换来的新列表带走（新 id 保留后端的折叠值），导入成功而界面上什么都没多出来。
+   */
+  reloadWorkspaceAndExpand: (nodeId: string) => Promise<void>;
+
   /** 关掉启动加载错误横幅（`features/top-bar/BootstrapErrorBanner`）而不重试。只清消息，`loaded` / `loading` 不动，故后续 `bootstrap()` 重试仍会跑。 */
   clearBootstrapError: () => void;
 
@@ -435,6 +443,16 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
       inFlight = local;
 
       return local;
+    },
+
+    // 展开排在重载之后是因为重载会整份替换 `nodes`（`mergeExpanded` 只按 id 保留旧值，
+    // 导入出来的新 id 保留后端的折叠值），先展开的那一下会被换来的列表带走。
+    // 重载失败也照旧展开：树还是原来那份，展开一个已存在的节点没有副作用。
+    reloadWorkspaceAndExpand: async (nodeId) => {
+      await get().reloadWorkspace();
+      set((s) => ({
+        nodes: s.nodes.map((n) => (n.id === nodeId && !n.expanded ? { ...n, expanded: true } : n)),
+      }));
     },
 
     clearBootstrapError: () => set({ bootstrapError: null }),

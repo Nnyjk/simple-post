@@ -21,7 +21,7 @@ export function CreateCollectionDialog() {
   const setNewItemName = useAppStore((s) => s.setNewItemName);
   const setNewItemDescription = useAppStore((s) => s.setNewItemDescription);
   const setNewItemParentModule = useAppStore((s) => s.setNewItemParentModule);
-  const submitNewItem = useAppStore((s) => s.submitNewItem);
+  const submitNewItemAndClose = useAppStore((s) => s.submitNewItemAndClose);
 
   const nameInputRef = useRef<HTMLInputElement>(null);
   const open = draft.open && draft.type === 'collection';
@@ -66,8 +66,7 @@ export function CreateCollectionDialog() {
 
   const submit = () => {
     if (!canSubmit) return;
-    void submitNewItem();
-    closeNewItem();
+    void submitNewItemAndClose();
   };
 
   return (

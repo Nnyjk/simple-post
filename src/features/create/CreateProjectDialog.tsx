@@ -27,7 +27,7 @@ export function CreateProjectDialog() {
   const setNewItemName = useAppStore((s) => s.setNewItemName);
   const setNewItemDescription = useAppStore((s) => s.setNewItemDescription);
   const setNewItemColor = useAppStore((s) => s.setNewItemColor);
-  const submitNewItem = useAppStore((s) => s.submitNewItem);
+  const submitNewItemAndClose = useAppStore((s) => s.submitNewItemAndClose);
 
   const nameInputRef = useRef<HTMLInputElement>(null);
   const open = draft.open && draft.type === 'project';
@@ -35,8 +35,7 @@ export function CreateProjectDialog() {
   // 这个对话框允许留空，另两个对话框不允许：`submitNewItem` 会回落到「新项目」，首次使用的
   // 用户只想先有个项目，不该非得先起名才看得见它。
   const submit = () => {
-    void submitNewItem();
-    closeNewItem();
+    void submitNewItemAndClose();
   };
 
   return (
