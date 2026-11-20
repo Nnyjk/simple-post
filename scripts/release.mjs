@@ -11,7 +11,11 @@
  *   npm run release                      # 默认 patch：只累加最后一位（0.1.39 → 0.1.40）
  *   npm run release -- patch --dry-run   # 只打印计划与发布说明，一个字节都不写
  *   npm run release -- patch --publish   # 等流水线成功并取消草案（真正发出去）
+ *   npm run release -- --notes v0.1.40   # 流水线成功之后单独一步：按标签生成说明、合并进草案正文、写成 md
  *   npm run release -- 0.1.42            # 逃生口：显式版本，修打错的标签
+ *
+ * `--notes` 与 `--dry-run` / `--publish` 互斥：它不跑发版，只读 `gh` 并写一个 md 文件。
+ * 三个 flag 都必须写在 `--` 之后才透传（npm 会把它们当自己的配置吃掉），见 `argvWithNpmConfig`。
  *
  * 版本规则：长期停在 `0.1.x`，只累加最后一位且没有上限（`0.1.99` → `0.1.100` 是正常
  * 一步）；没有 `minor` / `major` 这两档，`scripts/release-core.mjs` 会把它们当场拒掉。
@@ -41,6 +45,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   mergeReleaseBody,
+  parseVersion,
   renderReleaseNotes,
   renderReleaseSection,
   resolveNextVersion,
@@ -96,14 +101,18 @@ const VERSION_SOURCES = [
 ];
 
 const USAGE = `用法：npm run release -- [patch|<x.y.z>] [--dry-run] [--publish]
+      npm run release -- --notes <tag>
 
   默认 patch：本项目的版本长期停在 0.1.x，只累加最后一位，无上限
   （0.1.99 → 0.1.100 是正常一步，不存在「攒够升 0.2.0」）。
 
   显式 x.y.z 是逃生口（修打错的标签），必须大于当前版本，不是日常路径。
 
-  --dry-run   只打印计划与生成的发布说明，不建分支、不提交、不打标签、不调 gh 写命令
-  --publish   标签推送后等 release.yml 全部作业成功，填好说明并取消草案`;
+  --dry-run       只打印计划与生成的发布说明，不建分支、不提交、不打标签、不调 gh 写命令
+  --publish       标签推送后等 release.yml 全部作业成功，填好说明并取消草案
+  --notes <tag>   事后单独收尾：按标签生成说明、合并进草案正文、写成 release-notes-<版本>.md，
+                  再打印 gh release edit 命令。只读 gh + 写这一个文件，不动 git。
+                  不是发版路径：流水线成功后单独跑（与 --dry-run / --publish 互斥）`;
 
 // ── 日志 ───────────────────────────────────────────────────────────────────
 
@@ -204,12 +213,23 @@ async function poll(what, fn, { timeoutMs, hint }) {
 // ── 参数与只读事实 ─────────────────────────────────────────────────────────
 
 /**
- * npm 会把脚本名之后的 `--dry-run` / `--publish` 当成自己的配置吃掉（`npm_config_dry_run=true`），
- * 脚本的 `process.argv` 里一个都看不到 —— 于是 `npm run release --dry-run` 会**真的发一次版**。
- * 只有 `npm run release -- --dry-run` 才透传。为了不让人踩这个坑，把 npm 转发到环境里的同名
- * 配置折回参数列表，并说明正确写法。
+ * npm 会把脚本名之后的 `--dry-run` / `--publish` / `--notes` 当成自己的配置吃掉
+ * （`npm_config_dry_run=true`），脚本的 `process.argv` 里一个都看不到 —— 于是
+ * `npm run release --dry-run` 会**真的发一次版**。只有 `npm run release -- --dry-run`
+ * 才透传。为了不让人踩这个坑，把 npm 转发到环境里的同名布尔配置折回参数列表，并说明正确写法。
+ *
+ * `--notes <tag>` 不同：npm 只留下 `npm_config_notes=true`（布尔），标签本身沦为位置参数
+ * ——`npm run release --notes v0.1.40` 的 argv 是 `["v0.1.40"]`，会被当成显式版本**真发一次版**。
+ * 标签值在环境里没有，折不回来，故这里直接拒绝并要求用 `--`。
  */
 function argvWithNpmConfig(argv) {
+  if (process.env.npm_config_notes !== undefined && !argv.includes('--notes')) {
+    fail(
+      'npm 吃掉了 --notes，标签被当成了版本参数（那样会真发一次版）',
+      '写成 npm run release -- --notes v0.1.40（--notes 必须放在 -- 之后才透传）',
+    );
+  }
+
   const extra = [];
   for (const [env, flag] of [
     ['npm_config_dry_run', '--dry-run'],
@@ -228,14 +248,29 @@ function argvWithNpmConfig(argv) {
 }
 
 function parseArgs(argv) {
-  const out = { bump: 'patch', dryRun: false, publish: false, help: false };
+  const out = { bump: 'patch', dryRun: false, publish: false, notes: null, help: false };
   const positional = [];
-  for (const arg of argv) {
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
     if (arg === '--dry-run') out.dryRun = true;
     else if (arg === '--publish') out.publish = true;
-    else if (arg === '-h' || arg === '--help') out.help = true;
+    else if (arg === '--notes') {
+      const value = argv[i + 1];
+      if (value === undefined || value.startsWith('-')) {
+        throw new Error('--notes 需要一个标签，例如 --notes v0.1.40');
+      }
+      out.notes = value;
+      i += 1;
+    } else if (arg === '-h' || arg === '--help') out.help = true;
     else if (arg.startsWith('-')) throw new Error(`未知参数：${arg}`);
     else positional.push(arg);
+  }
+  if (out.notes !== null && (out.dryRun || out.publish)) {
+    // `--notes` 是事后的独立一步（只读 + 写一个 md），与「跑一次发版」互斥。
+    throw new Error('--notes 不能和 --dry-run / --publish 一起用');
+  }
+  if (out.notes !== null && positional.length > 0) {
+    throw new Error(`--notes 不接受版本参数，收到：${positional.join(' ')}`);
   }
   if (positional.length > 1) {
     throw new Error(`只接受一个版本参数，收到：${positional.join(' ')}`);
@@ -676,6 +711,61 @@ async function publishRelease(tag, titles, next, { publish }) {
     log(`发布页：${draft.url ?? `https://github.com/Nnyjk/simple-post/releases/tag/${tag}`}`);
 }
 
+/**
+ * 比 `version` 小的最近一个标签 —— 说明的区间就是 `它..v<version>`。
+ *
+ * **不能用 `package.json` 的版本**：事后跑这一步时，工作区里的版本号已经是新版了。
+ * `git tag --list 'v*' --sort=-v:refname` 的版本排序按段数值比，`0.1.99` 与 `0.1.100`
+ * 不会排反（字典序会）。
+ */
+function previousTag(version) {
+  const now = parseVersion(version);
+  if (!now) fail(`标签 ${version} 不是 x.y.z`, USAGE);
+  const listed = must('git', ['tag', '--list', 'v*', '--sort=-v:refname'], { capture: true })
+    .stdout.split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  const compare = (a, b) => a.major - b.major || a.minor - b.minor || a.patch - b.patch;
+  for (const candidate of listed) {
+    const parsed = parseVersion(candidate.slice(1));
+    if (parsed && compare(parsed, now) < 0) return candidate;
+  }
+  return fail(`找不到比 ${version} 小的标签`, '发布说明的区间需要一个起点');
+}
+
+/**
+ * 事后收尾（`--notes <tag>`）：按标签生成说明、合并进草案正文、写成文件。
+ *
+ * 这是**流水线成功之后**的独立一步，不碰 git（只读 `gh` + 写一个 md 文件）。之所以不在
+ * 发版主流程里做：草案要等 tauri-action 上传时才创建（20–40 分钟），主流程里 poll 只会把
+ * 「流水线刚开始」误报成失败。
+ *
+ * 合并必须走 `draftNotes`：直接把 `renderReleaseNotes` 交给 `--notes-file` 会把 `release.yml`
+ * 写进草案的安装说明与容器镜像段落整段冲掉。
+ */
+async function writeMergedNotes(tag) {
+  if (!/^v\d+\.\d+\.\d+$/.test(tag)) fail(`--notes 要一个版本标签（v0.1.40），收到：${tag}`, USAGE);
+  if (!exec('git', ['rev-parse', '--verify', '--quiet', `refs/tags/${tag}`]).ok) {
+    fail(`本地没有标签 ${tag}`, 'git fetch --tags origin 之后再试');
+  }
+
+  const version = tag.slice(1);
+  const prevTag = previousTag(version);
+  const titles = readTitles(`${prevTag}..${tag}`);
+  const { notes } = await draftNotes(tag, titles, version);
+
+  const file = join(ROOT, `release-notes-${version}.md`);
+  writeFileSync(file, notes);
+
+  log(`上一个标签 ${prevTag}；草案 ${tag} 的正文已合并好并写到：`);
+  console.log(`  ${file}`);
+  console.log(
+    '\n（草案里的安装说明与容器镜像段落都在里面；核对后执行下面这条，然后删掉这个文件）\n',
+  );
+  console.log(`  gh release edit ${tag} --notes-file "${file}" --draft=false`);
+}
+
 // ── dry-run ────────────────────────────────────────────────────────────────
 
 function printPlan({ current, next, bump, branch, tag, prevTag, publish }) {
@@ -743,6 +833,13 @@ async function main() {
     return;
   }
 
+  // `--notes` 是流水线成功之后单独跑的一步：只读 `gh` + 写一个 md，不做任何 git 写操作，
+  // 也不读当前版本号（那时工作区里的版本号已经是新版了）。
+  if (args.notes) {
+    await writeMergedNotes(args.notes);
+    return;
+  }
+
   const current = readCurrentVersion();
   let next;
   try {
@@ -806,20 +903,15 @@ async function main() {
     return;
   }
 
-  // 手动收尾也走 `draftNotes`：只打印未合并的说明，操作者手抄一遍就等于把草案里的安装
-  // 说明整段丢掉。写成文件（`git status` 看得见、不在 `.scratch/`），再把命令指向它。
-  const notes = readTitles(`${prevTag}..${pushedTag}`);
-  const { notes: merged } = await draftNotes(pushedTag, notes, next);
-  const file = join(ROOT, `release-notes-${next}.md`);
-  writeFileSync(file, merged);
-
+  // 这里**只打印**，不等草案：草案是 tauri-action 上传时才创建的（20–40 分钟），此刻 poll
+  // 只会把「流水线刚开始」误报成失败。收尾是之后单独的一步（`--notes <tag>`）。
   console.log('');
-  log(`${pushedTag} 已推送，release.yml 正在构建（含 fix-updater-json）。`);
-  log('草案不会自己公开 —— 等它全部作业成功后再公布，否则应用内更新会拿到 403：');
+  log(`${pushedTag} 已推送，release.yml 正在构建。`);
+  log('草案不会自己公开。等这一轮**全部作业**成功 —— 特别是后置的 fix-updater-json，');
+  log('它把 latest.json 的资产地址改成公开下载地址；在它之前公布，应用内更新会拿到 403。');
   console.log('  gh run list --workflow=release.yml --limit 5');
-  console.log(`\n草案正文已合并好并写到：${file}`);
-  console.log('（草案里的安装说明与容器镜像段落都在里面；核对后执行下面这条，然后删掉这个文件）\n');
-  console.log(`  gh release edit ${pushedTag} --notes-file "${file}" --draft=false`);
+  console.log('\n成功之后，按标签生成说明（合并了草案里的安装说明）并公布：');
+  console.log(`  npm run release -- --notes ${pushedTag}`);
 }
 
 main().catch((err) => {
