@@ -226,12 +226,19 @@ export function mergeReleaseBody(body, section) {
 /**
  * 算出下一个版本号。
  *
- * - `patch` → 末段 +1（`0.1.39` → `0.1.40`，这是默认的快步迭代节奏）；
- * - `minor` → 中段 +1、末段归零（`0.1.39` → `0.2.0`）；
- * - `x.y.z` → 原样采用，但必须大于当前版本（发一个更低的版本号只可能是手误）。
+ * 本项目**长期停在 `0.1.x`，只累加最后一位，且没有上限**：`0.1.99` → `0.1.100` →
+ * `0.1.101` → … 是正常的一步，不存在「攒够再升 0.2.0」这回事，故没有 `minor` / `major`
+ * 这两档（曾经有 `minor`，会被当成非法入参报错并说明原因）。
+ *
+ * - 省略或 `patch` → 第三段 +1；
+ * - `x.y.z` → 原样采用，但必须严格大于当前版本。这是**逃生口**，用来修「标签打错成 0.1.42
+ *   而实际是 0.1.37」这类事故，不是日常发版路径。
+ *
+ * 末段比较按**段数值**而非字符串：`0.1.100` 比 `0.1.99` 新。任何一处退回字符串比较，
+ * 跨过三位数的那一步就会坏。
  *
  * @param {string} current 当前版本号，例如 `0.1.39`
- * @param {string} bump `patch` / `minor` / `x.y.z`
+ * @param {string} bump `patch` / `x.y.z`
  * @returns {string}
  */
 export function resolveNextVersion(current, bump) {
@@ -241,11 +248,16 @@ export function resolveNextVersion(current, bump) {
   const arg = bump === undefined || bump === null ? 'patch' : String(bump).trim();
 
   if (arg === 'patch') return `${now.major}.${now.minor}.${now.patch + 1}`;
-  if (arg === 'minor') return `${now.major}.${now.minor + 1}.0`;
+  if (arg === 'minor' || arg === 'major') {
+    throw new Error(
+      `本项目的版本只累加最后一位（长期 0.1.x，且没有上限）：用 patch / 省略参数，` +
+        `不要用 ${arg}`,
+    );
+  }
 
   const explicit = parseVersion(arg);
   if (!explicit) {
-    throw new Error(`版本参数只能是 patch / minor / x.y.z，收到：${arg === '' ? '（空）' : arg}`);
+    throw new Error(`版本参数只能是 patch 或显式 x.y.z，收到：${arg === '' ? '（空）' : arg}`);
   }
   const compare = (a, b) => a.major - b.major || a.minor - b.minor || a.patch - b.patch;
   if (compare(explicit, now) <= 0) {

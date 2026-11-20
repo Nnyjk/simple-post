@@ -111,20 +111,37 @@ test('空输入与全是发版提交：正文不是空字符串', () => {
   assert.equal(notes.trimEnd(), `## Simple Post v0.1.40\n\n${section}`);
 });
 
-test('解析版本号：patch / minor / 显式三条路', () => {
+test('解析版本号：patch（或省略）与显式逃生口两条路', () => {
   assert.equal(resolveNextVersion('0.1.39', 'patch'), '0.1.40');
   assert.equal(
     resolveNextVersion('0.1.39', undefined as unknown as string),
     '0.1.40',
     '缺省即 patch',
   );
-  assert.equal(resolveNextVersion('0.1.39', 'minor'), '0.2.0');
+  // 显式版本是逃生口：修「标签打错成 0.1.42」这类事故，不是日常路径，故只要求大于当前。
   assert.equal(resolveNextVersion('0.1.39', '0.2.3'), '0.2.3');
   assert.equal(resolveNextVersion('0.1.39', '1.0.0'), '1.0.0');
 });
 
+test('版本只累加最后一位且没有上限：跨三位数是正常一步', () => {
+  // 守的是「按段数值比，不是字符串比」：'0.1.100' < '0.1.99' 在字典序下成立，
+  // 任何一处退回字符串比较，跨过 99 → 100 的那一步就会坏。
+  assert.equal(resolveNextVersion('0.1.99', 'patch'), '0.1.100');
+  assert.equal(resolveNextVersion('0.1.100', 'patch'), '0.1.101');
+  assert.equal(resolveNextVersion('0.1.100', '0.1.101'), '0.1.101');
+  assert.throws(() => resolveNextVersion('0.1.100', '0.1.99'), /必须大于当前版本/);
+});
+
 test('非法版本参数报错', () => {
-  for (const bad of ['', 'major', '0.1', '0.1.40-rc1', 'v0.1.40', '0.1.39', '0.1.3', 'x']) {
+  // 没有 minor / major 这两档：项目长期停在 0.1.x，只累加最后一位。
+  for (const tier of ['minor', 'major']) {
+    assert.throws(
+      () => resolveNextVersion('0.1.39', tier),
+      /只累加最后一位/,
+      `${tier} 不是本项目的一条路，报错文案要说清版本规则`,
+    );
+  }
+  for (const bad of ['', '0.1', '0.1.40-rc1', 'v0.1.40', '0.1.39', '0.1.3', 'x']) {
     assert.throws(() => resolveNextVersion('0.1.39', bad), /版本/);
   }
   assert.throws(() => resolveNextVersion('not-a-version', 'patch'), /不是 x\.y\.z/);
