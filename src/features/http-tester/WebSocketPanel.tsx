@@ -49,6 +49,8 @@ export function WebSocketPanel({
   const [now, setNow] = useState(Date.now());
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  // 连接代次：文件读取与发送都是异步的，回调可能在连接（或页签）换掉之后才回来。
+  const connection = useRef(0);
 
   const phase = view?.phase ?? 'closed';
   const open = phase === 'open';
@@ -57,8 +59,10 @@ export function WebSocketPanel({
 
   // 连接边界清掉上一条发送失败：它说的是上一次连接（或上一个页签）里的事，留着会顶掉
   // 这次连接的 `view.error` —— 渲染里是 `sendError ?? view.error`。连接存活期间的发送
-  // 失败照旧可见，发送动作不改变 `phase`。
+  // 失败照旧可见，发送动作不改变 `phase`。代次一并推进，让还在路上的文件读取与发送
+  // 回调认出自己已经过期，别把上一次连接的错误在清除之后又写回来。
   useEffect(() => {
+    connection.current += 1;
     setSendError(null);
   }, [phase, tabId]);
 
@@ -78,17 +82,22 @@ export function WebSocketPanel({
   }, [frameCount, following]);
 
   const send = async (kind: 'text' | 'binary', data: string, base64?: string) => {
+    const gen = connection.current;
     setSendError(null);
     try {
       await sendWsFrame(tabId, kind, data, base64);
     } catch (e) {
+      // 连接已经换掉：这条失败属于上一次连接，写回来会遮住这次的 `view.error`。
+      if (gen !== connection.current) return;
       setSendError(e instanceof Error ? e.message : String(e));
     }
   };
 
   const sendFile = (file: File) => {
+    const gen = connection.current;
     const reader = new FileReader();
     reader.onload = () => {
+      if (gen !== connection.current) return;
       const result = typeof reader.result === 'string' ? reader.result : '';
       const comma = result.indexOf(',');
       if (comma < 0) {
@@ -97,7 +106,10 @@ export function WebSocketPanel({
       }
       void send('binary', '', result.slice(comma + 1));
     };
-    reader.onerror = () => setSendError('读取文件失败');
+    reader.onerror = () => {
+      if (gen !== connection.current) return;
+      setSendError('读取文件失败');
+    };
     reader.readAsDataURL(file);
   };
 
