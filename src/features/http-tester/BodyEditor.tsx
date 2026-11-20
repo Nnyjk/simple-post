@@ -10,6 +10,7 @@ import { FloatToolbar, type FloatToolbarAction } from '@/components/ui/float-too
 import { JsonTreeView } from '@/components/ui/json-tree-view';
 import { AlertTriangle, Check, Copy, Wand2, WrapText } from 'lucide-react';
 import { cn, tryFormatJson, type FormatResult } from '@/lib/utils';
+import { copyText } from '@/lib/clipboard';
 import { parseJsonTree } from '@/lib/json-tree';
 import { listVars } from '@/lib/url';
 import { useIsDark } from '@/lib/theme';
@@ -242,13 +243,7 @@ function JsonBody({
       flashTimer.current = null;
     }
     setCopyState('busy');
-    try {
-      if (!navigator.clipboard) throw new Error('剪贴板不可用');
-      await navigator.clipboard.writeText(value.content);
-      setCopyState('ok');
-    } catch {
-      setCopyState('fail');
-    }
+    setCopyState((await copyText(value.content)) ? 'ok' : 'fail');
     flashTimer.current = window.setTimeout(() => setCopyState('idle'), 1500);
   };
 

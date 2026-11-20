@@ -5,6 +5,7 @@
 import { useCallback, type RefObject } from 'react';
 import { sendPreparedRequest } from '@/lib/http';
 import { preparedToCurl, type PreparedRequest, type RequestProblem } from '@/lib/http-build';
+import { copyText } from '@/lib/clipboard';
 import { draftToPatch } from '@/stores/slices/crud-helpers';
 import { useAppStore } from '@/stores/app-store';
 import type { EndpointDraft, RequestSettings } from '@/stores/store-types';
@@ -306,15 +307,13 @@ export function useRequestActions({
     // 命令由 `prepared`（发送所用的那个对象）渲染，故不可能描述另一个请求。复制不属
     // 于校验路径，body 解析不了也照样给命令 —— 这是复制而非请求，拒绝只会碍事。
     const curl = preparedToCurl(prepared);
-    try {
-      await navigator.clipboard.writeText(curl);
-      setCurlFlash(true);
-      window.setTimeout(() => setCurlFlash(false), 1500);
-    } catch (err) {
-      // 权限被拒、非安全上下文等 —— 先打到 console（还没有 toast 组件），用户可退而
-      // 手动选中文本。
-      console.error('[HttpTester] copy as cURL failed:', err);
+    // 两条通道都失败：先打到 console（还没有 toast 组件），用户可退而手动选中文本。
+    if (!(await copyText(curl))) {
+      console.error('[HttpTester] copy as cURL failed: clipboard unavailable');
+      return;
     }
+    setCurlFlash(true);
+    window.setTimeout(() => setCurlFlash(false), 1500);
   }, [prepared, setCurlFlash]);
 
   return { handleSend, handleSave, handleCopyCurl };

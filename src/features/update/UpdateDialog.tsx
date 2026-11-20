@@ -23,6 +23,7 @@ import { isUpdaterAvailable } from '@/lib/updater';
 import { IS_TAURI_SHELL } from '@/lib/tauri-commands';
 import { mirrorGithubUrl } from '@/lib/github-mirror';
 import { formatDate, relativeTime } from '@/lib/update/time';
+import { copyText } from '@/lib/clipboard';
 import { cn } from '@/lib/utils';
 import { ReleaseNotes } from './ReleaseNotes-lazy';
 
@@ -52,17 +53,14 @@ function CommandLine({ command }: { command: string }) {
   );
 
   const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(command);
-      setCopied(true);
-      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
-      timerRef.current = window.setTimeout(() => {
-        setCopied(false);
-        timerRef.current = null;
-      }, COPY_RESET_MS);
-    } catch {
-      // 剪贴板不可用（权限被拒、非安全上下文）时保持原样：用户仍能选中 <pre> 手动复制。
-    }
+    // 剪贴板不可用时保持原样：用户仍能选中 <pre> 手动复制。
+    if (!(await copyText(command))) return;
+    setCopied(true);
+    if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+    timerRef.current = window.setTimeout(() => {
+      setCopied(false);
+      timerRef.current = null;
+    }, COPY_RESET_MS);
   };
 
   return (

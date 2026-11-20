@@ -7,6 +7,7 @@ import { Check, Copy, Wand2, WrapText } from 'lucide-react';
 import { useIsDark } from '@/lib/theme';
 import { lightCodeTheme } from '@/lib/codemirror-themes';
 import { cn, type FormatResult } from '@/lib/utils';
+import { copyText } from '@/lib/clipboard';
 import { parseJsonTree } from '@/lib/json-tree';
 import { FloatToolbar, type FloatToolbarAction } from '@/components/ui/float-toolbar';
 import { JsonTreeView } from '@/components/ui/json-tree-view';
@@ -81,17 +82,10 @@ export function PrettyView({
   /** 先等剪贴板给出结论再点亮按钮：写失败却显示「已复制」，用户会以为内容已经在剪贴板里。 */
   const copyAll = async () => {
     const target = body;
-    try {
-      if (!navigator.clipboard) throw new Error('剪贴板不可用');
-      await navigator.clipboard.writeText(target);
-      // 写完时响应体已经换了：这条结论说的是旧内容，不许落到新响应的工具条上。
-      if (latestBody.current !== target) return;
-      setCopyState('ok');
-    } catch {
-      if (latestBody.current !== target) return;
-      setCopyState('fail');
-    }
+    const copied = await copyText(target);
+    // 写完时响应体已经换了：这条结论说的是旧内容，不许落到新响应的工具条上。
     if (latestBody.current !== target) return;
+    setCopyState(copied ? 'ok' : 'fail');
     if (flashTimer.current !== null) window.clearTimeout(flashTimer.current);
     flashTimer.current = window.setTimeout(() => setCopyState('idle'), 1500);
   };

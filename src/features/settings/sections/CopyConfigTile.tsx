@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Check, Copy } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { copyText } from '@/lib/clipboard';
 
 type CopyState = 'idle' | 'success' | 'error';
 
@@ -51,24 +52,7 @@ export function CopyConfigTile({ icon, name, description, configJson }: CopyConf
       window.clearTimeout(timerRef.current);
       timerRef.current = null;
     }
-    try {
-      if (navigator?.clipboard?.writeText) {
-        await navigator.clipboard.writeText(configJson);
-      } else {
-        // 没有异步剪贴板时改用临时 textarea（较旧的 Tauri webview）。
-        const ta = document.createElement('textarea');
-        ta.value = configJson;
-        ta.style.position = 'fixed';
-        ta.style.opacity = '0';
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        document.body.removeChild(ta);
-      }
-      setCopyState('success');
-    } catch {
-      setCopyState('error');
-    }
+    setCopyState((await copyText(configJson)) ? 'success' : 'error');
     scheduleReset();
   };
 

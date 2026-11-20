@@ -11,6 +11,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight, Copy, Eraser } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { copyText } from '@/lib/clipboard';
 import { useAppStore } from '@/stores/app-store';
 
 /** 展开时多久拉一次日志。与状态轮询同一个节奏，但**不**并进它。 */
@@ -56,13 +57,12 @@ export function McpLogPanel() {
 
   async function handleCopy() {
     if (visible.length === 0) return;
-    try {
-      await navigator.clipboard.writeText(visible.join('\n'));
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
-    } catch (e) {
-      console.error('[MCP] copy log failed', e);
+    if (!(await copyText(visible.join('\n')))) {
+      console.error('[MCP] copy log failed: clipboard unavailable');
+      return;
     }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1500);
   }
 
   const startedAt = daemonLogs?.startedAtMs ?? null;

@@ -9,6 +9,7 @@
  */
 
 import { useAppStore } from '@/stores/app-store';
+import { copyText } from '@/lib/clipboard';
 import type { EndpointDetail, Project, ResourceNode } from '@/types/domain';
 
 export type CommandSection = '导航' | '命令';
@@ -200,9 +201,7 @@ export function buildCommands(): Command[] {
         section: '命令',
         keywords: ['copy', 'url', '复制', epDetail.url, ep.name],
         run: () => {
-          if (typeof navigator !== 'undefined' && navigator.clipboard) {
-            void navigator.clipboard.writeText(epDetail.url);
-          }
+          void copyText(epDetail.url);
         },
       });
     }
