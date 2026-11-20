@@ -8,11 +8,13 @@
  *   →（`--publish`）等 release.yml **全部作业**成功 → 填发布说明 → 取消草案
  *
  * Usage:
- *   npm run release                      # 默认 patch：0.1.x 的 x +1
- *   npm run release -- minor             # 中段 +1（0.2.0）
- *   npm run release -- 0.2.3             # 显式版本
+ *   npm run release                      # 默认 patch：只累加最后一位（0.1.39 → 0.1.40）
  *   npm run release -- patch --dry-run   # 只打印计划与发布说明，一个字节都不写
  *   npm run release -- patch --publish   # 等流水线成功并取消草案（真正发出去）
+ *   npm run release -- 0.1.42            # 逃生口：显式版本，修打错的标签
+ *
+ * 版本规则：长期停在 `0.1.x`，只累加最后一位且没有上限（`0.1.99` → `0.1.100` 是正常
+ * 一步）；没有 `minor` / `major` 这两档，`scripts/release-core.mjs` 会把它们当场拒掉。
  *
  * 为什么 `--publish` 要等 `fix-updater-json`：`release.yml` 的三个矩阵作业用
  * `releaseDraft: true` 出包，tauri-action 会把 `latest.json` 的 `platforms.*.url`
@@ -93,9 +95,12 @@ const VERSION_SOURCES = [
   },
 ];
 
-const USAGE = `用法：npm run release -- [patch|minor|<x.y.z>] [--dry-run] [--publish]
+const USAGE = `用法：npm run release -- [patch|<x.y.z>] [--dry-run] [--publish]
 
-  （默认 patch：0.1.x 的 x 自增）
+  默认 patch：本项目的版本长期停在 0.1.x，只累加最后一位，无上限
+  （0.1.99 → 0.1.100 是正常一步，不存在「攒够升 0.2.0」）。
+
+  显式 x.y.z 是逃生口（修打错的标签），必须大于当前版本，不是日常路径。
 
   --dry-run   只打印计划与生成的发布说明，不建分支、不提交、不打标签、不调 gh 写命令
   --publish   标签推送后等 release.yml 全部作业成功，填好说明并取消草案`;
@@ -140,7 +145,7 @@ const formatCommand = (cmd, args) => [cmd, ...args].join(' ');
  *
  * @returns {{ ok: boolean, status: number, stdout: string, stderr: string }}
  */
-function exec(cmd, args, { capture = false, timeoutMs = 0 } = {}) {
+function exec(cmd, args, { capture = false, timeoutMs = 0, quiet = false } = {}) {
   const res = spawnSync(cmd, args, {
     cwd: ROOT,
     stdio: capture ? ['ignore', 'pipe', 'pipe'] : ['inherit', 'inherit', 'pipe'],
@@ -152,7 +157,8 @@ function exec(cmd, args, { capture = false, timeoutMs = 0 } = {}) {
   const stdout = res.stdout ?? '';
   const stderr = res.stderr ?? '';
   // `stdio: 'inherit'` 时 stderr 仍然被 pipe 住，以便这里统一决定要不要显示。
-  if (stderr.length > 0) process.stderr.write(stderr);
+  // `quiet` 只用于轮询探针：它按设计会反复拿到同一条「还没有」的错误。
+  if (stderr.length > 0 && !quiet) process.stderr.write(stderr);
   if (res.error) {
     fail(`无法执行 ${cmd}：${res.error.message}`, `${cmd} 是否在 PATH 上？`);
   }
@@ -196,6 +202,30 @@ async function poll(what, fn, { timeoutMs, hint }) {
 }
 
 // ── 参数与只读事实 ─────────────────────────────────────────────────────────
+
+/**
+ * npm 会把脚本名之后的 `--dry-run` / `--publish` 当成自己的配置吃掉（`npm_config_dry_run=true`），
+ * 脚本的 `process.argv` 里一个都看不到 —— 于是 `npm run release --dry-run` 会**真的发一次版**。
+ * 只有 `npm run release -- --dry-run` 才透传。为了不让人踩这个坑，把 npm 转发到环境里的同名
+ * 配置折回参数列表，并说明正确写法。
+ */
+function argvWithNpmConfig(argv) {
+  const extra = [];
+  for (const [env, flag] of [
+    ['npm_config_dry_run', '--dry-run'],
+    ['npm_config_publish', '--publish'],
+    ['npm_config_help', '--help'],
+  ]) {
+    const value = process.env[env];
+    if (value === undefined || value === 'false') continue;
+    if (argv.includes(flag)) continue;
+    extra.push(flag);
+    warn(
+      `npm 吃掉了 ${flag}（它把它当自己的配置）；已按环境变量补回。正确写法是 npm run release -- ${flag}`,
+    );
+  }
+  return [...argv, ...extra];
+}
 
 function parseArgs(argv) {
   const out = { bump: 'patch', dryRun: false, publish: false, help: false };
@@ -286,12 +316,16 @@ function applyVersionSources(from, to) {
 /**
  * 让两个锁文件跟上新版本号。
  *
- * `cargo metadata --no-deps` 不做依赖解析、不联网，只让 cargo 重写
- * `Cargo.lock` 里工作区那几个 crate 的版本行；`npm install --package-lock-only`
- * 同理由 npm 重写 `package-lock.json`。手改锁文件迟早会漏一个 crate。
+ * `cargo metadata` 会按 `Cargo.toml` 重算并写回 `Cargo.lock` 里工作区那几个 crate 的版本行；
+ * `npm install --package-lock-only` 同理由 npm 重写 `package-lock.json`。手改锁文件迟早会漏
+ * 一个 crate。
+ *
+ * **不能用 `--no-deps`**：那一档只读元数据、根本不落盘，`Cargo.lock` 一个字节都不动，
+ * 于是 `verifyDiff` 每次都判定「Cargo.lock 没有变化」而中止发版。加 `--offline` 之外不加
+ * 别的：依赖若被顺手重解，`verifyDiff` 的版本行白名单会拦下来（这正是它存在的理由）。
  */
 function refreshLockfiles() {
-  must('cargo', ['metadata', '--no-deps', '--format-version', '1'], { capture: true });
+  must('cargo', ['metadata', '--format-version', '1'], { capture: true });
   runNpm(['install', '--package-lock-only']);
 }
 
@@ -419,8 +453,37 @@ function createPr(branch, next, titles, current) {
   return info;
 }
 
-/** 等 PR 上的检查结束。`--fail-fast` 让第一个红勾立刻回报，不必等满整条矩阵。 */
-function awaitChecks(prNumber) {
+/**
+ * 等 PR 上的检查结束。`--fail-fast` 让第一个红勾立刻回报，不必等满整条矩阵。
+ *
+ * 两个坑：`gh pr checks` 在 check-suite 还没挂到 head 提交上时以
+ * `no checks reported on the '<branch>' branch` 退出非零，而 `gh pr create` 刚返回的那几秒
+ * 正是这个窗口 —— 直接 `--watch` 会把「还没开始」当成「失败了」。故先静默轮询到真有检查，
+ * 再进 watch；watch 期间 pending 归零才退出，故退出码非零就是真有红勾。
+ */
+async function awaitChecks(prNumber) {
+  await poll(
+    `PR #${prNumber} 的检查`,
+    () => {
+      // 退出码不能用：检查还在跑时 `gh pr checks` 以 8 退出（`Checks pending`），
+      // 「还没挂上」是空 stdout。判据只有一个 —— 拿得到至少一条检查。
+      const { stdout } = exec('gh', ['pr', 'checks', String(prNumber), '--json', 'name'], {
+        capture: true,
+        quiet: true,
+      });
+      try {
+        const list = JSON.parse(stdout);
+        return Array.isArray(list) && list.length > 0;
+      } catch {
+        return false;
+      }
+    },
+    {
+      timeoutMs: RUN_APPEAR_TIMEOUT_MS,
+      hint: 'PR 建好了但一个检查都没挂上：CI 的 on: pull_request 触发了吗？gh pr view 看一眼',
+    },
+  );
+
   log(`等 PR #${prNumber} 的检查（CI 三个必需检查；docker 视改动范围可能被跳过）`);
   const res = exec(
     'gh',
@@ -603,7 +666,7 @@ function printPlan({ current, next, bump, branch, tag, prevTag, publish }) {
     'git fetch --tags origin',
     'git checkout -b ' + branch,
     `# 改写 ${VERSION_SOURCES.map((s) => s.file).join('、')}`,
-    'cargo metadata --no-deps --format-version 1',
+    'cargo metadata --format-version 1',
     'npm install --package-lock-only',
     'git diff --stat HEAD   # 只许出现预期六个文件，锁文件只许动版本行',
     `git add ${EXPECTED_FILES.join(' ')}`,
@@ -629,7 +692,7 @@ function printPlan({ current, next, bump, branch, tag, prevTag, publish }) {
     );
   }
 
-  const label = bump === 'patch' ? 'patch' : bump === 'minor' ? 'minor' : `显式版本 ${bump}`;
+  const label = bump === 'patch' ? 'patch（末位 +1）' : `显式版本 ${bump}（逃生口）`;
   console.log('');
   log(`当前 ${current} → 目标 ${next}（${label}）`);
   log(`分支 ${branch}；标签 ${tag}；上一个标签 ${prevTag}`);
@@ -639,7 +702,7 @@ function printPlan({ current, next, bump, branch, tag, prevTag, publish }) {
     console.log(`  ${source.file.padEnd(28)} ${current} → ${next}   （${source.describe}）`);
   }
   console.log(
-    `  ${'Cargo.lock'.padEnd(28)} cargo metadata --no-deps --format-version 1 重写工作区 crate 的版本行`,
+    `  ${'Cargo.lock'.padEnd(28)} cargo metadata --format-version 1 重写工作区 crate 的版本行`,
   );
   console.log(`  ${'package-lock.json'.padEnd(28)} npm install --package-lock-only 重写根包版本`);
   console.log('\n将执行：');
@@ -653,7 +716,7 @@ function printPlan({ current, next, bump, branch, tag, prevTag, publish }) {
 async function main() {
   let args;
   try {
-    args = parseArgs(process.argv.slice(2));
+    args = parseArgs(argvWithNpmConfig(process.argv.slice(2)));
   } catch (err) {
     fail(err.message, USAGE);
   }

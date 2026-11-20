@@ -66,5 +66,5 @@ export function renderReleaseNotes(titles: string[], version: string): string;
 /** 把改动小节嵌进 draft release 现有正文的 `### 这一版的改动` 位置。 */
 export function mergeReleaseBody(body: string, section: string): string;
 
-/** `patch` / `minor` / 显式 `x.y.z` → 下一个版本号；非法入参抛错。 */
+/** `patch`（或省略）/ 显式 `x.y.z` → 下一个版本号；`minor` 与非法入参抛错。 */
 export function resolveNextVersion(current: string, bump: string): string;
