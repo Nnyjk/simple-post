@@ -29,8 +29,7 @@ pub(crate) async fn request_settings_put(
     Json(body): Json<crate::domain::RequestSettings>,
 ) -> Result<Json<Value>, HttpErrorResponse> {
     // PUT 语义：整体替换。与 Tauri 命令的 `RequestSettingsPatch` 不同，这里收整个结构体
-    // 并原样写回。想要局部更新的调用方可以退回 `/api/preferences`
-    // （`{"key": "request_settings", "value": ...}`）。
+    // 并原样写回。想要局部更新的调用方可以退回偏好项配置接口 `/api/preferences`（键为 request_settings）。
     //
     // `RequestSettings` 带 `#[serde(default)]`，故省略某字段的 body 会被接受，且该字段
     // 被重置为默认值而非被拒。这是为了读取旧版本写下的 blob 而刻意做的取舍；见该字段

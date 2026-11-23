@@ -35,7 +35,7 @@ fn cell(url: &str) -> ModuleBaseUrl {
 fn list_by_project_returns_seeded_envs() {
     let pool = fresh_pool();
     let envs = db::with_conn(&pool, |c| list_by_project(c, "p_demo")).unwrap();
-    // fixtures seed 3 envs (dev/staging/prod) under p_demo
+    // fixtures 为 p_demo 播种了 3 个环境（dev/staging/prod）
     assert_eq!(envs.len(), 3);
 }
 
@@ -175,7 +175,7 @@ fn set_module_base_url_writes_one_cell_and_leaves_its_siblings() {
         "http://localhost:4000/demo/auth",
         "别的模块那一格必须不动"
     );
-    // And durable, not merely echoed.
+    // 验证落库持久化，不仅是回显正确。
     let got = db::with_conn(&pool, |c| get(c, "env_dev")).unwrap();
     assert_eq!(got.module_base_urls.get("m_pay").unwrap().url, "http://pay");
 }
@@ -409,7 +409,7 @@ fn rename_var_moves_key_and_keeps_its_value() {
         "sibling keys must be untouched"
     );
 
-    // And it must be durable, not just correct in the echoed row.
+    // 验证落库持久化，不仅是回显正确。
     let got = db::with_conn(&pool, |c| get(c, "env_dev")).unwrap();
     assert_eq!(
         got.variables.get("access_token").unwrap(),
@@ -430,8 +430,7 @@ fn rename_var_missing_from_key_is_validation_error() {
 
 #[test]
 fn rename_var_existing_to_key_refuses_and_keeps_both_keys() {
-    // Renaming `token` -> `env` would clobber a live variable, so the
-    // call must be refused and the stored map left exactly as it was.
+    // 把 `token` 改名为 `env` 会覆盖已有变量，调用必须被拒绝且原 map 保持不变。
     let pool = fresh_pool();
     let err = db::with_tx(&pool, |c| rename_var(c, "env_dev", "token", "env")).unwrap_err();
     assert_eq!(err.code(), "validation");

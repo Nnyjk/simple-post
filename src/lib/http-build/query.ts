@@ -27,7 +27,7 @@ export function appendQueryString(
     const value = resolveVarsWithMissing(p.value, pool);
     missing.add(value.missing);
     // 空值判断跑在*解析后*的值上：解析为 "" 的变量与手输的空值同样丢掉该参数
-    if (value.value === '') continue; // spec: skip empty keys/values
+    if (value.value === '') continue; // 规范：忽略空 key / 空 value
     // 空格编码成 `%20`（与 JS 的 `encodeURIComponent` 同字符集，不是 form 编码的 `+`）
     parts.push(`${percentEncode(p.key)}=${percentEncode(value.value)}`);
   }

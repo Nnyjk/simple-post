@@ -3,7 +3,8 @@
  * 外加「每次调用都带 content-type」这条横切断言。
  *
  * 与 `tauri-commands-routes-tree.test.ts` 同构，断言 `(method, url, body)`。
- */ import { describe, it, beforeEach, after } from 'node:test';
+ */
+import { describe, it, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { COMMANDS, invokeCmd } from '../tauri-commands';

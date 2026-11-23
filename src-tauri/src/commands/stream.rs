@@ -1,5 +1,5 @@
 //! 流式传输的 Tauri 命令：SSE（`stream_request` / `stream_cancel`）与 WebSocket
-//! （`ws_connect` / `ws_send` / `ws_close`）。
+//! （含 `ws_connect` / `ws_send` / `ws_close` 三个会话命令）。
 //!
 //! 事件经 `tauri::ipc::Channel` 逐条推给渲染层；`Channel` 类型只出现在本 crate，
 //! core 与 server 只认事件结构本身。

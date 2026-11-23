@@ -56,7 +56,7 @@ fn resolve_endpoint_basic_auth_injects_authorization_header() {
         .iter()
         .find(|(k, _)| k.eq_ignore_ascii_case("authorization"))
         .expect("Authorization header must be present");
-    // "alice:wonder" base64 → "YWxpY2U6d29uZGVy"
+    // 对 "alice:wonder" 进行 base64 编码后的期望值为 "YWxpY2U6d29uZGVy"
     assert!(auth.1.starts_with("Basic "));
     assert!(auth.1.contains("YWxpY2U6d29uZGVy"));
 }
@@ -110,12 +110,12 @@ fn resolve_endpoint_apikey_query_appends_to_url() {
     };
     let r = resolve_endpoint(&ep, Some(&env), Some(&in_module_a())).unwrap();
     assert!(r.url.contains("access_token=Q-VAL"));
-    // And there's NO Authorization header.
+    // 且不应存在 Authorization 请求头。
     assert!(r
         .headers
         .iter()
         .all(|(k, _)| !k.eq_ignore_ascii_case("authorization")));
-    // And the URL doesn't carry an apikey-shaped header.
+    // 且 URL query 不会导致产生形如 access_token 的头字段。
     assert!(r
         .headers
         .iter()
@@ -148,7 +148,7 @@ fn resolve_endpoint_user_authorization_wins_over_auth_config() {
         oauth2: None,
     };
     let r = resolve_endpoint(&ep, Some(&env), Some(&in_module_a())).unwrap();
-    // The user's "Bearer user-set" should win.
+    // 用户显式声明的 "Bearer user-set" 具有更高优先级。
     let auth = r
         .headers
         .iter()
@@ -167,9 +167,8 @@ fn resolve_endpoint_user_authorization_wins_over_auth_config() {
 /// `authCode` 里的 `{{var}}` 不会被解出来，而解出来的那份配置也不会进任何被回显的
 /// 结构体 —— `api_resolve_endpoint` 回显的 `auth` 就是这份未替换的载荷。
 ///
-/// 样本 `fixtures/oauth2-config-parity.json` 钉住「哪些字段被替换」这条规则，两侧读取器
-/// 是 `crates/simple-post-core/src/oauth2/config_parity_test.rs` 与
-/// `src/lib/__tests__/oauth2-config-parity.test.ts`。
+/// 样本 `fixtures/oauth2-config-parity.json` 钉住字段替换规则，由两侧测试共同读取：
+/// 分别为核心库测试 `crates/simple-post-core/src/oauth2/config_parity_test.rs` 与前端测试 `src/lib/__tests__/oauth2-config-parity.test.ts`。
 #[test]
 fn the_oauth2_payload_is_left_alone_by_the_resolver() {
     let mut env = empty_env();

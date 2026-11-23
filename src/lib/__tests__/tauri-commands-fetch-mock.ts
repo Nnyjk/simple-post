@@ -6,7 +6,7 @@
  */
 export interface CapturedCall {
   url: string;
-  /** String for easier assertions; `undefined` when the request had no body. */
+  /** 字符串形式方便断言；请求无 body 时为 `undefined`。 */
   body: string | undefined;
   method: string;
   contentType: string | undefined;

@@ -6,8 +6,8 @@
  * 挂载两处，一份实现：工作区把它渲染进标签条，无项目的 `SettingsSurface` 则把同一个组件铺满
  * 整窗供欢迎页用。这是安全的，因为下面的一切都从 store 读而非吃 props。
  *
- * 环境分区在这条链上还要再往下一层：本面板只决定显示哪个分区，该分区自己的 store 接线住在
- * `ProjectEnvSection`，因为*项目标签*也把它当作自己的一层挂载。
+ * 环境分区配置进一步下沉：本面板仅调度分区切换，环境分区的 store 状态绑定由
+ * `ProjectEnvSection` 管理，项目标签页亦挂载同一组件。
  */
 
 import { useRef } from 'react';
@@ -117,9 +117,8 @@ export function SettingsPanel() {
   // 左栏「关于」项的红点：判据与「可更新」行一致。点「稍后再说」不清它。
   const updateAvailable = useAppStore((s) => s.updateInfo?.available === true);
 
-  // `SettingsPanel` 不再读别的。环境分区的 store 接线 —— 哪些环境属于当前项目、哪些模块是
-  // 模块地址表的行轴，以及那几组环境动作 —— 住在 `ProjectEnvSection`，因为项目标签挂载的
-  // 正是同一份分区。改在这里拼这些 props，就等于让那些规则有第二份副本。
+  // `SettingsPanel` 不再读取其他状态。环境分区的 store 状态绑定（项目环境过滤、
+  // 模块地址表行轴、环境操作动作）收拢于 `ProjectEnvSection`，供设置与项目标签页复用。
   const mainRef = useRef<HTMLElement>(null);
 
   // `activeSection` 变化时给当前分区做交叉淡入。外层包装带 `key={activeSection}`，React

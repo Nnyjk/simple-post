@@ -18,8 +18,7 @@ use super::router::{build_router, WebState};
 /// `auto_start_daemon` 为 `Some(bool)` 时 CLI 已给定答案，`None` 时由持久化的 `mcp.auto_start`
 /// 行决定。在这里解析而非在 `main.rs`：那边会另开一个 `db::init()` 池只为读一个 preference。
 /// **MCP 的端点是守护进程自己的监听端口**，由持久化的 `mcp.http_config` 决定：守护进程启动时
-/// 把那一行的绑定地址、端口、挂载路径与两张白名单读进命令行（见
-/// `daemon_supervisor::daemon_cli_args`）。
+/// 把那一行的绑定地址、端口、挂载路径与两张白名单读进命令行（参数拼装见 `daemon_supervisor::daemon_cli_args`）。
 ///
 /// 主端口**不**提供 MCP，故本进程不再另开一个「只服务 MCP」的监听器：那个监听器会抢走
 /// 配置里写的端口（守护进程绑不上那个端口），而且它绑的是 Web 主机的地址，与配置里的
@@ -122,7 +121,7 @@ pub fn default_data_dir() -> Result<PathBuf, AppError> {
 }
 
 // -------------------------------------------------------------------------
-// Tests
+// 测试
 // -------------------------------------------------------------------------
 
 #[cfg(test)]

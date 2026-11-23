@@ -1,14 +1,9 @@
 #!/usr/bin/env node
-// scripts/mcp-repl.mjs — manual REPL for the Simple Post MCP daemon.
+// Simple Post MCP 守护进程交互式 REPL：从 stdin 按行读取 JSON-RPC 帧并转发至守护进程。
 //
-// Reads JSON-RPC frames (one per line) from stdin and forwards them to the
-// running daemon at http://127.0.0.1:<port>/mcp, printing each response on
-// stdout. Lets you poke at the 48 tools interactively:
-//
-//   npm run mcp:repl                   # uses port_registry to discover
-//   npm run mcp:repl -- --port=41923   # explicit port (debug)
-//
-// Useful while developing new tools or debugging the proxy.
+// 用法：
+//   npm run mcp:repl                   # 通过端口文件自动发现
+//   npm run mcp:repl -- --port=41923   # 指定端口调试
 
 import process from 'node:process';
 import { createInterface } from 'node:readline';
@@ -16,7 +11,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-// ----- Resolve port ---------------------------------------------------------
+// ── 解析端口 ──────────────────────────────────────────────────────────────
 function portFilePath() {
   const base =
     process.env.SIMPLE_POST_DATA_DIR ||
@@ -52,7 +47,7 @@ if (port === null) {
 const url = `http://127.0.0.1:${port}/mcp`;
 console.error(`[mcp-repl] POSTing to ${url} — type JSON-RPC frames, Ctrl-C to exit`);
 
-// ----- Stream stdin → HTTP → stdout -----------------------------------------
+// ── 将 stdin 经由 HTTP 流式转发至 stdout ──────────────────────────────────
 const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
 rl.on('line', async (line) => {
   const trimmed = line.trim();

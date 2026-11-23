@@ -28,7 +28,7 @@ import { fileContentType, readFileAsBase64 } from './model/fileBytes';
  */
 
 // ============================================================
-// x-www-form-urlencoded
+// x-www-form-urlencoded 表单
 // ============================================================
 
 /**

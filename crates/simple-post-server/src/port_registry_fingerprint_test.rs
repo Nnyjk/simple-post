@@ -1,8 +1,7 @@
 //! 端口文件里那条配置指纹的回归网。
 //!
 //! `port_registry.rs` 的同级 `#[path]` 模块（以 `mod fingerprint_tests` 挂载）。
-//! 全部是对纯函数的断言：不设环境变量、不写文件，故不会与别的测试抢
-//! `SIMPLE_POST_DATA_DIR`。
+//! 全部是对纯函数的断言：不设环境变量、不写文件，故不会与别的测试争抢数据目录环境变量 `SIMPLE_POST_DATA_DIR`。
 
 use super::{parse_entry, serialize_entry, PortRecord, CONFIG_FINGERPRINT_KEY};
 

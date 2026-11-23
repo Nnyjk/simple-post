@@ -25,7 +25,7 @@ function setDataTransfer(e: ReactDragEvent, payload: DragPayload) {
 }
 
 export interface TreeDndBindings {
-  /** The active project's nodes — already filtered by `rootId`. */
+  /** 当前激活项目的节点列表 —— 已按 `rootId` 过滤。 */
   nodes: ResourceNode[];
   activeProjectId: string | null;
   moveNodes: (nodeIds: string[], parentId: string | null, index: number) => void;

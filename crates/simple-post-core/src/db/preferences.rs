@@ -9,8 +9,6 @@ use serde::{de::DeserializeOwned, Serialize};
 
 use crate::error::AppError;
 
-// 读。
-
 /// 按键读一个偏好。键不存在时为 `Ok(None)`，故调用方无需另发一次「是否存在」的查询就能退回默认值。
 ///
 /// 存下的值对 `T` 而言不是合法 JSON 时为 `AppError::Db`。
@@ -27,8 +25,6 @@ pub fn get<T: DeserializeOwned>(conn: &mut Connection, key: &str) -> Result<Opti
         None => Ok(None),
     }
 }
-
-// 写。
 
 /// Upsert 一个偏好。值经 serde 做 JSON 编码，故任何 `Serialize` 类型都能存。
 ///
@@ -98,8 +94,8 @@ pub mod keys {
     /// 启动路径都不再拉起守护进程；该键由桌面与 `serve-web` 两种形态共用。
     pub const MCP_AUTO_START: &str = "mcp.auto_start";
 
-    /// `"mcp.policy"` → string。**默认 `read_only`。** 用户在设置面板里选定的全局 MCP 能力档位
-    /// （`"read_only"` / `"safe_write"` / `"full_access"`）。
+    /// `"mcp.policy"` → string。**默认 `read_only`。** 用户在设置面板选定的全局 MCP 能力档位
+    /// （可选 `"read_only"`、`"safe_write"`、`"full_access"` 三档）。
     ///
     /// 行缺失即解析为 `read_only`，故在用户提高档位之前，AI 客户端可以 list 与 get，但不能改动
     /// 任何东西。

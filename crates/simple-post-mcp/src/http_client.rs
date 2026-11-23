@@ -1,4 +1,4 @@
-// crates/simple-post-mcp/src/http_client.rs
+// HTTP 客户端实现：crates/simple-post-mcp/src/http_client.rs
 //
 // 访问运行中的 `simple-post serve-web` 的 `reqwest::Client` 薄封装，
 // 持有 bearer 密码，调用方不必逐个方法往下传。

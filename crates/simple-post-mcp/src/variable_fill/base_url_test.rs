@@ -347,17 +347,13 @@ fn join_base_url_inserts_separator_when_missing() {
 
 // ---- collapse_url_slashes ------------------------------------------
 //
-// The join/substitute ordering is deliberate —an environment's own base
-// URL may be templated, so `{{var}}` must resolve *after* the join to be
-// able to see it. The price is that `join_base_url` inserts a separator
-// before it knows what `{{var}}` becomes, and a value already starting
-// with `/` turns that separator into a `//`:
-// `http://host:9200/{{var}}` → `http://host:9200//api`, a different route
-// to most servers. `collapse_url_slashes` is the post-substitution pass.
+// 故意维持「先拼接后替换」的顺序：环境自带的 base URL 本身可能含有模板变量，
+// 变量 `{{var}}` 必须在拼接后解析才能感知到。代价是 `join_base_url` 在不知道变量展开值之前
+// 会插入分隔符，若变量值本身以 `/` 开头就会形成 `//`（例如 `http://host:9200/{{var}}` 变成
+// `http://host:9200//api`，对多数服务端而言是不同路由）。`collapse_url_slashes` 即负责替换后的修复遍历。
 //
-// These cases mirror `collapseUrlSlashes` in `src/lib/__tests__/url.test.ts`
-// one-for-one; if the two ever disagree the preview and the request that
-// actually goes out describe different URLs.
+// 以下测试用例与 `src/lib/__tests__/url.test.ts` 中的 `collapseUrlSlashes` 逐一对应；
+// 若两边不一致，会导致预览展示与真实发送的 URL 出现偏差。
 
 #[test]
 fn collapse_url_slashes_repairs_join_boundary() {
@@ -365,7 +361,7 @@ fn collapse_url_slashes_repairs_join_boundary() {
         collapse_url_slashes("http://host:9200//api"),
         "http://host:9200/api"
     );
-    // Already clean: must be idempotent, not eat the separator.
+    // 已经是规范路径时保持幂等，不误删分隔符。
     assert_eq!(
         collapse_url_slashes("http://host:9200/api"),
         "http://host:9200/api"
@@ -400,7 +396,7 @@ fn collapse_url_slashes_keeps_protocol_relative_reference() {
 
 #[test]
 fn collapse_url_slashes_leaves_query_and_fragment_alone() {
-    // `//` inside a query value is payload (a nested URL), not a path.
+    // 查询参数内部的 `//` 属于参数值（如嵌套 URL），并非路径分隔符，不予收拢。
     assert_eq!(
         collapse_url_slashes("http://host/x?redirect=https://a//b#frag//ment"),
         "http://host/x?redirect=https://a//b#frag//ment"

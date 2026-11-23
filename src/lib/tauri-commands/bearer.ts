@@ -10,7 +10,8 @@
  *
  * - `localStorage` 对同源 XSS 可读；Postman / Insomnia / dbx 这类独立客户端
  *   （无按用户会话）接受同一暴露面。
- */ export const WEB_BEARER_STORAGE_KEY = 'simple-post.web.bearer';
+ */
+export const WEB_BEARER_STORAGE_KEY = 'simple-post.web.bearer';
 
 export function writeBearerToStorage(token: string): void {
   try {

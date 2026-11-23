@@ -42,7 +42,7 @@ function resolveAlias(spec: string, fromFile: string): string | null {
   return null; // bare package import
 }
 
-/** Module specifiers imported by a file, from both static and type imports. */
+/** 文件导入的模块标识符（含静态 import 与类型 import）。 */
 function importsOf(file: string): string[] {
   const src = readFileSync(file, 'utf8');
   const specs: string[] = [];

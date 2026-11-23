@@ -28,7 +28,7 @@ import { createUiDraftEndpoints } from '../slices/ui-draft-endpoints';
 import type { NewItemDraft } from '../store-types';
 import type { ResourceNode } from '@/types/domain';
 
-/** What `addNode` was asked to create, captured for assertions. */
+/** 捕获 `addNode` 调用实参以供断言。 */
 interface AddNodeCall {
   rootId?: string;
   parentId: string | null;

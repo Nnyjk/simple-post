@@ -1,55 +1,24 @@
 /**
- * Standalone verification harness for the "store-extensions" plan task.
+ * store 扩展独立验证脚本：无需启动浏览器或 Tauri 运行时。
  *
- * Three concerns from the spec, exercised without ever starting a
- * browser or Tauri shell:
+ * 验证目标与防范风险：
+ *   (A) 选择器稳定性：防范选择器在状态未变时产生新引用（严禁 map/filter/spread 等分配开销导致 React 意外重渲）。
+ *   (B) 级联清理：防范删除节点后残留历史、示例与详情孤儿数据（覆盖 endpoint/collection/module/project 四级）。
+ *   (C) 持久化写入：防范主题未写入 localStorage 或请求旋钮误写入 localStorage（请求旋钮必须落后端 preferences 表）。
+ *   (D) 持久化初始化：防范非法主题注入 store 以及默认请求旋钮偏离后端真值。
  *
- *   (A) Selector stability — `useActiveProject` (and friends) must
- *       return the same reference across two consecutive calls on
- *       unchanged state. The spec hard-bans any selector that
- *       allocates (`map`, `filter`, `spread`, …).
- *
- *   (B) Cascade cleanup — deleting an endpoint must drop its
- *       `responseHistory[id]`, `responseExamples[id]` and
- *       `endpointDetails[id]` rows. Same applies when deleting the
- *       parent collection / module / project (each must clear every
- *       endpoint id in the subtree). One `deleteNode` action covers
- *       all three tree types; `deleteProject` is the `rootId` scope.
- *
- *   (C) Persistence — `setTheme` must persist to localStorage under the
- *       prefs key, and `updateRequestSettings` must send the request knobs
- *       to the **backend** (they live in the `preferences` table, not in
- *       localStorage). The init path is asserted by behaviour: the store
- *       seeds its state from localStorage when the module is evaluated, so
- *       the assertions compare what the store holds against what the
- *       shared module (`src/lib/theme-boot/index.ts`) resolves.
- *
- * Run:
- *   npx tsx scripts/_verify_store.mjs
- *
- * About the IPC mock
- * ------------------
- * The delete* actions optimistically mutate local state via `set()`,
- * then fire the Tauri command. When the command rejects, the catch
- * branch calls `set(snapshot)` to roll back — which **restores the
- * cascade removal**. So the cascade is observable in the success
- * path (IPC resolves) but gets erased on the failure path.
- *
- * The mock therefore makes every delete* resolve with `null`, so
- * the cascade sticks. The slice's IPC plumbing is irrelevant for
- * these concerns; we're testing the local mutation logic.
+ * IPC 桩说明：
+ *   delete* 采用乐观更新并在 catch 中按快照回滚；本脚本让 IPC 返回 null 模拟成功路径，验证本地状态级联清理逻辑。
  */
 
-// ---------- inline browser + IPC shim ----------
+// ── 浏览器与 IPC 桩环境 ──────────────────────────────────────────────────
 import { mockIPC } from '@tauri-apps/api/mocks';
 
 const g = globalThis;
 if (!g.window) g.window = g;
 if (!g.window.__TAURI_INTERNALS__) g.window.__TAURI_INTERNALS__ = {};
 
-// Native localStorage on Node 22+ is empty (no methods). Replace it
-// unconditionally with a Map-backed shim that matches the spec the
-// store reads (`getItem` / `setItem` / `removeItem`).
+// Node 22+ 原生 localStorage 无方法，替换为 Map 桩以满足 getItem/setItem/removeItem 规范。
 {
   const backing = new Map();
   const shim = {
@@ -75,46 +44,26 @@ if (!g.window.__TAURI_INTERNALS__) g.window.__TAURI_INTERNALS__ = {};
   g.localStorage = shim;
 }
 
-// Run a successful "delete" through the slice so the cascade sticks.
-// Other commands (e.g. addEndpoint) won't be invoked by this script.
-// Setting `undefined` triggers the catch branch; `null` resolves
-// successfully. We pick success.
-//
-// The calls are captured so the persistence section can assert what the
-// store sent to the backend: the request knobs live there, not in
-// localStorage.
+// 模拟 IPC 成功返回以保留级联修改，并记录调用参数供持久化断言校验。
 const ipcCalls = [];
 mockIPC(async (cmd, args) => {
   ipcCalls.push({ cmd, args });
   return null;
 });
 
-// ---------- import the shared module first ----------
-//
-// The prefs key comes from the shared module — the one place it is written
-// down. `index.html`'s first-frame script and the store both read it there.
-//
-// It is read *before* the store, because the store computes its initial
-// state while its module is evaluated: whatever the store should see has
-// to be in localStorage by then.
+// ---------- 优先导入共享模块 ----------
+// 首帧脚本与 store 均由此读取唯一 PREFS_KEY，须在 store 求值前写入 localStorage。
 const { default: themeBoot } = await import('../src/lib/theme-boot/index.ts');
 const KEY = themeBoot.PREFS_KEY;
 
-// Seed a theme the shared resolver rejects. With an empty store the
-// check below compares 'dark' with 'dark' and passes even if the store
-// ignored the resolver; with a rejected value the store has to have run
-// that value through it. The key comes from the shared module, so this
-// harness does not write a second copy of it.
+// 预置非法主题 'blue'：防范 store 忽略解析器校验直接使用存储值（合法回退为 'dark'）。
 g.localStorage.setItem(KEY, JSON.stringify({ theme: 'blue' }));
 
-// ---------- import the store ----------
+// ── 导入 store 模块 ───────────────────────────────────────────────────────
 const { useAppStore, useActiveProject } = await import('../src/stores/app-store.ts');
 
-// ---------- the state the store starts with ----------
-//
-// Captured right after the import, before any section below mutates it:
-// the persistence-init assertions are about the **initial** state, and the
-// sections that follow change it.
+// ---------- store 初始状态 ----------
+// 导入后立即记录初始状态，用于断言初始化行为，防止被后续测试修改。
 const ls = g.localStorage;
 const initialState = useAppStore.getState();
 const initialPrefs = themeBoot.parsePrefs(ls.getItem(KEY));
@@ -140,10 +89,7 @@ function makeProject(id) {
   };
 }
 function makeNode(id, kind, parentId, sortOrder) {
-  // `kind`, not `type`: the one-`nodes`-table refactor renamed the field,
-  // and both cascade paths filter on `n.kind === 'endpoint'` — a seed
-  // still calling it `type` silently prunes nothing and reports the whole
-  // section green about the wrong thing.
+  // 字段为 kind 而非 type；防范因字段名过时导致过滤静默失效。
   return {
     id,
     rootId: 'p1',
@@ -179,15 +125,12 @@ function makeResp() {
     contentType: 'text/plain',
   };
 }
-// One `response_history` row. The wrapper is what the strip reads; the
-// assertions below only ask whether a *key* survives a cascade, but
-// seeding a bare `ApiResponse` here would let a shape regression in
-// `ResponseHistoryEntry` pass unnoticed in the one script that seeds it.
+// 构建包含完整外层的 ResponseHistoryEntry，防范历史数据结构回归。
 function makeHistoryEntry(id, endpointId) {
   return { id, endpointId, response: makeResp(), bodyTruncated: false, createdAt: 0 };
 }
 
-// ---------- (A) selector stability ----------
+// ── (A) 状态选择器引用稳定性验证 ──────────────────────────────────────────
 console.log('\n=== (A) Selector stability ===');
 
 useAppStore.setState({
@@ -200,28 +143,22 @@ try {
   const b = useActiveProject();
   line('useActiveProject same reference on consecutive calls', a === b, `a.name=${a?.name}`);
 } catch (e) {
-  // Zustand 5 wraps `useSyncExternalStore`, which throws outside
-  // React render. The spec explicitly permits a code-review fallback
-  // when the runtime check can't run cleanly.
+  // Zustand 5 的 useSyncExternalStore 在 React 渲染树外抛错时降级为源码静态检查。
   console.log(
     `[INFO] useActiveProject() unavailable outside React (Zustand 5): ${e?.message ?? e}`,
   );
 }
 
-// Source-shape review. Look at the four `useActive*` selectors and
-// confirm each one is a `s.x.find(...)` or a raw field reference —
-// never `.map`, `.filter`, `.sort`, or a spread.
+// 静态源码检查：防范 useActive* 选择器内部使用 map/filter/sort/spread 等导致新引用的分配操作。
 const { readFileSync } = await import('node:fs');
 const selSrc = readFileSync(new URL('../src/stores/app-store.ts', import.meta.url), 'utf8');
 {
-  // Pull every `useAppStore((s) => …)` occurrence together with its
-  // closing parenthesis, ignoring strings + comments. The selector
-  // bodies are short (≤ 5 lines each).
+  // 提取各 useAppStore((s) => …) 选择器闭包体进行语法特征扫描。
   const lines = selSrc.split('\n');
   const startIdx = lines.map((l, i) => ({ l, i })).filter(({ l }) => /useAppStore\(\(s\)/.test(l));
   let allClean = startIdx.length > 0;
   for (const { l, i } of startIdx) {
-    // assemble body up to the first standalone `)` line.
+    // 拼接函数体直至遇到首个独立的 ')' 行。
     let body = l;
     for (let j = i + 1; j < Math.min(i + 8, lines.length); j++) {
       body += '\n' + lines[j];
@@ -229,7 +166,7 @@ const selSrc = readFileSync(new URL('../src/stores/app-store.ts', import.meta.ur
     }
     const allocators = /\.(map|filter|sort|reduce)\(/.test(body);
     const spreads = /\[\s*\.\.\./.test(body) || /\{\s*\.\.\.[a-z]/i.test(body);
-    // Allow `find(...)`, raw field access, or `?? null` postfix.
+    // 仅允许 find(...)、直接字段访问或 '?? null' 后缀。
     const isFindOrField =
       /\.find\s*\(/.test(body) ||
       /\bs\.(openTabs|projects|environments|nodes|endpointDetails|activeTabId|activeEndpointId)\b/.test(
@@ -250,11 +187,10 @@ const selSrc = readFileSync(new URL('../src/stores/app-store.ts', import.meta.ur
   );
 }
 
-// ---------- (B) cascade cleanup ----------
+// ── (B) 级联清理孤儿数据验证 ──────────────────────────────────────────────
 console.log('\n=== (B) Cascade cleanup ===');
 
-// One flat tree replaces the three parallel arrays: hierarchy is
-// `parentId`, the owner is the denormalised `rootId`.
+// 树节点共用单表：通过 parentId 表达层级，通过反范式化 rootId 关联所属项目。
 const SEED_NODES = [
   makeNode('m1', 'module', null, 0),
   makeNode('c1', 'collection', 'm1', 0),
@@ -292,8 +228,7 @@ async function seedAndDelete(actionName, id, expectedGoneIds) {
       !(gone in after.responseExamples),
       JSON.stringify(Object.keys(after.responseExamples)),
     );
-    // The detail row is keyed the same way and must not outlive its
-    // node — the HTTP tester reads it by node id.
+    // 防范详情数据脱离节点残留孤儿行（HTTP 测试器按 nodeId 读取）。
     line(
       `${label} → endpointDetails[${gone}] removed`,
       !(gone in after.endpointDetails),
@@ -302,16 +237,14 @@ async function seedAndDelete(actionName, id, expectedGoneIds) {
   }
 }
 
-// `deleteNode` covers the endpoint, collection and module cases in one
-// action — the cascade lives in the schema, so the client drops the
-// whole `parentId` subtree rather than knowing what hangs below what.
+// deleteNode 统一处理端点、集合与模块：客户端级联清理整棵 parentId 子树。
 await seedAndDelete('deleteNode', 'ep1', ['ep1']);
 await seedAndDelete('deleteNode', 'c2', ['ep2']);
 await seedAndDelete('deleteNode', 'm1', ['ep1', 'ep2']);
-// A project delete is the one scope that filters by `rootId` instead.
+// deleteProject 作用域按 rootId 匹配清理整个项目下的端点关联数据。
 await seedAndDelete('deleteProject', 'p1', ['ep1', 'ep2']);
 
-// ---------- (C) persistence write ----------
+// ── (C) 持久化存储写入验证 ────────────────────────────────────────────────
 console.log('\n=== (C) Persistence write ===');
 
 {
@@ -347,9 +280,7 @@ console.log('\n=== (C) Persistence write ===');
 }
 
 {
-  // The request knobs live in the backend's `preferences` table — that is
-  // where MCP reads them from too. So this one asserts the *command* the
-  // store sent, not what it wrote to localStorage.
+  // 请求旋钮归属于后端 preferences 表（MCP 亦由此读取），断言 store 发往后端的 IPC 命令。
   ipcCalls.length = 0;
   useAppStore.getState().updateRequestSettings({ timeoutMs: 60000 });
   const call = ipcCalls.find((c) => c.args?.patch?.timeoutMs === 60000);
@@ -374,15 +305,9 @@ console.log('\n=== (C) Persistence write ===');
   );
 }
 
-// ---------- (D) persistence init ----------
+// ── (D) 持久化配置初始化验证 ──────────────────────────────────────────────
 console.log('\n=== (D) Persistence init ===');
-// The init path is asserted by **behaviour**, not by matching the source
-// text: the store seeds its state from localStorage when the module is
-// evaluated, and the shape of that code changes for unrelated reasons
-// often enough that a regex on it goes stale without anyone noticing.
-//
-// The shared module is where the key and the theme rules live; the store
-// and the first-frame script in `index.html` both read them from there.
+// 通过实际运行时行为断言 store 初始化逻辑，避免正则匹配代码文本导致误报。
 {
   const state = initialState;
   const stored = initialPrefs;

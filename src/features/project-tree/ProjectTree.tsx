@@ -66,7 +66,7 @@ const kindLabel: Record<TargetKind, string> = {
 };
 
 export function ProjectTree() {
-  // ---------- raw state (all raw references — safe for selectors) ----------
+  // ---------- 原始状态（均为原始引用，选择器可安全使用） ----------
   const nodes = useAppStore((s) => s.nodes);
   const endpointDetails = useAppStore((s) => s.endpointDetails);
   const activeProjectId = useAppStore((s) => s.activeProjectId);
@@ -206,7 +206,7 @@ export function ProjectTree() {
     setMenu,
   });
 
-  // ---------- edit / context menu / delete ----------
+  // ---------- 编辑 / 右键菜单 / 删除 ----------
   const {
     toDelete,
     cancelDelete,
@@ -227,7 +227,7 @@ export function ProjectTree() {
     setMenu,
   });
 
-  // ---------- drag-and-drop helpers ----------
+  // ---------- 拖放辅助函数 ----------
   const {
     dropHint,
     setDataTransfer,
@@ -241,8 +241,8 @@ export function ProjectTree() {
     moveNodes,
   });
 
-  // 拖放接线打包成一份，供树里的行统一接上。行的拖放行为全部由这一份决定 —— 三种行各写
-  // 一遍接线时，改一处要改三处，漏掉一处不会报错。
+  // 拖放回调统一打包，供树节点行接入。拖放逻辑收拢于此处，避免模块/集合/接口三种行
+  // 重复实现导致改动漂移或漏改。
   const dragContext: DragContextValue = {
     moveNodes,
     setDataTransfer,

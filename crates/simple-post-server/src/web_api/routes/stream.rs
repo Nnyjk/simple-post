@@ -45,7 +45,7 @@ fn sink_into(tx: mpsc::Sender<StreamEvent>, cancel_id: String) -> StreamSink {
     })
 }
 
-/// `POST /api/http/stream`
+/// 发起 HTTP 流式请求：`POST /api/http/stream`
 pub(crate) async fn http_stream(
     Json(body): Json<HttpStreamBody>,
 ) -> Result<Response, crate::web_api::error::HttpErrorResponse> {

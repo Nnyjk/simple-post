@@ -34,8 +34,7 @@ pub struct McpHttpConfigDto {
     pub requires_restart: bool,
 }
 
-/// 读持久化配置。行缺失返回 [`McpHttpConfig::default`]；无法解析则报错（见
-/// `db::preferences::mcp_http_config`）。
+/// 读持久化配置。行缺失返回 [`McpHttpConfig::default`]；无法解析则报数据库偏好项错误（参见 `db::preferences::mcp_http_config`）。
 pub fn read_http_config(pool: &DbPool) -> Result<McpHttpConfig, AppError> {
     crate::db::with_conn(pool, crate::db::preferences::mcp_http_config)
 }
@@ -135,7 +134,7 @@ fn sorted_copy(items: &[String]) -> Vec<String> {
 }
 
 // -------------------------------------------------------------------------
-// Tests
+// 测试
 // -------------------------------------------------------------------------
 
 #[cfg(test)]

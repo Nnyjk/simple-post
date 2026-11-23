@@ -1,20 +1,11 @@
 #!/usr/bin/env node
-// scripts/perf-bench.mjs — measure p50/p95/p99 for the serve-web API.
+// 测量 serve-web HTTP API 的 p50/p95/p99 延迟分位数。
 //
-//   node scripts/perf-bench.mjs [--target URL] [--n N] [--assert]
-//
-// By default hits http://127.0.0.1:4173 (the dev port from
-// `npm run dev:split`); --target points the bench at any other running
-// instance (e.g. one behind an nginx reverse proxy).
-// --assert enforces the budget: p95 < 200ms
-// and exits non-zero on regression.
-//
-// The script is silent (no JSON body, no auth) so it measures pure
-// network + axum overhead, not SQLite. The /api/healthz handler is the
-// truest public probe — it touches the DB pool but not a real query.
-//
-// A second mode `--route /api/projects` lets you bench the CRUD path;
-// supply SIMPLE_POST_WEB_PASSWORD if your binary is locked.
+// 用法示例：
+//   node scripts/perf-bench.mjs [--target URL] [--n N] [--assert] # 指定目标与样本数并断言
+// 默认目标为 http://127.0.0.1:4173，通过 --target 可指向其他实例；
+// --assert 开启 p95 < 200ms 预算门控（超标非零退出）。
+// 默认探测无载荷无鉴权的 /api/healthz 路由，测量纯网络与 axum 开销。
 
 import { performance } from 'node:perf_hooks';
 import process from 'node:process';
@@ -31,9 +22,7 @@ if (PASSWORD) headers.authorization = `Bearer ${PASSWORD}`;
 
 console.log(`[perf-bench] target=${TARGET} route=${ROUTE} n=${N} assert=${ASSERT}`);
 
-// ----- Warm up -----------------------------------------------------------------
-// Three throwaway hits before timing so TCP slow-start / first-bucket JIT
-// / SQLite open don't poison the percentiles.
+// 预热 3 次以消除 TCP 慢启动、首轮 JIT 与 SQLite 初始连接对分位数的干扰。
 for (let i = 0; i < 3; i++) {
   try {
     await fetch(`${TARGET}${ROUTE}`, { headers });
@@ -42,7 +31,7 @@ for (let i = 0; i < 3; i++) {
   }
 }
 
-// ----- Main loop ------------------------------------------------------------
+// ── 压测主循环 ────────────────────────────────────────────────────────────
 const samples = [];
 let failures = 0;
 for (let i = 0; i < N; i++) {
@@ -51,7 +40,7 @@ for (let i = 0; i < N; i++) {
   try {
     const r = await fetch(`${TARGET}${ROUTE}`, { headers });
     status = r.status;
-    // Drain body so connection can be pooled / reused.
+    // 排空响应体以便连接复用。
     await r.arrayBuffer();
   } catch {
     /* transport error */

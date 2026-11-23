@@ -284,7 +284,7 @@ pub struct ToolsListResponse {
 }
 
 // =========================================================================
-// `POST /mcp` — JSON-RPC 2.0 entry point
+// `POST /mcp` —— JSON-RPC 2.0 请求入口
 // =========================================================================
 
 async fn handle_mcp_post(State(state): State<Arc<AppState>>, body: String) -> Response {

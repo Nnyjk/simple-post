@@ -337,8 +337,8 @@ pub struct NodeCreateBody {
 }
 
 /// `POST /api/nodes` body 中结构性的那一半。`root_id` 取 `Option<String>`，与 Tauri 命令同名参数
-/// 同一份契约：renderer 发 `rootId: null` 表示「由服务端推」，按存储形状反序列化会报
-/// `400 invalid type: null, expected a string`。
+/// 同一份契约：renderer 发 `rootId: null` 表示「由服务端推」，按存储形状反序列化会报错
+/// （类型校验失败报 400：预期字符串却传入 null）。
 /// `id` 必填，因为解析本类型之前 `ensure_server_id` 已补上它；时间戳缺席，由服务端盖。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]

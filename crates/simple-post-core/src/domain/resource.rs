@@ -531,8 +531,8 @@ impl EndpointDetailPatch {
 }
 
 /// 树与编辑器共同看到的 endpoint：节点结构 + 请求配置。
-/// 与 [`ResourceNode`] 分开，好让树的读取可以完全跳过 `endpoint_details`——树只渲染
-/// name / type / sort_order。
+/// 与 [`ResourceNode`] 分开，好让树的读取完全跳过 `endpoint_details`——树组件只渲染
+/// name、type 与 sort_order 基础字段。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EndpointResource {

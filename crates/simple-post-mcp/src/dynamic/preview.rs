@@ -110,7 +110,7 @@ fn non_empty(value: Option<String>) -> Option<String> {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PreviewIssue {
-    /// `not_json` / `no_match` / `binary` / `http_status` / `too_large` / `script_error`。
+    /// 错误分类标签：`not_json` / `no_match` / `binary` / `http_status` / `too_large` / `script_error`。
     pub kind: String,
     pub message: String,
 }

@@ -115,11 +115,8 @@ try {
   const health = await fetch(`${BASE}${PREFIX}/api/healthz`);
   assert(health.status === 200, `${PREFIX}/api/healthz returns 200 (got ${health.status})`);
 
-  // The unprefixed alias must answer with the *probe*, not with the SPA
-  // shell. `auth::is_public_path` has listed `/healthz` since the beginning,
-  // but no route was ever registered for it, so it fell through to the SPA
-  // fallback and answered `200 text/html`. Any probe that only checks for a
-  // 200 calls that healthy — a probe that cannot fail is worse than none.
+  // 别名路由必须响应探针 JSON，而非回落到 SPA 壳。
+  // 若未注册路由会导致回落到 SPA 响应 200 text/html，仅校验 200 会掩盖探针未生效的缺陷。
   const legacyHealth = await fetch(`${BASE}${PREFIX}/healthz`);
   assert(legacyHealth.status === 200, `${PREFIX}/healthz returns 200 (got ${legacyHealth.status})`);
   const legacyBody = await legacyHealth.text();
@@ -247,9 +244,8 @@ try {
 
 if (failures > 0) {
   console.error(`\n[test:web-basepath] FAILED with ${failures} assertion failure(s)`);
-  // See `test-web-auth.mjs`: `process.exit()` after `fetch` calls aborts in
-  // libuv on Windows and masks the failure output. Set the code and let the
-  // process drain instead.
+  // 参见 test-web-auth.mjs：Windows 下 fetch 连接未关闭时调用 process.exit() 会在 libuv 崩溃，
+  // 此处仅设置 exitCode 让进程自然退出。
   process.exitCode = 1;
 }
 console.log('\n[test:web-basepath] all assertions passed');

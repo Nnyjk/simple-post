@@ -1,5 +1,5 @@
 /**
- * ProjectEnvSection —— {@link EnvironmentSection} 的接 store 的宿主。
+ * ProjectEnvSection —— {@link EnvironmentSection} 的 store 绑定宿主。
  *
  * `EnvironmentSection` 按设计是纯展示：每个列表和每个动作都从 props 进来，它的行因此能脱离
  * store 测试。但那些 props 得由挂载方从 store 里拼出来，而这份拼装正是项目自身规则的所在：
@@ -7,8 +7,8 @@
  * - 环境按 `activeProjectId` 过滤；
  * - 模块地址表的行轴是*本项目的模块*，按 `sortOrder` 排序，因为 `nodes` 是打平的列表。
  *
- * 这些规则现在有两个宿主：设置标签的环境分区，和项目标签自己的环境层。规则写两遍就会漂移，
- * 故接线只在此处写一次，两个宿主挂的都是*这个*。
+ * 设置标签的环境分区与项目标签的环境层共享相同规则。为避免逻辑漂移，
+ * 状态与动作绑定统一由本组件提供。
  *
  * 无项目守卫同理。两个宿主在没有项目打开时也都可达，而该分区会渲染一个看着能用的
  * 「新建环境」按钮，其写入却会打到 `projectId === ''` 并静默失败。故这里直接说明缺了什么。

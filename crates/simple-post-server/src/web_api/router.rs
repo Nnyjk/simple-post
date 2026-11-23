@@ -38,8 +38,7 @@ pub struct WebState {
     /// 层校验。
     pub password: Option<String>,
     /// 可选反代 base path（如 `"/sp"`）。设置后整棵 router（含两个健康探针）
-    /// 都 `nest` 到该前缀下：`curl /api/projects` 404，
-    /// `curl /sp/api/projects` 200。
+    /// 都 `nest` 到该前缀下（未带前缀报 404，如 `curl /sp/api/projects` 响应 200）。
     pub base_path: Option<String>,
 }
 
@@ -251,27 +250,26 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
         // 请求体是整份规格，故显式抬一次 `DefaultBodyLimit`：axum 的默认值是 2 MB，
         // 而 `body.schema` 可以是一份很大的 JSON Schema、两段脚本也可以很长。少了
         // 这一层，超大规格在浏览器形态下回的是 413（传输层错误，读不出「规格太大」），
-        // 桌面形态的同一份规格却能落库——两侧行为分叉。上限见
-        // `crate::spec_api::SPEC_BODY_LIMIT_BYTES`。
+        // 桌面形态的同一份规格却能落库——两侧行为分叉，规格上限定义参见 `crate::spec_api::SPEC_BODY_LIMIT_BYTES`。
         .route(
             "/api/spec/upsert",
             post(spec_upsert).layer(axum::extract::DefaultBodyLimit::max(
                 crate::spec_api::SPEC_BODY_LIMIT_BYTES,
             )),
         )
-        // ---- mcp (existing + new verbs) ----
+        // ---- MCP 守护进程管理（既有与新增动作）----
         .route("/api/mcp/status", get(mcp_status))
         .route("/api/mcp/logs", get(mcp_log_tail))
         .route("/api/mcp/start", post(mcp_start))
         .route("/api/mcp/stop", post(mcp_stop))
         .route("/api/mcp/restart", post(mcp_restart))
-        // ---- mcp capability policy ----
+        // ---- MCP 能力策略 ----
         .route(
             "/api/mcp/capability",
             get(mcp_capability_get).put(mcp_capability_put),
         )
         .route("/api/mcp/capability/tools", get(mcp_capability_list_tools))
-        // ---- mcp http listener config (daemon bind/path/allowlists) ----
+        // ---- MCP HTTP 监听器配置（守护进程绑定/路径/白名单）----
         .route(
             "/api/mcp/http-config",
             get(mcp_http_config_get).put(mcp_http_config_put),

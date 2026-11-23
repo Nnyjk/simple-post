@@ -157,7 +157,7 @@ pub(crate) async fn nodes_search_paths(
     ))
 }
 
-/// `GET /api/nodes/:id`
+/// 节点查询路由：`GET /api/nodes/:id`。
 pub(crate) async fn nodes_get(
     State(s): State<Arc<WebState>>,
     Path(id): Path<String>,
@@ -220,7 +220,7 @@ pub(crate) async fn nodes_update(
     Ok(Json(serde_json::to_value(&row).unwrap_or(Value::Null)))
 }
 
-/// `DELETE /api/nodes/:id`
+/// 节点删除路由：`DELETE /api/nodes/:id`。
 ///
 /// 连带整棵子树：`nodes.parent_id` 自引用且 `ON DELETE CASCADE`，一条语句即可拆完。
 pub(crate) async fn nodes_delete(
@@ -231,7 +231,7 @@ pub(crate) async fn nodes_delete(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// `POST /api/nodes/move`
+/// 节点移动路由：`POST /api/nodes/move`。
 ///
 /// `parentId` 为 null 表示「项目顶层」，且仅对模块合法。目的地位于哪张表由父节点的 `type`
 /// 回答。
@@ -261,7 +261,7 @@ pub(crate) async fn endpoint_details_list(
     ))
 }
 
-/// `GET /api/nodes/:id/endpoint-detail`
+/// 端点详情读取路由：`GET /api/nodes/:id/endpoint-detail`。
 pub(crate) async fn node_endpoint_detail_get(
     State(s): State<Arc<WebState>>,
     Path(id): Path<String>,
@@ -270,7 +270,7 @@ pub(crate) async fn node_endpoint_detail_get(
     Ok(Json(serde_json::to_value(&d).unwrap_or(Value::Null)))
 }
 
-/// `PATCH /api/nodes/:id/endpoint-detail`
+/// 端点详情更新路由：`PATCH /api/nodes/:id/endpoint-detail`。
 pub(crate) async fn node_endpoint_detail_patch(
     State(s): State<Arc<WebState>>,
     Path(id): Path<String>,

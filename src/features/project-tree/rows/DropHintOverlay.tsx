@@ -12,7 +12,7 @@ export function DropHintOverlay({ zone }: { zone: DropZone | null }) {
       ? { top: -1, left: 4, right: 4, height: 2 }
       : zone === 'below'
         ? { bottom: -1, left: 4, right: 4, height: 2 }
-        : { display: 'none' }; // 'into' is drawn by the row's bg+ring
+        : { display: 'none' }; // 'into' 区域由宿主行的背景与 ring 绘制
   return (
     <div aria-hidden className="pointer-events-none absolute rounded-sm bg-primary" style={style} />
   );

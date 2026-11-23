@@ -59,7 +59,7 @@ pub(super) fn doc_servers(value: Option<&Value>, ctx: &mut Ctx) -> DocServers {
     DocServers { host, base_path }
 }
 
-/// `https://api.example.com/v2` → (`https://api.example.com`, `/v2`)。
+/// 将服务地址切分为 host 与 base_path，例如 `https://api.example.com/v2` → (`https://api.example.com`, `/v2`)。
 /// 没有 host（`/v2` 这样的相对写法）时 host 为空串，basePath 照留。
 fn split_server_url(url: &str) -> (String, String) {
     let trimmed = url.trim();

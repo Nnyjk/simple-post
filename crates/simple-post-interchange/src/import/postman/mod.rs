@@ -1,4 +1,4 @@
-//! Postman Collection v2.1 → IR。
+//! 将 Postman 集合规范（Collection v2.1）转为 IR 结构。
 //!
 //! 由 [`super::parse_text`] 分派进来；本模块只管 [`serde_json::Value`]。
 //!

@@ -9,11 +9,10 @@
 //! 单向的：`server → core`、`mcp → core`）。规则若各写一遍，两处就会漂——漂了之后
 //! 桥接二进制会连不上一个正在服务的 daemon，而症状离原因很远。
 //!
-//! 文件路径：
-//!   * Windows: `%APPDATA%\simple-post\mcp.port`
-//!   * macOS:   `~/Library/Application Support/simple-post/mcp.port`
-//!   * Linux:   `$XDG_DATA_HOME/simple-post/mcp.port`（或
-//!     `~/.local/share/simple-post/mcp.port`）
+//! 端口文件位于平台基准数据目录下的 `simple-post/` 子目录（基准目录不带应用段，由内部统一追加 `simple-post`）：
+//!   * Windows 平台：`%APPDATA%\simple-post\mcp.port`（基准为 `%APPDATA%`）
+//!   * macOS 平台：`~/Library/Application Support/simple-post/mcp.port`（基准为 `~/Library/Application Support`）
+//!   * Linux 平台：`$XDG_DATA_HOME/simple-post/mcp.port`（若未设置则基准为 `~/.local/share`）
 //!
 //! 测试下用 `SIMPLE_POST_DATA_DIR` 覆盖基准目录，免得单测踩掉真实用户的端口文件。
 

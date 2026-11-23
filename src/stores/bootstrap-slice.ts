@@ -81,7 +81,7 @@ export interface BootstrapSliceState {
 
 /** action 部分。 */
 export interface BootstrapSliceActions {
-  // actions: data — selection / expansion
+  // 动作：数据 —— 选择 / 展开
   /**
    * 纯选择 setter：设 `activeProjectId` 并按该项目重解 `activeEnvironmentId`，不换标签条
    * （那是 `openProject` 的职责）。响应历史也不在此加载——它按 endpoint 作用域，
@@ -133,7 +133,7 @@ export interface BootstrapSliceActions {
    */
   setAllNodesExpanded: (expanded: boolean) => void;
 
-  // actions: bootstrap (one-shot at app start)
+  // 动作：初始化引导（应用启动时单次运行）
   /**
    * 从 daemon 拉持久化数据镜像进 store。幂等。由 `main.tsx` 在 `createRoot` 之前触发，
    * 让 IPC 与 React 挂载重叠。两层：
@@ -314,7 +314,7 @@ export const createBootstrapSlice: StateCreator<AppState, [], [], BootstrapSlice
         ),
       })),
 
-    // ---------- bootstrap (one-shot, called from main.tsx) ----------
+    // ---------- bootstrap（单次运行，由 main.tsx 调用）----------
 
     bootstrap: async () => {
       if (get().loaded) return;

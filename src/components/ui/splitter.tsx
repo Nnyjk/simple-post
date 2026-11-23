@@ -18,8 +18,8 @@ interface SplitterProps {
 }
 
 function parseBasisPx(basis: string, containerSize: number): number {
-  // basis can be a percentage like "50%" or a pixel value. We always store
-  // percentages in App.tsx, but be defensive in case a caller passes "500px".
+  // `basis` 可为百分比（如 "50%"）或像素值。`App.tsx` 存的一律是百分比，
+  // 调用方也可能传 "500px"，故两种都认。
   const trimmed = basis.trim();
   if (trimmed.endsWith('%')) {
     const pct = parseFloat(trimmed.slice(0, -1));

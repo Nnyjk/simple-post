@@ -131,9 +131,7 @@ fn watcher_only_claims_state_it_still_owns() {
 // 阻止后来某次改动把 Tauri 类型重新串回 `ensure_started_with`。一旦发生，本 crate 仍
 // 编译，`cargo build -p simple-post` 仍产出可用的二进制，所有既有测试仍全绿——然后
 // `simple-post` 的**测试**二进制在 Windows 上彻底加载不了：
-//
-//   simple_post_lib-<hash>.exe : exit 0xc0000139 (STATUS_ENTRYPOINT_NOT_FOUND)
-//
+//   Windows 加载崩溃示例：simple_post_lib-<hash>.exe : exit 0xc0000139 (STATUS_ENTRYPOINT_NOT_FOUND)
 // 未解析的导入是 `comctl32.dll!TaskDialogIndirect`，只由 comctl32 **v6** 导出——经
 // activation context 解析的 side-by-side 程序集，而非 `System32` 里的 v5 副本。它是
 // 被一个被持有的 `AppHandle` 留在本模块可达图里的 `tao` / `muda` 窗口栈带进来的。这个

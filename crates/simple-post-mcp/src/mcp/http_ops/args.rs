@@ -28,9 +28,8 @@ pub(super) struct RunRequestArgs {
     #[serde(default)]
     pub(super) body_mode: Option<String>,
     /// 鉴权方案，形状与端点存的那份一致：
-    /// `{"kind": "bearer", "bearer": "…"}` / `{"kind": "basic", "basic": {…}}` /
-    /// `{"kind": "apikey", "apikey": {…}}` / `{"kind": "oauth2", "oauth2": {…}}`。
-    #[serde(default)]
+    /// 支持 Bearer 令牌 `{"kind": "bearer", "bearer": "…"}`、Basic 认证 `{"kind": "basic", "basic": {…}}`、
+    /// API 密钥 `{"kind": "apikey", "apikey": {…}}` 或 OAuth2 模式 `{"kind": "oauth2", "oauth2": {…}}`。
     pub(super) auth: Option<Value>,
     /// 这次请求用哪个环境，以及**它属于哪个项目**。
     ///

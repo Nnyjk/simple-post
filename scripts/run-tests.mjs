@@ -1,22 +1,14 @@
 /**
- * Test runner: discover every `src/**\/*.test.ts` and hand the list to
- * `tsx --test` (Node's built-in test runner).
+ * 测试运行器：自动发现 `src/` 下所有 `*.test.ts` 并交由 `tsx --test` 执行。
  *
- * This replaces the previous hardcoded file list in `package.json` so a
- * newly added test file is picked up by `npm test` automatically —
- * AGENTS.md used to document that footgun ("New test files are *not*
- * picked up until you add them to the script").
+ * 替代 package.json 中硬编码的文件列表，新增测试文件无需手动更新脚本即可被 `npm test` 拾取。
  *
- * Usage:
- *   node scripts/run-tests.mjs           # single run
- *   node scripts/run-tests.mjs --watch   # watch mode (same as npm run test:watch)
+ * 用法：
+ *   node scripts/run-tests.mjs           # 单次运行
+ *   node scripts/run-tests.mjs --watch   # 监听模式（对应 npm run test:watch）
  *
- * Caveat: in `--watch` mode the file list is captured at spawn time;
- * restart the watch process after adding or renaming a test file.
- *
- * Paths are emitted repo-relative so they contain no spaces or shell
- * metacharacters — safe to join into a shell command on Windows, where
- * spawning a `.cmd` shim (node_modules/.bin/tsx.cmd) requires a shell.
+ * 注意：`--watch` 模式在启动时收集文件列表，新增或重命名测试文件后需重启监听进程。
+ * 输出相对仓库根目录的路径（无空格与 shell 特殊字符），便于 Windows 下安全执行。
  */
 import { spawn } from 'node:child_process';
 import { readdirSync } from 'node:fs';
@@ -27,13 +19,13 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SRC = path.join(root, 'src');
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'target', 'build']);
 
-/** @param {string} dir @param {string[]} out @returns {string[]} */
+/** @param {string} dir 扫描目录 @param {string[]} out 结果收集数组 @returns {string[]} 测试文件路径列表 */
 function collect(dir, out = []) {
   let entries;
   try {
     entries = readdirSync(dir, { withFileTypes: true });
   } catch {
-    return out; // src/ missing — fall through to the empty-list error below
+    return out; // src/ 不存在时回落至下方的空列表错误
   }
   for (const entry of entries) {
     const full = path.join(dir, entry.name);
@@ -57,15 +49,13 @@ const flags = watch ? ['--watch', '--test'] : ['--test'];
 console.log(`[test] ${files.length} test file(s):`);
 for (const f of files) console.log(`  - ${f}`);
 
-// Build the full command string instead of passing an args array with
-// `shell: true` — Node deprecated that combination (DEP0190). Safe
-// because every argument is a repo-relative path without spaces or
-// shell metacharacters (see header).
+// 拼接完整命令字符串替代 args 数组 + shell: true 组合，避免 Node DEP0190 弃用告警。
+// 所有参数均为无空格与元字符的相对路径，安全可拼接。
 const command = ['tsx', ...flags, ...files].join(' ');
 const child = spawn(command, {
   cwd: root,
   stdio: 'inherit',
-  shell: true, // Windows: node_modules/.bin/tsx.cmd must go through a shell
+  shell: true, // Windows 下执行 tsx.cmd 需通过 shell
 });
 
 child.on('exit', (code, signal) => {

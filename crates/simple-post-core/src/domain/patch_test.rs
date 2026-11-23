@@ -21,7 +21,7 @@ fn endpoint_patch_distinguishes_absent_from_null() {
     .unwrap();
     assert_eq!(p.base_url_override, Some(None));
 
-    // `baseUrlOverride: "https://e1"` → Some(Some("https://e1"))
+    // 传入具体字符串值解析为双重嵌套：`baseUrlOverride: "https://e1"` → Some(Some("https://e1"))
     let p: EndpointDetailPatch = serde_json::from_value(json!({
         "baseUrlOverride": "https://e1"
     }))

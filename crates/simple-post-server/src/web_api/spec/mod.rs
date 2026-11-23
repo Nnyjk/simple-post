@@ -39,29 +39,29 @@ pub struct RouteSpec {
     pub response: Option<&'static str>,
 }
 
-// ---- internal (not in OpenAPI v1) -------------------------------
+// ---- 内部路由（不在 OpenAPI v1 导出列表中）-----------------------
 // 以下端点在 `build_router` 里注册了，但刻意不登记：它们是设置面板与 supervisor
 // 的投影，无版本承诺。它们在 `WEB_ROUTES` 里可供运行时访问，但 OpenAPI v1 文档
 // 省略它们。
 //   GET  /api/nodes/children           - 懒加载层级树：取一个节点的直接孩子
 //   GET  /api/nodes/search             - 跨全部项目搜接口并带回它所在的路径
 //   GET  /api/request-settings         - 出站请求旋钮的单例行
-//   PUT  /api/request-settings
+//   PUT  /api/request-settings         - 写出站请求旋钮配置
 //   GET  /api/permissions/{projectId}   - 每个项目的权限档位
-//   PUT  /api/permissions/{projectId}
+//   PUT  /api/permissions/{projectId}   - 写指定项目权限档位
 //   PUT  /api/response-history/favorite - 标记或取消标记一条历史
 //   GET  /api/response-history/keep     - 读全局保留条数
-//   PUT  /api/response-history/keep
+//   PUT  /api/response-history/keep     - 写全局历史保留条数
 //   GET  /api/mcp/status               - daemon 生命周期快照
 //   GET  /api/mcp/logs                 - daemon 日志 tail
 //   POST /api/mcp/restart              - 重启 daemon
 //   GET  /api/mcp/capability           - 能力策略
-//   PUT  /api/mcp/capability
+//   PUT  /api/mcp/capability           - 写 MCP 能力策略配置
 //   GET  /api/mcp/capability/tools     - 当前策略下可见的工具名
 //   GET  /api/mcp/http-config          - daemon 的绑定地址、挂载路径与白名单
-//   PUT  /api/mcp/http-config
+//   PUT  /api/mcp/http-config          - 写 daemon 监听与白名单配置
 //   GET  /api/preferences              - 偏好表的原始读写
-//   PUT  /api/preferences
+//   PUT  /api/preferences              - 写偏好表原始键值
 //   GET  /api/update/check             - 查最新 release（无新版本与失败都回 200）
 //   GET  /api/update/deployment        - 部署形态与「能不能执行更新」
 //   POST /api/update/apply             - 执行运维声明的更新命令（口令模式下才开放）

@@ -81,7 +81,7 @@ pub(crate) async fn response_history_append(
     ))
 }
 
-/// `DELETE /api/response-history/:endpointId`
+/// 清空端点历史：`DELETE /api/response-history/:endpointId`
 ///
 /// 回 `{ "removed": n }` 而非邻路由所用的 `204`。这是树里唯一一个调用方会据其数字行动的删除
 /// ——0 意味着「本来就没东西可清」，而这条状态在历史条上呈现不同——`204` 没有响应体，带不回这个

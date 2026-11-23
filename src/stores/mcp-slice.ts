@@ -254,7 +254,7 @@ export const createMcpSlice: StateCreator<AppState, [], [], McpSlice> = (set, ge
   //     让徽标立刻翻回 `running`。
   startMcpPolling: () => {
     const state = get();
-    if (state._mcpTimer !== null) return; // idempotent — only one timer ever
+    if (state._mcpTimer !== null) return; // 幂等守卫：保持单例定时器
     const tick = () => {
       void state.refreshMcpStatus();
     };

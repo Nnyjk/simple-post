@@ -8,8 +8,6 @@ use rusqlite::{params, Connection, Row};
 use crate::domain::{Project, ProjectPatch};
 use crate::error::AppError;
 
-// 读。
-
 /// 全部项目。
 pub fn list(conn: &mut Connection) -> Result<Vec<Project>, AppError> {
     let mut stmt = conn.prepare(
@@ -37,8 +35,6 @@ pub fn get(conn: &mut Connection, id: &str) -> Result<Project, AppError> {
         None => Err(AppError::NotFound(format!("project {id}"))),
     }
 }
-
-// 写。
 
 /// 插入一个项目。`created_at` / `updated_at` 取自调用方给的结构体；不在服务端 `now()`，
 /// 因为渲染层有时会为 offline-first 流程种下乐观时间戳。

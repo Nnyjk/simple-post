@@ -1,4 +1,4 @@
-// crates/simple-post-mcp/src/error.rs
+// 客户端错误定义：crates/simple-post-mcp/src/error.rs
 //
 // 独立客户端的错误类型。Rust 错误原文绝不直接吐到 stdout：JSON-RPC 通道是
 // 逐行文本，一段 panic message 或多行 backtrace 就会破坏帧格式并挂住客户端。

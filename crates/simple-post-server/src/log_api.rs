@@ -19,8 +19,7 @@ pub const CLIENT_FIELD_LIMIT_CHARS: usize = 4 * 1024;
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LogExport {
-    /// 建议的文件名：`simple-post-logs-<YYYYMMDD-HHMMSS>.txt` 或
-    /// `simple-post-errors-<…>.txt`。
+    /// 建议的文件名：`simple-post-logs-<YYYYMMDD-HHMMSS>.txt` 或错误日志 `simple-post-errors-<…>.txt`。
     pub file_name: String,
     /// 纯文本，一行一条记录。本次运行没有匹配的日志时为空串。
     pub content: String,

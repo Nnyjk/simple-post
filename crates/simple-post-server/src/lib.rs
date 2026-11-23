@@ -17,11 +17,9 @@
 //!
 //! 依赖方向是单向的：
 //!
-//! ```text
-//! simple-post (Tauri)  ->  simple-post-server  ->  simple-post-core
+//! 桌面 simple-post (Tauri) -> 服务端 simple-post-server -> 核心 simple-post-core
 //!                                     |
-//!                                     +-------------->  simple-post-mcp
-//! ```
+//!                                     +-------------->  MCP 守护进程 simple-post-mcp
 //!
 //! `src-tauri` 再导出下列模块，故 Tauri 命令里既有的 `crate::daemon_supervisor::…` /
 //! `crate::web_api::…` 路径仍能解析。
@@ -63,8 +61,8 @@ pub mod web_api;
 pub mod win_spawn;
 
 // 再导出共享的底层，好让调用点在 workspace 抽取与本次 crate 拆分之后继续使用
-// `crate::db::*` / `crate::domain::*` / `crate::error::*` /
-// `crate::permissions::*` / `crate::http_executor::*` / `crate::mcp::*`。
+// 核心数据层 `crate::db::*` / `crate::domain::*` / `crate::error::*` 以及
+// 权限与协议层 `crate::permissions::*` / `crate::http_executor::*` / `crate::mcp::*`。
 // `spec` 也在其中：一份接口规格的线格式与落库编排在 core，两个宿主都认它。
 pub use simple_post_core::{db, domain, error, http_executor, oauth2, permissions, script, spec};
 

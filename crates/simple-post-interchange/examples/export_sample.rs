@@ -8,11 +8,10 @@
 //! 夹具刻意覆盖导出器的每一处分支：八个合法动词、集合外的动词、四种 body mode、
 //! 三种可映射的鉴权、嵌套集合、路径参数、配了服务与没配服务的两个模块。
 //!
-//! ```text
-//! cargo run -q -p simple-post-interchange --example export_sample -- out.yaml
-//! cargo run -q -p simple-post-interchange --example export_sample -- out.json --json
-//! cargo run -q -p simple-post-interchange --example export_sample -- --ir out.ir.json
-//! ```
+//! 示例执行命令：
+//! - 导出 YAML 文档：`cargo run -q -p simple-post-interchange --example export_sample -- out.yaml`
+//! - 导出 JSON 文档：`cargo run -q -p simple-post-interchange --example export_sample -- out.json --json`
+//! - 导出 IR 结构体：`cargo run -q -p simple-post-interchange --example export_sample -- --ir out.ir.json`
 //!
 //! `--ir` 落的是 IR 本身。改了 `IrEndpoint` 的字段却忘了同步夹具时，那条命令会报出
 //! 缺哪个字段——否则夹具会安静地按 `#[serde(default)]` 补出零值，而那份文档看起来

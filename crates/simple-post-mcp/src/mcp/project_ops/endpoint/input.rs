@@ -89,8 +89,7 @@ pub(in crate::mcp::project_ops) fn oauth2_config_schema() -> serde_json::Value {
 /// `clientKeyPath`），与 `simple_post_core::domain::TlsSettings` 自己的 serde 键名一致——故这两个
 /// 工具的 `tls` 载荷可以直接反序列化成那个类型，不需要转换。
 /// 注意这与 `api_run_request` / `api_call_endpoint` 的 `settings_override.tls` 用的
-/// **snake_case** 不同：那两个工具的 `settings_override` 里既有的键都是 snake_case，转换函数在
-/// `mcp::http_ops::input::parse_tls_settings`。
+/// **snake_case** 不同：那两个工具里既有键均为 snake_case，转换函数见 `mcp::http_ops::input::parse_tls_settings` 实现。
 fn tls_settings_properties() -> serde_json::Value {
     json!({
         "skipVerify": {

@@ -27,8 +27,8 @@ pub enum OAuth2GrantType {
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum OAuth2ClientAuth {
-    /// `Authorization: Basic base64(urlencode(id):urlencode(secret))`，RFC 6749 §2.3.1
-    /// 的默认。多数 IdP 只认这一档。
+    /// 发送 `Authorization: Basic base64(urlencode(id):urlencode(secret))` 请求头，
+    /// 符合 RFC 6749 §2.3.1 默认规范。多数 IdP 仅支持本档位。
     #[default]
     Basic,
     /// `client_id` / `client_secret` 进 form body。public client（无 secret）

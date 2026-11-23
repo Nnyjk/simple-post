@@ -2,24 +2,23 @@
 /**
  * scripts/rewrite-updater-json.mjs
  *
- * 把 `latest.json` 里 `platforms.*.url` 的 GitHub API 资产端点改写成 release 的下载地址。
+ * 将 `latest.json` 中 `platforms.*.url` 的 GitHub API 资产端点改写为 release 直链下载地址。
  *
- * 为什么需要：`tauri-action` 在 `releaseDraft: true` 时把资产表里的
- * `https://api.github.com/repos/<owner>/<repo>/releases/assets/<id>` 写进 latest.json。
- * 那个端点是 API 端点，不是下载端点：它要求请求带 `User-Agent`，
- * 不带时返回 `403 Forbidden`（正文 `Request forbidden by administrative rules`），
- * 而 tauri-plugin-updater 用的 reqwest 默认不发 `User-Agent`，
- * 所以 0.1.35 → 0.1.36 的应用内更新拿到 `403`。
- * 同一条请求带上 `Accept: application/octet-stream` 才 `302` 去文件；不带只返回资产元数据 JSON。
- * 正确的地址是资产的 `browser_download_url`。
- *
+ * 为什么改写：`tauri-action` 开启 `releaseDraft: true` 时会将资产列表中的
+ * `https://api.github.com/repos/<owner>/<repo>/releases/assets/<id>` 写入 latest.json。
+ * 该地址属于 GitHub API 端点而非文件直链，请求必须附带 `User-Agent`，
+ * 缺失时 GitHub API 会直接拒绝并返回 `403 Forbidden`（正文 `Request forbidden by administrative rules`）。
+ * 由于 `tauri-plugin-updater` 底层的 reqwest 客户端默认不发送 `User-Agent` 请求头，
+ * 导致应用内更新请求该端点时遭遇 403 阻断；且该端点只有显式指定 `Accept: application/octet-stream`
+ * 才会 302 重定向到二进制文件，默认则返回元数据 JSON。
+ * 因此必须统一改写为 `https://github.com/<owner>/<repo>/releases/download/<tag>/<filename>` 直链。
  * 这个文件有两半：
  *   1. `rewriteUpdaterJson` 是纯函数，无副作用、不读环境变量，供单测 import；
  *   2. 文件末尾的 CLI 用 `gh` 取资产表与 latest.json、改写后写回同一个 release。
  *
- * Usage:
- *   node scripts/rewrite-updater-json.mjs --tag v0.1.36 --repo Nnyjk/simple-post
- *   node scripts/rewrite-updater-json.mjs --tag refs/tags/v0.1.36 --repo Nnyjk/simple-post --dry-run
+ * 用法示例：
+ *   node scripts/rewrite-updater-json.mjs --tag v0.1.36 --repo Nnyjk/simple-post            # 改写指定版本的 latest.json
+ *   node scripts/rewrite-updater-json.mjs --tag refs/tags/v0.1.36 --repo Nnyjk/simple-post --dry-run # 试运行且不上传
  */
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';

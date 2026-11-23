@@ -34,8 +34,8 @@ pub(crate) async fn projects_get(
 /// 创建项目，并种下它的默认环境。
 ///
 /// 有两种 body 形状，都仍在使用：
-/// - `{ "name": …, "opts": { description, color } }` —— `invokeCmd(COMMANDS.projectsCreate, …)`
-///   发的就是这个，因为 `WEB_ROUTES.projectsCreate` 没有 `body:` mapper，参数对象*就是* payload。
+/// - 嵌套结构 `{ "name": …, "opts": { description, color } }` —— 前端调用 `invokeCmd(COMMANDS.projectsCreate, …)`
+///   发的就是这个，因为 `WEB_ROUTES.projectsCreate` 没有 `body:` mapper，参数对象就是 payload。
 /// - 打平的 `Project` —— 文档化的公共 v1 形状，外部 REST 客户端使用。
 ///
 /// 两者都解析：`Project` 没有 `opts` 字段，而 serde 会静默丢弃未知键，于是按 `Project` 解析会让

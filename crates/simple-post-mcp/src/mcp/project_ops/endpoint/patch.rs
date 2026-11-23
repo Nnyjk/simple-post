@@ -108,8 +108,8 @@ pub(super) fn patch_field<T: serde::de::DeserializeOwned>(
     }
 }
 
-/// 读一个没有「用 null 清空」语义的 patch 字段 —— 值本身就是载荷（`params`、
-/// `headers`、`tags`、`body`、`auth`）。
+/// 读一个没有「用 null 清空」语义的 patch 字段 —— 值本身就是载荷（如 `params`、
+/// `headers`、`tags`、`body` 与 `auth` 等字段）。
 ///
 /// 这里的 `null` 是**笔误**而非清空请求：这些列要靠发空数组 / 空 body 才清得掉；
 /// 把 `null` 当清空，会让「把缺失值序列化成 null」的客户端悄悄抹掉配好的请求头列表。

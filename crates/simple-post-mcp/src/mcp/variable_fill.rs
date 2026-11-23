@@ -1,5 +1,5 @@
-//! 变量填充 / 校验类 MCP 工具 —— 共 3 个：`api_resolve_template`、
-//! `api_resolve_endpoint`、`api_validate_endpoint`。
+//! 变量填充 / 校验类 MCP 工具 —— 共 3 个：模版解析 `api_resolve_template`、
+//! 端点解析 `api_resolve_endpoint` 以及端点校验 `api_validate_endpoint`。
 //!
 //! 都是底层 `crate::variable_fill` 的 MCP 适配层：重活在那里干，这里补上权限检查、
 //! 参数校验与 JSON-RPC 形状的返回值。

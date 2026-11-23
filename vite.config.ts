@@ -16,7 +16,7 @@ const themeBootSource = readFileSync(
   'utf8',
 );
 
-// https://vitejs.dev/config/
+// Vite 基础配置项说明见官方文档
 export default defineConfig({
   plugins: [react(), themeBootPlugin(themeBootSource)],
   resolve: {
