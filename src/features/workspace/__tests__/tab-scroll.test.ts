@@ -10,7 +10,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { scrollTargetForActiveTab, type ScrollHost } from '../tab-scroll';
+import { scrollTargetForActiveTab, scrollbarThumb, type ScrollHost } from '../tab-scroll';
 
 /** 造一个标签条：可视宽度 `clientWidth`，内容宽度 `scrollWidth`，当前滚到 `scrollLeft`。 */
 function makeHost(opts: {
@@ -74,5 +74,51 @@ describe('scrollTargetForActiveTab', () => {
     const host = makeHost({ scrollLeft: 200, scrollWidth: 2000, clientWidth: 1000 });
     // 目标左缘 255.75，条的左缘 256 → 只差 0.25px，不滚。
     assert.equal(scrollTargetForActiveTab(host, { left: 255.75, right: 300 }), null);
+  });
+});
+
+describe('scrollbarThumb', () => {
+  it('内容放得下时不显示滚动条', () => {
+    const host = makeHost({ scrollWidth: 800, clientWidth: 1000 });
+    assert.equal(scrollbarThumb(host), null);
+  });
+
+  it('滑块宽度与可视宽度成正比', () => {
+    // 可视 1000、内容 2000 → 滑块占一半。
+    const host = makeHost({ scrollWidth: 2000, clientWidth: 1000 });
+    assert.equal(scrollbarThumb(host)?.width, 500);
+  });
+
+  it('滑块不短于最小宽度', () => {
+    // 可视 1000、内容 100000 → 比例宽只有 10px，按最小宽度 24 兜底。
+    const host = makeHost({ scrollWidth: 100000, clientWidth: 1000 });
+    assert.equal(scrollbarThumb(host)?.width, 24);
+  });
+
+  it('滑块宽度不超过可视宽度', () => {
+    // 内容只比可视宽 1px：比例宽接近可视宽，仍不得超过它。
+    const host = makeHost({ scrollWidth: 1001, clientWidth: 1000 });
+    const box = scrollbarThumb(host);
+    assert.ok(box);
+    assert.ok(box.width <= 1000);
+  });
+
+  it('滚到最右时滑块贴住轨道的右端', () => {
+    const host = makeHost({ scrollLeft: 1000, scrollWidth: 2000, clientWidth: 1000 });
+    const box = scrollbarThumb(host);
+    assert.ok(box);
+    assert.equal(box.left, 1000 - box.width);
+  });
+
+  it('滚到最左时滑块贴住轨道的左端', () => {
+    const host = makeHost({ scrollLeft: 0, scrollWidth: 2000, clientWidth: 1000 });
+    assert.equal(scrollbarThumb(host)?.left, 0);
+  });
+
+  it('scrollLeft 越界时滑块被夹在轨道内', () => {
+    const host = makeHost({ scrollLeft: 9999, scrollWidth: 2000, clientWidth: 1000 });
+    const box = scrollbarThumb(host);
+    assert.ok(box);
+    assert.equal(box.left, 1000 - box.width);
   });
 });
