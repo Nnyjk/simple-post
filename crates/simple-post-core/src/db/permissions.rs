@@ -1,7 +1,8 @@
 //! `agent_permissions` 表的 CRUD。
 //!
 //! 存放授予 MCP / 外部 agent 的逐项目权限。每项目一行；行缺失时默认
-//! [`Permission::ReadCall`]，故刚导入的项目无需显式授权即可使用。
+//! [`Permission::ReadCall`]。注意此处仅为项目级权限门，实际生效时与全局
+//! `mcp.policy`（默认 `read_only`）取更严格档位，故未显式放开全局策略前 AI 仍不可写。
 
 use rusqlite::{params, Connection};
 
@@ -29,8 +30,9 @@ pub fn get(conn: &mut Connection, project_id: &str) -> Result<Permission, AppErr
 
 // 写。
 
-/// Upsert 权限。这里用 INSERT OR REPLACE 好让 schema 保持简单——不需要 UNIQUE 约束，
-/// `project_id` 已经是主键。
+/// Upsert 权限。使用 INSERT ... ON CONFLICT(project_id) DO UPDATE。
+/// 注意：函数不主动校验项目是否存在；若传入不存在的 `project_id`，底层外键约束
+/// 失败将返回 `AppError::Db(...)`。
 pub fn set(conn: &mut Connection, project_id: &str, perm: Permission) -> Result<(), AppError> {
     conn.execute(
         "INSERT INTO agent_permissions (project_id, permission) \

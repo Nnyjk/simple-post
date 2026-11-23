@@ -211,7 +211,7 @@ fn from_release(current: &str, release: Release) -> UpdateCheck {
     if version::parse(&release.tag_name).is_err() {
         return failure(current, UpdateError::BadResponse);
     }
-    // tag 已经过 `parse`，故这里的 `Err` 分支只是 `current` 走样时的兜底。
+    // tag 已经过 `parse`，故这里的 `Err` 分支只在 `current` 格式走样时回退。
     let available = version::is_newer(&release.tag_name, current).unwrap_or(false);
     UpdateCheck {
         current: current.to_string(),

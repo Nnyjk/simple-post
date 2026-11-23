@@ -40,7 +40,7 @@ const SSE_STOP_GRACE_MS = 5000;
 const WS_CLOSE_GRACE_MS = 3000;
 
 /**
- * 收尾事件的兜底：后端会在 `end` / `closed` 之后关掉事件流，读循环随之结束，那就把定时器
+ * 收尾事件的回退：后端会在 `end` / `closed` 之后关掉事件流，读循环随之结束，那就把定时器
  * 清掉；到点还没结束说明后端没有收尾，才真的中止本地读取。
  */
 function abortAfterGrace(

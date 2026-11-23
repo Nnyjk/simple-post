@@ -2,7 +2,7 @@
 
 - **适用范围**：`crates/simple-post-interchange/`、`crates/simple-post-server/src/interchange_api.rs`、四个薄壳入口、`src/lib/transfer-file-save.ts`、仓库根的 `fixtures/*.json` 与两侧读取器。
 - **权威来源**：`crates/simple-post-interchange/README.md`（448 行，契约与已核实陷阱）、`AGENTS.md` 的 Interchange 段、`crates/simple-post-interchange/src/{lib,ir,spec,project,diagnostics,fingerprint}.rs` 的模块文档、两侧读取器源码。
-- **最后核对**：2026-11-13（v0.1.34）
+- **最后核对**：2026-11-23（v0.1.41）
 - **前置阅读**：`01-overview.md`、`02-architecture.md`
 
 ## 结论
@@ -157,8 +157,6 @@ simple-post-server ──▶ simple-post-interchange ──▶ simple-post-core
 
 ## 文档与实现不一致
 
-1. **`src/lib/__tests__/placement-parity.test.ts` 的文件头把 Rust 读取器写成 `crates/simple-post-core/src/placement_parity_test.rs`**，实际是 `crates/simple-post-core/src/domain/placement_parity_test.rs`（`#[path]` 挂载在 `domain` 模块下）。按头注释去找会找不到文件。
-2. **`AGENTS.md` 第 194 行把 `base-url-parity.json` 的 Rust 侧写成 `core::url`**。实际读取器在 `crates/simple-post-mcp/src/variable_fill/base_url_parity_test.rs`，实现是 mcp 的 `resolve_base_url` 加 core 的 `apply_rewrite` 两处；core 只有改写，没有解析。同一份 `AGENTS.md` 第 75 行的说法是准确的，两处自相矛盾。
-3. **「读取器要 `deny_unknown_fields` 并断言条目数」目前只在一部分读取器上成立**。严格的：`base_url_parity_test.rs`（全部结构体都带，且断言 `cases` / `rewriteCases` 的精确条数）、`placement_parity_test.rs`（带，且断言九格恰好各一次）、`body_parity_test.rs`、`oauth2/config_parity_test.rs`、`db/nodes_read_test.rs`。**没带的**：`variable_fill/resolve_parity_test.rs`、`path_params_test.rs`、`oauth2/inject_parity_test.rs`、`dynamic/resolve_parity_test.rs`、`mcp/http_ops/multipart_parity_test.rs`——这些只断言 `!cases.is_empty()`，键名漂移会静默空转。这是纪律与现状的差距，不是设计分歧。
-4. **`fixtures/oauth2-config-parity.json` 与 `fixtures/placement-parity.json` 没有 `$comment`**，其余八份都有。靠 `$comment` 找「两侧读取器是谁」的读者会在这两份上落空；实际信息只在两侧测试文件的头注释里。
-5. **`CommitTarget::ProjectRoot` 的模块文档把它写成真实选项**（「各自新建一个顶层模块。这是资源树里模块唯一的合法位置」），但生产路径没有调用方——`import_commit` 恒传 `Module`，导出也只做 `module_to_ir`。是「保留的 API 形状」还是「忘了接的项目级入口」，`[未核实]`。
+1. **`fixtures/oauth2-config-parity.json` 与 `fixtures/placement-parity.json` 没有 `$comment`**，其余八份都有。靠 `$comment` 找「两侧读取器是谁」的读者会在这两份上落空；实际信息只在两侧测试文件的头注释里。
+2. **`CommitTarget::ProjectRoot` 的模块文档**：代码已注明目前生产导入路径仅支持 `CommitTarget::Module`，`ProjectRoot` 仅供内部测试验证顶层模块生成使用；外部文档若将其描述为现役用户入口则与实现不一致。
+3. （已闭环项：`placement-parity.test.ts` 头注释路径已修正挂载于 `domain/` 下；`AGENTS.md` 的 fixtures 描述已同步更新；四个 parity 读取器已补齐 `deny_unknown_fields` 与精确条数断言）。

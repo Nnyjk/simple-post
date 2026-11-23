@@ -1,6 +1,6 @@
 > 适用范围：改动态变量取数/缓存/合并、改请求脚本沙箱、改脚本链顺序的人
 > 权威来源：AGENTS.md §Dynamic variables / §Scripts、`crates/simple-post-core/src/dynamic/*`、`crates/simple-post-core/src/script/*`、`crates/simple-post-mcp/src/mcp/dynamic_ops.rs`
-> 最后核对：2026-11-13（v0.1.34）
+> 最后核对：2026-11-23（v0.1.41）
 > 前置阅读：01-overview.md、02-architecture.md
 
 # 06 动态变量与请求脚本
@@ -90,8 +90,7 @@ flowchart LR
 
 ## 文档与实现不一致
 
-- `db/preferences.rs` 里 `MCP_AUTO_START` 的键注释与同文件的 `mcp_auto_start()` 注释互相矛盾（默认 `false` vs `true`），实现取 `true`。与动态变量无关，但常在同一次排查里读到。
-- `dynamic/mod.rs` 说取数失败「退化顺序：覆盖值 → 过期缓存值（仅当 `stale_fallback`）→ 按缺失处理」，省略了「新鲜缓存」和「成功取数」两档；完整表在 `dynamic/cache.rs::decide` 的文档注释里。两处不矛盾，只是前者不完整。
+暂无未闭环项。
 
 ## 相关笔记
 

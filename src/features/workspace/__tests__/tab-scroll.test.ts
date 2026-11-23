@@ -1,9 +1,9 @@
 /**
  * `src/features/workspace/tab-scroll.ts` 的纯单测 —— 标签条该滚到哪儿。
  *
- * 这条规则以前住在组件里（原生 `scrollIntoView`），它的问题是**瞬间**改掉 `scrollLeft`：
+ * 这条规则住在独立模块里：原生 `scrollIntoView` 会**瞬间**改掉 `scrollLeft`，
  * 所有标签的视口位置在同一帧里挪一截，那一下不参与任何动画，读起来就是「标签条
- * 猛地跳一下」。改成 GSAP 补间之后，「该滚到哪儿」就成了可以单测的纯计算。
+ * 猛地跳一下」。改用 GSAP 补间之后，「该滚到哪儿」就成了可以单测的纯计算。
  *
  * 运行：npx tsx --test src/features/workspace/__tests__/tab-scroll.test.ts
  */
@@ -90,7 +90,7 @@ describe('scrollbarThumb', () => {
   });
 
   it('滑块不短于最小宽度', () => {
-    // 可视 1000、内容 100000 → 比例宽只有 10px，按最小宽度 24 兜底。
+    // 可视 1000、内容 100000 → 比例宽只有 10px，按最小宽度 24 回退。
     const host = makeHost({ scrollWidth: 100000, clientWidth: 1000 });
     assert.equal(scrollbarThumb(host)?.width, 24);
   });

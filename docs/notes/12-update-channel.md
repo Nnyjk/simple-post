@@ -2,7 +2,7 @@
 
 - 适用范围：版本提示从哪来、桌面端怎么自动装、「立即执行更新」在什么部署里成立、离线时界面显示什么。
 - 权威来源：`crates/simple-post-core/src/update/{version,check}.rs`、`crates/simple-post-server/src/update_api.rs`、`crates/simple-post-server/src/web_api/routes/update.rs`、`src-tauri/src/commands/update.rs`、`src-tauri/tauri.conf.json`、`.github/workflows/release.yml`、`src/stores/update-slice.ts`、`src/features/update/`、`docker/Dockerfile`、`docker/*.yml`。
-- 最后核对：2026-11-17（v0.1.35）
+- 最后核对：2026-11-23（v0.1.41）
 - 前置阅读：01-overview.md、02-architecture.md（双传输不变量）、09-engineering-process.md（发布与部署）
 
 ## 结论

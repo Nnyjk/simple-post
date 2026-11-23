@@ -1,6 +1,6 @@
 > 适用范围：加/改 MCP 工具、动工具注册表与能力门、改守护进程端口与资源指南的人
 > 权威来源：AGENTS.md §MCP server、`crates/simple-post-mcp/src/mcp/{registry,dispatch,protocol,permissions}.rs`、`crates/simple-post-mcp/src/daemon_http.rs`、`crates/simple-post-core/src/port_file.rs`、`crates/simple-post-server/src/daemon_supervisor.rs`
-> 最后核对：2026-11-13（v0.1.34）
+> 最后核对：2026-11-23（v0.1.41）
 > 前置阅读：01-overview.md、02-architecture.md
 
 # 05 MCP 形态
@@ -111,9 +111,7 @@ graph LR
 
 ## 文档与实现不一致
 
-- **工具数**：`AGENTS.md:5` 与 `:19` 写 48，`:420` 写「the 47-tool registry」——**47 是旧数**。实测 `tool_table().len() == 48`，`mod_test.rs::EXPECTED_TOOL_COUNT = 48` 断言通过；`README.md` 四处均为 48。
-- `crates/simple-post-mcp/src/mcp/project_ops/mod.rs:53` 的注释写「projects (5) → … → endpoints (8) → spec (1)」「全部 24 条」，实际 `endpoint::register` 推 9 条、合计 25 条。数字注释未随 `endpoint_history` 一起更新。
-- `crates/simple-post-core/src/db/preferences.rs`：`keys::MCP_AUTO_START` 的文档写「**默认 `false`**」，同文件 `mcp_auto_start()` 的注释与实现（`unwrap_or(true)`）都默认**开**。实现与后者一致，前者是旧说法。
+暂无未闭环项。
 
 ## 相关笔记
 

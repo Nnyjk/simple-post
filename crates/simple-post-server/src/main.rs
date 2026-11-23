@@ -48,10 +48,10 @@ enum Cmd {
         #[arg(long)]
         spa_dir: Option<String>,
 
-        /// Data directory. Defaults to the OS-conventional
-        /// `dirs::data_dir()/simple-post`. Mount this on a volume in a
-        /// container: it holds the SQLite database, the `mcp.port`
-        /// record, and every environment definition.
+        /// Data directory. Defaults to `dirs::data_dir()` (or
+        /// `SIMPLE_POST_DATA_DIR` when that is set). Mount this on a volume in a
+        /// container: it holds the SQLite database (`store.db`), the
+        /// `simple-post/mcp.port` record, and every environment definition.
         #[arg(long)]
         data_dir: Option<String>,
 
@@ -88,7 +88,7 @@ enum Cmd {
     Mcp {
         /// Transport: `http` (default) or `stdio`. `stdio` here routes
         /// through the same HTTP server; use the separate
-        /// `simple-post-mcp-proxy` binary for stdio mode.
+        /// `simple-post-mcp` binary for real stdio mode.
         #[arg(long, default_value = "http")]
         transport: String,
 

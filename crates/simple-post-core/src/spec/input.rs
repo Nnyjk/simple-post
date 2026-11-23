@@ -249,7 +249,7 @@ impl From<ResponseDefinitionInput> for ResponseDefinition {
     fn from(input: ResponseDefinitionInput) -> Self {
         ResponseDefinition {
             id: input.id.unwrap_or_default(),
-            // 手写 JSON 里前后多一个空格是常事，边界空白在这里抹平；中间的空白仍然是错误，
+            // 手写 JSON 里前后多一个空格是常事，此处在数据入口统一剔除边界空白；中间的空白仍然是错误，
             // 由 `response_problems` 报出来。
             status: input.status.trim().to_string(),
             description: input.description,

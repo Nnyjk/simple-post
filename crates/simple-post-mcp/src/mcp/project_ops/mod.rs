@@ -1,5 +1,5 @@
 //! project / module / collection / endpoint / spec MCP 工具，共
-//! 5 + 5 + 5 + 8 + 1 = **24 个**。
+//! 5 + 5 + 5 + 9 + 1 = **25 个**。
 //!
 //! ## 命名
 //!

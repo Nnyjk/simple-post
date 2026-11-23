@@ -1,6 +1,6 @@
 > 适用范围：要改任何一侧代码的人，动手前先确认依赖方向与哪些地方必须一起改
 > 权威来源：AGENTS.md §Architecture & Data Flow、crates/simple-post-server/README.md、crates/simple-post-interchange/README.md、src-tauri/Cargo.toml、src-tauri/src/lib.rs、src-tauri/src/commands/mod.rs
-> 最后核对：2026-11-13（v0.1.34）
+> 最后核对：2026-11-23（v0.1.41）
 > 前置阅读：01-overview.md
 
 # 02 架构
@@ -46,7 +46,7 @@ graph TD
 
 1. `src-tauri/src/commands/<resource>.rs` 里的 `#[tauri::command]` handler；
 2. `src-tauri/src/commands/mod.rs` 用**glob** `pub use <resource>::*;` 导出；
-3. `src-tauri/src/lib.rs` 的 `tauri::generate_handler![…]` 注册（`lib.rs:156` 起）；
+3. `src-tauri/src/lib.rs` 的 `tauri::generate_handler![…]` 注册（`lib.rs:160` 起）；
 4. `src/lib/tauri-commands/commands.ts` 的 `COMMANDS` 条目（camelCase 键 → snake_case 值）；
 5. `crates/simple-post-server/src/web_api/routes/<resource>.rs` 的 handler + `web_api/router.rs::build_router` 的 `.route()` 注册（`router.rs:65`），浏览器可调时再加 `src/lib/tauri-commands/web-routes.ts` 的 `WEB_ROUTES` 条目。
 
@@ -94,4 +94,4 @@ graph TD
 
 ## 文档与实现不一致
 
-- `src-tauri/src/main.rs` 里同一个 `mcp-proxy` 子命令的两段注释指向了不同的二进制名：`:33` 说「use the separate `simple-post-mcp-proxy` binary for stdio mode」，`:81` 说「This is a separate binary (`simple-post-mcp.exe`)」。实际存在的是 `simple-post-mcp`（`crates/simple-post-mcp/Cargo.toml` 的 `[[bin]]`），`simple-post-mcp-proxy` 是已删除的旧名（`src-tauri/Cargo.toml:14` 也这么说）。以 crates 清单为准。
+暂无未闭环项。

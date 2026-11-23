@@ -1,6 +1,6 @@
 > 适用范围：第一次接手 simple-post 的人或 agent，在 `docs/notes/` 里找入口时先读它
 > 权威来源：AGENTS.md、README.md、crates/*/README.md、本目录各篇
-> 最后核对：2026-11-13（v0.1.34）
+> 最后核对：2026-11-23（v0.1.41）
 > 前置阅读：无（本文件即入口）
 
 # simple-post 接手认知结构

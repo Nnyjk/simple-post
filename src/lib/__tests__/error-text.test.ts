@@ -21,7 +21,7 @@ test('errorText: 转不成字符串的取值给出回退文案，不抛异常', 
 
 test('errorText: 后端的 { code, message } 对象取它的 message', () => {
   // 桌面端 invoke 失败时 Tauri 2 把 `AppError` 当作普通对象 reject：它不是 `Error`，
-  // 故这条路径以前会显示 `[object Object]`，把唯一有信息量的那一句丢掉。
+  // 若直接转字符串会显示 `[object Object]`，把唯一有信息量的那一句丢掉。
   const appError = { code: 'validation', message: 'validation: 变量名非法' };
   assert.equal(errorText(appError), 'validation: 变量名非法');
 });

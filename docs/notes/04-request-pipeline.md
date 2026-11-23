@@ -1,6 +1,6 @@
 > 适用范围：改请求组装、body/multipart、鉴权注入、脚本插入点、请求历史的人
 > 权威来源：AGENTS.md §HTTP execution / §Scripts、`src/lib/http-build/prepare.ts`、`crates/simple-post-core/src/script/send.rs`、`crates/simple-post-core/src/http_executor.rs`、`crates/simple-post-mcp/src/variable_fill/resolve.rs`
-> 最后核对：2026-11-13（v0.1.34）
+> 最后核对：2026-11-23（v0.1.41）
 > 前置阅读：01-overview.md、02-architecture.md
 
 # 04 请求链路：从草稿到落历史
@@ -50,7 +50,7 @@ MCP 分支更短，但汇入同一点：`api_call_endpoint` / `api_run_request` 
 
 1. **组装一次，预览与发送同源。** `HttpTester.tsx` 的 `prepared` 是 `useMemo`，cURL 预览与真实发送读同一个对象；`sendPreparedRequest` 只做 OAuth2 注入，且返回新对象（`applyOAuth2Token` 不改入参），否则预览会多出一条 `Authorization`。token 只在 `outbound` 里，绝不进 cURL。
 
-2. **`content` 是载荷，`schema` 是定义。** `resolveBody` / `prepareRequest` 只读 `body.content`；`schema` 从不上线（`src/features/http-tester/__tests__/body-schema.test.ts` 钉住）。拒收门是 `core::spec::input::reject_schema_shaped_payload`：`mode == json` 且顶层同时有 `type`+`properties`（或出现 `$schema`）、且 `schema` 为空 → 报 `Validation` 并点名 `body_schema`。填了 `schema` 就不拦（那是有意为之）。调用点：`spec/upsert/write.rs`、`project_ops/endpoint/write.rs`、`variable_fill.rs`（`api_validate_endpoint` 只报 issue）。**桌面保存路径没有这道门**。
+2. **`content` 是载荷，`schema` 是定义。** `resolveBody` / `prepareRequest` 只读 `body.content`；`schema` 从不上线（`src/features/http-tester/__tests__/body-schema.test.ts` 钉住）。拒收门是 `core::spec::input::reject_schema_shaped_payload`：`mode == json` 且顶层同时有 `type`+`properties`（或出现 `$schema`）、且 `schema` 为空 → 报 `Validation` 并点名 `body_schema`。填了 `schema` 就不拦（那是有意为之）。调用点：`spec/upsert/write.rs`、`project_ops/endpoint/write.rs`、`variable_fill.rs`（`api_validate_endpoint` 只报 issue）。**桌面端点保存与 REST 普通更新路径（`PATCH /api/nodes/:id/endpoint-detail`）均无此门**。
 
 3. **七种 `body_mode`**（`domain::BodyMode`，`core/body.rs` 顶部表格即权威）：
 
@@ -87,8 +87,7 @@ MCP 分支更短，但汇入同一点：`api_call_endpoint` / `api_run_request` 
 
 ## 文档与实现不一致
 
-- `crates/simple-post-mcp/src/mcp/resources.rs` 的 `endpointTemplate.body_mode` 写成 `none | json | form | multipart | raw`（5 个），而 `guide.rules` 同一份资源里正确列出 7 个（多 `xml` / `binary`），`spec::input::BODY_MODE_VALUES` 也是 7 个。照着 `endpointTemplate` 填 `xml` 的 agent 会以为不支持。
-- `AGENTS.md §HTTP execution` 与实现一致；但桌面侧没有 `content`/`schema` 的拒收门，只有 MCP/REST 写入路径有，文档未点明这层不对称。
+- `content`/`schema` 拒收门不对称：该门（`reject_schema_shaped_payload`）仅在 spec 导入（`core/spec/upsert/write.rs`）与 MCP 端点写入（`mcp/project_ops/endpoint/write.rs`）中校验；桌面保存（`commands/nodes.rs`）与 REST 普通端点更新（`web_api/routes/nodes.rs:274`）均未设该门。
 
 ## 相关笔记
 

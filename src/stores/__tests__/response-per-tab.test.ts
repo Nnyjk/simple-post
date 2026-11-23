@@ -138,7 +138,7 @@ describe('切接口不再清空响应', () => {
 
     store.openTab('endpoint', 'e1');
     store.setLastResponse('e1', RESPONSE);
-    // 重复点同一个接口：早先这里是 `setLastResponse(null)`，那份响应当场就没了。
+    // 重复点同一个接口：不应执行 `setLastResponse(null)`，保留刚发出的响应。
     store.setActiveEndpoint('e1');
 
     assert.equal(useAppStore.getState().lastResponses['e1']?.response, RESPONSE);

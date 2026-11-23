@@ -1,6 +1,6 @@
 > 适用范围：读代码/笔记遇到不熟的词时回查；写代码前确认自己没把两个词当同一个
 > 权威来源：AGENTS.md §Architecture & Data Flow / §Code Conventions、crates/simple-post-core/src/db/schema.sql、crates/simple-post-core/src/domain/、crates/simple-post-interchange/src/ir.rs
-> 最后核对：2026-11-13（v0.1.34）
+> 最后核对：2026-11-23（v0.1.41）
 > 前置阅读：01-overview.md
 
 # 10 术语表与不变量速查卡
@@ -105,4 +105,4 @@
 
 ## 文档与实现不一致
 
-- 未发现术语层面的矛盾。`AGENTS.md` 的「47-tool registry」与实际 48 条属计数笔误，已记在 [01-overview.md](01-overview.md)。
+暂无未闭环项（术语定义与代码一致；AGENTS.md 的工具计数已同步对齐 48 条）。

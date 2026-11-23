@@ -68,7 +68,8 @@ pub struct AppliedBaseUrl {
 /// IR 顶层那些「模块」往哪儿落。
 #[derive(Debug, Clone, Copy)]
 pub enum CommitTarget<'a> {
-    /// 各自新建一个顶层模块。这是资源树里模块唯一的合法位置。
+    /// 各自新建一个顶层模块。目前生产导入路径仅支持 `CommitTarget::Module`，
+    /// `ProjectRoot` 仅供内部测试验证顶层模块生成使用。
     ProjectRoot,
     /// 挂进一个已存在的模块。**此时 IR 顶层模块一律降级成集合。**
     ///
