@@ -39,6 +39,7 @@ crates/simple-post-mcp/
     ├── dynamic/               # dynamic variables: the shared operations
     │   ├── mod.rs             #   module map
     │   ├── ops.rs             #   the operations all three consumers share
+    │   ├── preview.rs         #   ad-hoc expression evaluation preview
     │   └── source.rs          #   the SourceFetcher implementation
     ├── spec/                  # the OpenAPI spec upsert tool
     │   ├── mod.rs
@@ -104,7 +105,7 @@ crates/simple-post-mcp/
 
 ```
 simple-post-mcp
-  --url=<SIMPLE_POST_WEB_URL>          (default: http://localhost:4173)
+  --url=<SIMPLE_POST_WEB_URL>          (optional; default: discovers port from `mcp.port`)
   --password=<SIMPLE_POST_WEB_PASSWORD>   (optional, sent as `Authorization: Bearer …`)
   --transport=stdio|http               (default: stdio)
   --port=<number>                       (only for --transport=http, default 4333)
@@ -119,8 +120,20 @@ are set. `--transport`, `--port` and `--log-level` have no env-var override.
 
 ## Tools and capability tiers
 
-`tool_table()` registers 48 MCP tools, and `REQUIRED_CAPABILITY` gives
-every one of them a row. The global capability gate treats a missing row
+`tool_table()` registers 48 MCP tools across 6 operational categories:
+- `env_ops` (7 tools): `env_list`, `env_get_default`, `env_create`, `env_update`, `env_delete`, `env_set_var`, `env_set_baseurl`
+- `project_ops` (25 tools):
+  - project (5): `project_list`, `project_get`, `project_create`, `project_update`, `project_delete`
+  - module (5): `module_list`, `module_create`, `module_update`, `module_delete`, `module_move`
+  - collection (5): `collection_list`, `collection_create`, `collection_update`, `collection_delete`, `collection_move`
+  - endpoint (9): `endpoint_list`, `endpoint_get`, `endpoint_search`, `endpoint_history`, `endpoint_create`, `endpoint_update`, `endpoint_delete`, `endpoint_duplicate`, `endpoint_move`
+  - spec (1): `spec_upsert`
+- `http_ops` (3 tools): `api_run_request`, `api_call_endpoint`, `api_run_collection`
+- `variable_fill` (3 tools): `api_resolve_template`, `api_resolve_endpoint`, `api_validate_endpoint`
+- `response_parse` (3 tools): `api_parse_response`, `api_diff_responses`, `api_extract_jsonpath`
+- `dynamic_ops` (7 tools): `dynamic_var_list`, `dynamic_var_get`, `dynamic_var_create`, `dynamic_var_update`, `dynamic_var_delete`, `dynamic_var_resolve`, `dynamic_var_set_override`
+
+`REQUIRED_CAPABILITY` gives every one of the 48 tools a capability tier row. The global capability gate treats a missing row
 as unclassified and denies the tool. The three capability tiers are
 `read_only` / `safe_write` / `full_access`. The backend applies the tier
 the user picked in Settings (persisted as the `mcp.policy` preference);

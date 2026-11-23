@@ -415,7 +415,7 @@ async fn run_session(
     }
 
     // 走到这里只有正常收尾：对端发了 `Close`（已经备好事件）、eof，或写端坏了。读侧错误在
-    // 上面就地 return 了，不会再被这条兜底盖掉。
+    // 上面就地 return，不会触发此处的关闭事件回退分支。
     emit(
         &mut sink,
         close_event.unwrap_or(WsEvent::Closed {

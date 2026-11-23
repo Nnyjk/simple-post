@@ -2,30 +2,30 @@
 
 > 适用范围：`crates/simple-post-core/src/db/`（schema、CRUD、事务）、`domain/` 里与落库形状绑定的类型；不涉及前端 store 与 HTTP 层。
 > 权威来源：`crates/simple-post-core/src/db/schema.sql`、`db/schema.rs`、`db/mod.rs`、`db/pool.rs` 及各表 CRUD 文件、`port_file.rs`；三处 `db::init` 调用点（`src-tauri/src/lib.rs`、`crates/simple-post-server/src/lib.rs`、`web_api/serve.rs`）；`AGENTS.md § Key Directories`。
-> 最后核对：2026-11-13（v0.1.34）
+> 最后核对：2026-11-23（v0.1.41）
 > 前置阅读：`01-overview.md`
 
 ## 结论
 
-- **默认情形**（三种形态都不给 `--data-dir`、且 `SIMPLE_POST_DATA_DIR` 一致时）全应用只有**一个**库文件，路径恒为**调用方传给 `db::init` 的那个目录** + `store.db`（`db/pool.rs:24-26`，不加任何后缀）。例外是 `serve-web --data-dir D`：它把主进程的库挪到 `D\store.db`，而 daemon 子进程照旧用基准目录那份，于是**两份库互不相干**——细节见本节下面的「数据目录与落点（三种形态）」。默认调用方传 `port_registry::data_dir()`：`SIMPLE_POST_DATA_DIR`（非空时）否则 `dirs::data_dir()`，**原样**返回、不带 `simple-post` 段，故 Windows 默认是 `%APPDATA%\store.db`；`mcp.port` 则在 `<同一基准目录>\simple-post\mcp.port`——两者**不同层**。WAL + `foreign_keys=ON` + `busy_timeout=3000`，连接池固定 4 条。读走 `db::with_conn`，写走 `db::with_tx`。
+- **默认情形**（三种形态都不给 `--data-dir`、且 `SIMPLE_POST_DATA_DIR` 一致时）全应用只有**一个**库文件，路径恒为**调用方传给 `db::init` 的那个目录** + `store.db`（`db/pool.rs:24-26`，不加任何后缀）。例外是 `serve-web --data-dir D`：它把主进程的库挪到 `D\store.db`，而 daemon 子进程照旧用基准目录那份，于是**两份库互不相干**——细节见本节下面的「数据目录与文件位置（三种形态）」。默认调用方传 `port_registry::data_dir()`：`SIMPLE_POST_DATA_DIR`（非空时）否则 `dirs::data_dir()`，**原样**返回、不带 `simple-post` 段，故 Windows 默认是 `%APPDATA%\store.db`；`mcp.port` 则在 `<同一基准目录>\simple-post\mcp.port`——两者**不同层**。WAL + `foreign_keys=ON` + `busy_timeout=3000`，连接池固定 4 条。读走 `db::with_conn`，写走 `db::with_tx`。
 - 资源树是**单表多态**：`nodes` 用 `type` 判别 module / collection / endpoint，`endpoint_details` 只装 endpoint 专属列，`node_scripts` 只装 collection 的脚本。项目**不是**节点，由 `root_id` 指名。
 - schema 只增不迁：`SCHEMA_SQL`（`CREATE ... IF NOT EXISTS`）+ `ADDED_COLUMNS`（给既有表补列）+ 打开时 DROP 废弃索引/表 + 动态变量回填。版本号不符的新库（`user_version` > 当前）**报错**，更旧的文件**删库重建**。
 - 所有主键由 `domain::uid()`（`sp_` + 纳秒 + 进程内计数器）产生；`spec::mint_id(prefix)` 在其上加业务前缀 `proj_` / `mod_` / `col_` / `ep_` / `env_`。
 - 结构化字段一律 JSON-in-TEXT，serde 的形状**就是**线格式：改字段名等于改库内容可读性，必须 bump `SCHEMA_VERSION`（见 `auth_json` 的 v3）。
 
-### 数据目录与落点（三种形态）
+### 数据目录与文件位置（三种形态）
 
 `db::init(data_dir)` 只做 `data_dir.join("store.db")`（`db/pool.rs:24-26`），**不**附加后缀；`port_file::port_file_path()` 恒为 `<同一基准目录>/simple-post/mcp.port`（`port_file.rs:61` 是 `base.join("simple-post")`）。故 `store.db` 在基准目录根上，`mcp.port` 在其 `simple-post/` 子目录里——两者**不同层**。
 
-| 形态 | 传给 `db::init` 的目录 | `store.db`（Windows 默认） | `mcp.port` 落点 |
+| 形态 | 传给 `db::init` 的目录 | `store.db`（Windows 默认） | `mcp.port` 文件位置 |
 |---|---|---|---|
 | 桌面（Tauri） | `port_registry::data_dir()` = `SIMPLE_POST_DATA_DIR`（非空时）否则 `dirs::data_dir()`（`src-tauri/src/lib.rs:131,138`） | `%APPDATA%\store.db` | `%APPDATA%\simple-post\mcp.port`（supervisor 写） |
 | serve-web | `--data-dir` 给了就用；否则 `default_data_dir()` = `port_registry::data_dir()`（`cli.rs:92-101`、`web_api/serve.rs:35,120-122`） | `%APPDATA%\store.db`；给了 `--data-dir D` 则是 `D\store.db` | 仍由 supervisor 按 `port_registry::data_dir()` 算：`%APPDATA%\simple-post\mcp.port` |
-| MCP daemon | `port_registry::data_dir()`（`crates/simple-post-server/src/lib.rs:100,121`）；子进程按环境变量自行解析，`--data-dir` 不会传给它 | `%APPDATA%\store.db` | 由 supervisor 写；独立跑 `mcp` 时自己写（`lib.rs:176-186`） |
+| MCP daemon | `port_registry::data_dir()`（`crates/simple-post-server/src/lib.rs:113`）；子进程按环境变量自行解析，`--data-dir` 不会传给它 | `%APPDATA%\store.db` | 由 supervisor 写；独立跑 `mcp` 时自己写（`lib.rs:176-186`） |
 
 macOS / Linux 只是把 `%APPDATA%` 换成 `dirs::data_dir()` 的平台值（`~/Library/Application Support`、`$XDG_DATA_HOME` 或 `~/.local/share`）；`mcp.port` 的完整清单见 `port_file.rs` 文件头。
 
-- **`daemon_supervisor::host_data_dir()` 不是库位置**：它返回 `dirs::data_dir()/simple-post`，只用于填端口记录里的 `data_dir` 字段（`daemon_supervisor.rs:62-65,315`）；按它去找 `store.db` 会落空。
+- **`daemon_supervisor::host_data_dir()` 不是库位置**：它返回 `dirs::data_dir()/simple-post`，只用于填端口记录里的 `data_dir` 字段（`daemon_supervisor.rs:62-65`）；按它去找 `store.db` 会落空。
 - **设 `SIMPLE_POST_DATA_DIR=X` 后两者不同层**：库在 `X\store.db`（连同 `-wal`、`-shm`），端口文件在 `X\simple-post\mcp.port`。按目录备份 / 挪库时只拷 `X` 根会漏 `mcp.port`，只拷 `X\simple-post\` 会漏库。
 - **`--data-dir` 只挪主进程的库**：桌面端不传它；`serve-web --data-dir D` 时只有主进程的 REST 库搬到 `D\store.db`，`daemon_cli_args` 不带数据目录、也不为子进程设 `SIMPLE_POST_DATA_DIR`，故 daemon 子进程仍按环境变量（未设则 `%APPDATA%`）打开**另一份** `store.db`，端口文件也仍在 `%APPDATA%\simple-post\`。要整体搬迁必须设 `SIMPLE_POST_DATA_DIR`，不要只给 `--data-dir`。
 
@@ -117,7 +117,5 @@ macOS / Linux 只是把 `%APPDATA%` 换成 `dirs::data_dir()` 的平台值（`~/
 
 ## 文档与实现不一致
 
-- `db/preferences.rs::keys::MCP_AUTO_START` 的注释写「**默认 `false`**」，而同文件 `mcp_auto_start()` 的注释与实现都是缺行回退 `true`（`Ok(raw.unwrap_or(true))`）。实现为真，键注释为旧。
-- `db/permissions.rs` 顶部注释说缺行默认 `ReadCall` 是「刚导入的项目无需显式授权即可使用」；实际 `ReadCall` 允许的是只读 + 发请求，与全局 `mcp.policy` 缺行默认 `read_only` 并列时容易读成同一个开关（见「陷阱」）。措辞易混，非行为错误。
-- `db/schema.sql` 中 `nodes` 段落写「纯增量，故 SCHEMA_VERSION 不需要 bump」，但该表是 `SCHEMA_SQL` 的一部分、随 v2/v3 的重建路径到达；注释本身不矛盾，只是别据此认为旧库能保留 `nodes` 之前的行。
-- `[未核实]` `permissions.rs` 注释称「每项目一行」，schema 只以 `project_id` 为 PK 保证唯一，未见额外的项目存在性校验；`set` 对不存在的项目会以原始外键错误收场（有 FK 与 CASCADE，故不会留下悬挂行）。
+- `db/schema.sql` 中 `nodes` 段落写「纯增量，故 SCHEMA_VERSION 不需要 bump」，该表属于 `SCHEMA_SQL`、通过 v2/v3 重建路径创建，旧库不会保留 `nodes` 之前的历史数据。
+- `[未核实]` `permissions.rs` 注释称「每项目一行」，schema 以 `project_id` 为 PK 保证唯一；`permissions::set` 未做项目存在性预检，依赖外键约束与级联删除拦截无效写入。

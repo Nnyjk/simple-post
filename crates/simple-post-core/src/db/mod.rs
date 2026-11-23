@@ -4,8 +4,8 @@
 //!   行只来自用户或 MCP 客户端。
 //! - 读用 `db::with_conn`，写用 `db::with_tx`；所有 CRUD 模块只能走这两者之一。
 //! - `init` 里启用 WAL：读者互不阻塞，单个写者也不阻塞读者。
-//! - 库文件在 `<data_dir>/store.db`；`data_dir` 由 `SIMPLE_POST_DATA_DIR` 或
-//!   `dirs::data_dir()` 解析出来（Windows 上即 `%APPDATA%\store.db`），
+//! - 库文件在 `<data_dir>/store.db`；`data_dir` 通常由 `--data-dir`、`SIMPLE_POST_DATA_DIR`
+//!   或 `dirs::data_dir()` 解析出来（Windows 默认即 `%APPDATA%\store.db`），
 //!   目录和文件缺失时自动创建；首次启动建完表即止。
 //! - `db::ping` 是廉价存活探针。
 //!

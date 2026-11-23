@@ -2,7 +2,7 @@
 
 - 适用范围：`src/` 全部渲染层代码（React 19 + Zustand 5 + Tailwind 4 + CodeMirror 6），含分包红线与前端测试约定。
 - 权威来源：`src/App.tsx`、`src/main.tsx`、`src/stores/app-store.ts`、`vite.config.ts`、`src/lib/tauri-commands.ts`、各 `features/*/` 模块头注释。
-- 最后核对：2026-11-13（v0.1.34）
+- 最后核对：2026-11-23（v0.1.41）
 - 前置阅读：`01-overview.md`、`02-architecture.md`
 
 ## 一句话结论
@@ -139,5 +139,4 @@
 
 ## 文档与实现不一致
 
-1. `src/main.tsx` 注释称 `bootstrap()` 在 `loaded || loading` 时幂等早退；`bootstrap-slice.ts` 实际只判断 `if (get().loaded) return;`，**没有 `loading` 守卫**——并发调用会重复跑第 1 层（`main.tsx` 只调一次，故当前不触发）。以代码为准。
-2. `WorkspaceShell.tsx` 头部写「这里刻意不挂载 `ProjectTree`」，正文第 169 行实际是条件挂载 `{activeProjectId !== '' && <ProjectTree />}`。语义应为「没有项目时不挂载」，注释措辞与代码字面冲突。
+暂无未闭环项（`src/main.tsx` 早退说明已在 2026-11-17 纠正，`WorkspaceShell.tsx` 挂载注释亦已同步）。

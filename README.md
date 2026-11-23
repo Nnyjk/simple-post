@@ -111,7 +111,7 @@ npm run dev:split      # 同时启动 Vite 与 serve-web（4173），前后端�
 npm run check          # 本地门禁：Prettier → ESLint → tsc → 单测 → OpenAPI lint → cargo fmt → clippy
 ```
 
-Rust 侧：`cargo build --release`（桌面应用与全部子命令）、`cargo build --release -p simple-post-server`（仅无头服务）、`cargo test --workspace`（全部测试）。`npm run check` 覆盖 CI 的两个 job，提交前本地跑一次即可。
+Rust 侧：`cargo build --release`（桌面应用与全部子命令）、`cargo build --release -p simple-post-server`（仅无头服务）、`cargo test --workspace`（全部测试）。CI 包含 Web、Rust 与 Docker 三个 job（Docker job 按路径变更触发）；`npm run check` 覆盖 Web 与 Rust 两个 job 跑的主要代码检查与前端单测，提交前本地跑它，加跑 `cargo test --workspace` 覆盖 Rust 测试。
 
 桌面应用用 `npm run tauri:dev` 开发运行，用 `npm run tauri:build` 产出 NSIS / dmg / deb 安装包。
 
@@ -317,13 +317,13 @@ sp.example.com {
 }
 ```
 
-前缀只由一处处理。服务端把整个路由（`/api/*`、`/mcp` 与三个健康探针）一起放进 `/sp` 下，并按实际前缀改写单页应用外壳里的资源引用。nginx 若再剥一次，两边就对不上。设置前缀后健康检查也移到 `/sp/healthz`，探针要跟着改。
+前缀只由一处处理。服务端把整棵路由树（`/api/*` 与 `/healthz`、`/api/healthz` 两个健康探针）一起放进 `/sp` 下（MCP 位于守护进程独立的监听端口，不受 base path 影响），并按实际前缀改写单页应用外壳里的资源引用。nginx 若再剥一次，两边就对不上。设置前缀后健康检查也移到 `/sp/healthz`，探针要跟着改。
 
 ### 安全约束
 
-- **`SIMPLE_POST_WEB_PASSWORD` 必须设置。** 口令为空时鉴权中间件不生效，`/api/*` 与 `/mcp` 对所有能连到该端口的调用方开放。容器监听 `0.0.0.0`，因此这个口令是唯一的访问控制。
+- **`SIMPLE_POST_WEB_PASSWORD` 必须设置。** 口令为空时鉴权中间件不生效，`/api/*` 与 MCP 守护进程端点对所有能连到对应端口的调用方开放。容器监听 `0.0.0.0`，因此这个口令是唯一的访问控制。
 - **不要把口令写成空串。** 服务端判断的是这个环境变量有没有被设置，不是值是不是空：未设置时不鉴权，写成 `""` 则变成鉴权开启且要求一个空的口令，结果是所有 `/api/*` 返回 401。
-- 健康检查 `/api/healthz`、`/mcp/healthz`、`/healthz` 始终免认证；`/assets/*` 与单页应用外壳同样免认证——浏览器无法给 `<script type="module">` 附加 `Authorization` 头，对它们鉴权会让带口令的部署无法打开页面。
+- 健康检查 `/api/healthz`、`/healthz`（主端口）以及 `/mcp/healthz`（MCP 端口）始终免认证；`/assets/*` 与单页应用外壳同样免认证——浏览器无法给 `<script type="module">` 附加 `Authorization` 头，对它们鉴权会让带口令的部署无法打开页面。
 - **出站通道只有三条，且同受一条策略管辖**：`POST /api/http/send`、`POST /api/http/stream`（SSE）与 `POST /api/ws/sessions`（WebSocket）。请求体里的 URL 完全由调用方给出，服务端就是这几条通道的代理。出站策略由 `core::http_executor::OutboundPolicy` 把关，它只放行 `http` 与 `https` 两种 scheme；WebSocket 的 `ws://` / `wss://` 先映射成 `http://` / `https://` 再走同一个检查，被拒时回一条 `kind: "protocol"` 的错误、不建连。默认不拦截私网地址，桌面端用户经常要访问 `localhost:3000`；公网或共享部署请设置 `SIMPLE_POST_BLOCK_PRIVATE_NET=1`，额外拒绝回环、私网、链路本地（含云厂商 metadata `169.254.169.254`）与 CGNAT 网段（`100.64.0.0/10`）。服务端不注册节点级的 `POST /api/nodes/{id}/send`，注册了它就多出一条不受管辖的出站通道。
 
 ## 版本更新

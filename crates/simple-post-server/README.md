@@ -3,8 +3,8 @@
 The headless host of Simple Post. This crate owns everything the desktop
 shell and the container image share, minus the GUI:
 
-- `web_api` — the axum router behind `serve-web`: the REST surface, the
-  `/mcp` JSON-RPC endpoint and the static SPA host.
+- `web_api` — the axum router behind `serve-web`: the REST surface and the
+  static SPA host. MCP's endpoint is served on the daemon's own port.
 - `daemon_supervisor` — the host-independent spawn and teardown of the MCP
   daemon subprocess.
 - `auth` — the bearer middleware and the list of paths that stay public.
@@ -22,6 +22,11 @@ and the `--lib` test binary dragged the Windows GUI runtime in through
 `AppHandle` (see the long note on `daemon_supervisor`). Splitting the
 server out turns the image into `debian-slim` plus one binary, and keeps
 the test binary free of what it does not need.
+
+The optional `gui` feature (`features = ["gui"]`) is disabled by default.
+It re-attaches the three `AppHandle`-taking daemon methods (`ensure_started`,
+`start`, `restart`) so desktop crash events reach the webview. The default build
+has no Tauri dependency.
 
 The dependency direction is one-way:
 
@@ -49,9 +54,14 @@ crates/simple-post-server/
     ├── dto.rs                # the wire shapes both transports share
     ├── http_config.rs        # the MCP listener config + its fingerprint
     ├── dynamic_api.rs        # the dynamic-variable orchestration
+    ├── environment_api.rs    # the environment creation orchestration
     ├── interchange_api.rs    # the import / export orchestration
+    ├── log_api.rs            # the log export orchestration
+    ├── log_layer.rs          # the tracing layer that feeds the log ring buffer
+    ├── mcp_router.rs         # the router on the MCP daemon's own port
     ├── project_api.rs        # the project and tree-node creation orchestration
     ├── spec_api.rs           # the interface-specification orchestration
+    ├── update_api.rs         # the update check/apply orchestration
     ├── daemon_supervisor.rs  # the facade over the MCP daemon supervision
     ├── daemon_supervisor/    # the supervision, one file per concern
     │   ├── listen_config.rs  #   the persisted listener row → the child's argv
@@ -63,12 +73,10 @@ crates/simple-post-server/
     │   ├── stderr.rs         #   the daemon's stderr forwarding
     │   └── watcher.rs        #   the exit watchers
     ├── port_registry.rs      # the `mcp.port` file facade
-    ├── port_registry/        # the registry, one file per concern
+    ├── port_registry/        # the registry, one file per concern (path + record shape live in core)
     │   ├── claim.rs          #   the multi-instance claim (create_new + fallback)
     │   ├── health.rs         #   the `/mcp/healthz` liveness probe
-    │   ├── paths.rs          #   the platform data dir + the file path
-    │   ├── proc.rs           #   the process-table probe + the forced kill
-    │   └── record.rs         #   the record shape + the configuration fingerprint
+    │   └── proc.rs           #   the process-table probe + the forced kill
     ├── web_api/              # the REST + static-file layer
     │   ├── dto.rs            #   the web-side wire shapes
     │   ├── error.rs          #   the AppError → HTTP mapping
@@ -77,6 +85,7 @@ crates/simple-post-server/
     │   ├── static_files.rs   #   the SPA shell + the hashed assets
     │   ├── routes/           #   the handlers, one file per resource
     │   └── spec/             #   the OpenAPI contract table
+    ├── win_spawn.rs          # the `CREATE_NO_WINDOW` flag for child processes
     └── (the tests sit beside their source as `*_test.rs` / `mod_test.rs`)
 ```
 
@@ -85,9 +94,10 @@ crates/simple-post-server/
 Every feature that both the desktop commands and the REST routes expose
 keeps its orchestration in this crate: `interchange_api` (import and
 export), `project_api` (project and tree-node creation), `spec_api`
-(interface specifications) and `dynamic_api` (dynamic variables). The
-Tauri commands in `src-tauri/src/commands/` and the REST handlers in
-`web_api/routes/` are thin shells over them.
+(interface specifications), `dynamic_api` (dynamic variables),
+`environment_api` (environments), `log_api` (log export) and `update_api`
+(updates). The Tauri commands in `src-tauri/src/commands/` and the REST
+handlers in `web_api/routes/` are thin shells over them.
 
 The shells parse the **wire format** and nothing else: the REST side
 accepts the two body shapes that `POST /api/projects` has always taken

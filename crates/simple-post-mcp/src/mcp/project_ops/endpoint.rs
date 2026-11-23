@@ -1,4 +1,4 @@
-//! `endpoint_*` MCP 工具 —— 端点 CRUD、搜索、复制、移动，共 8 个。
+//! `endpoint_*` MCP 工具 —— 端点 CRUD、搜索、复制、移动，共 9 个。
 //!
 //! 本文件只是门面：登记与 JSON Schema（`registry.rs`）、Args（`args.rs`）、输入强制
 //! 转换（`input.rs` / `patch.rs`）、读写 handler（`read.rs` / `write.rs`）、调用历史的
@@ -27,7 +27,7 @@ pub(super) use registry::register;
 pub(super) use write::tool_endpoint_create;
 
 // `spec_upsert` 也要用这两样：「它还缺什么」的判据，以及 OAuth2 载荷的 JSON Schema。
-// 它们本来只服务 `endpoint_*` 那 8 个工具，现在同一个 `project_ops` 下的另一个
+// 它们本来只服务 `endpoint_*` 那 9 个工具，现在同一个 `project_ops` 下的另一个
 // 工具也要用，故在这里再导出一次。
 //
 // `missing_pieces` 另有一处调用方：`crate::spec::ops` —— REST 路由

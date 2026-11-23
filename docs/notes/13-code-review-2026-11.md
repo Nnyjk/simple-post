@@ -2,7 +2,7 @@
 
 > 适用范围：想知道「这轮评审到底改了什么、还欠什么」的人，以及下一轮评审的起点
 > 权威来源：本轮六份报告（`.scratch/review/*.md`，gitignored）+ 代码本身；**「已修」一律以代码为准**，报告只作线索
-> 最后核对：2026-11-17
+> 最后核对：2026-11-23（v0.1.41）
 > 前置阅读：[11-handover-open-issues](11-handover-open-issues.md)（文档/注释矛盾总表与修复记录，本文不重复那张表）
 
 ## 结论摘要
@@ -14,7 +14,7 @@
 | 代码质量 | 5 个 patch 类型补 `deny_unknown_fields`；脚本快照/回滚不再静默失败 |
 | 依赖 | `sha2`、`tower-http` 归并到已有版本，`r2d2` 降为 dev-dependency，reqwest 注释改成事实 |
 | 视觉一致性 | Send 按钮回主色、药丸按底色选墨色、状态码文字走语义 token、标签条可键盘、hover-only 补 focus 通道 |
-| 守卫 | 新增 9 条样式哨兵（`src/lib/__tests__/style-guards.test.ts`），字号下限与虚线语汇从此可回归；`scripts-manifest.test.ts` 守 `scripts/` 的静态可达性，`registry_parity_test.rs` / `route_specs_test.rs` 守四处注册表的差集 |
+| 守卫 | 新增 10 条样式哨兵（`src/lib/__tests__/style-guards.test.ts`），字号下限与虚线语汇从此可回归；`scripts-manifest.test.ts` 守 `scripts/` 的静态可达性，`registry_parity_test.rs` / `route_specs_test.rs` 守四处注册表的差集 |
 
 本轮落地 **28 条**（六份报告的 21 条 + 上一版残留清单里收口的 7 条），仍未修 **3 条**（见「未修残留」）。没有遗留 blocker：残留是「门禁成本」与「契约待决」两类，不是会算错数据的缺陷。
 
@@ -68,7 +68,7 @@
 | 数据目录注释写 `com.simple-post`，代码 `simple-post` | `crates/simple-post-core/src/port_file.rs:53-62` 注释改成「不带任何应用段，`port_file_path_at` 自己 join `simple-post`」 | 读代码即可核对 |
 | `mcp/resources.rs` 的 `body_mode` 只列 5 个取值 | `crates/simple-post-mcp/src/mcp/resources.rs:153` 补齐 7 个（`none/json/form/multipart/xml/raw/binary`） | `mcp/mod_test.rs` 预算不受影响 |
 | `docs/notes/05-mcp.md` 与 `docs/notes/11-handover-open-issues.md:73` 的数字落后 | 两处改为 48 工具、62 条 `COMMANDS`/`WEB_ROUTES`、45 200/45 116 | `npm test`（预算测试会先红） |
-| 样式约定无回归网 | 新增 `src/lib/__tests__/style-guards.test.ts`（213 行、9 条）：层级不用任意值/不内联 `zIndex`、不用原生调色板、不写死黑白、hover 不手写 accent 透明度、次要文字不叠 alpha、字号 ≥10px、圆角 ≤lg、虚线边框只属于 EmptyHint（5 个白名单）、hover-only 必须可聚焦 | 9 条 test 名与判据见该文件；`npm test` |
+| 样式约定无回归网 | 新增 `src/lib/__tests__/style-guards.test.ts`（231 行、10 条）：层级不用任意值/不内联 `zIndex`、不用原生调色板、不写死黑白、hover 不手写 accent 透明度、次要文字不叠 alpha、字号 ≥10px、圆角 ≤lg、虚线边框只属于 EmptyHint（5 个白名单）、hover-only 必须可聚焦、hover/focus 底色不使用 bg-accent | 10 条 test 名与判据见该文件；`npm test` |
 
 ### 收口：上一节 7 条残留的落地
 

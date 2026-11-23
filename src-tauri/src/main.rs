@@ -78,7 +78,7 @@ enum Cmd {
     },
 
     /// Run as stdio→HTTP proxy. This is a separate binary
-    /// (`simple-post-mcp.exe`); the main binary prints an error and exits.
+    /// (`simple-post-mcp`); the main binary prints an error and exits.
     /// Use the dedicated binary directly, or point the client at the
     /// daemon over HTTP (no local install needed on the client machine).
     #[command(name = "mcp-proxy")]

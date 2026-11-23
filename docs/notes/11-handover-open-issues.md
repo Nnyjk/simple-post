@@ -1,6 +1,6 @@
 > 适用范围：刚接手、要决定「先查什么、哪些文档不能信」的人；也用于收口时判断一条矛盾是否已被登记
 > 权威来源：本表每行的「应以谁为准」列（源码路径:行 或 小节），以及各篇末尾的「文档与实现不一致」
-> 最后核对：2026-11-13（v0.1.34）
+> 最后核对：2026-11-23（v0.1.41）
 > 前置阅读：README.md、01-overview.md
 
 # 11 接手清单：已知矛盾、核对顺序、欠账
@@ -31,11 +31,11 @@
 | 14 | `src/lib/__tests__/placement-parity.test.ts:5` | Rust 读取器写成 `crates/simple-post-core/src/placement_parity_test.rs` | 实际是 `crates/simple-post-core/src/domain/placement_parity_test.rs`（`#[path]` 挂在 `domain` 下） | 照注释找不到文件 | 改注释 · **确认** |
 | 15 | 五个 parity 读取器：`variable_fill/resolve_parity_test.rs`、`core/path_params_test.rs`、`core/oauth2/inject_parity_test.rs`、`core/dynamic/resolve_parity_test.rs`、`mcp/http_ops/multipart_parity_test.rs` | 交接说明称「五个都只断言非空，且没有 `deny_unknown_fields`」 | 五个确实都没有 `deny_unknown_fields`；但 `resolve_parity_test.rs:137` **断言了精确条数 15**（注释还专门否掉了「非空」写法），其余四个才是只断言 `!cases.is_empty()` | 键名漂移时后四个会静默少跑；resolve 有数量兜底 | 改代码（补 `deny_unknown_fields` 或补条数）· **修正** |
 | 16 | `fixtures/oauth2-config-parity.json`、`fixtures/placement-parity.json` | 缺 `$comment` | 逐文件核对：其余八份各有一条 `$comment`，这两份为 0 | 靠 `$comment` 找读取器的人在这两份落空 | 改 fixture（补 `$comment`）· **确认** |
-| 17 | `crates/simple-post-interchange/src/commit/mod.rs:70-72` | `ProjectRoot` 文档写「各自新建一个顶层模块。这是资源树里模块唯一的合法位置」，读起来像现役入口 | 生产路径只有 `interchange_api.rs:133` 的 `CommitTarget::Module`；`ProjectRoot` 只出现在 `commit/*_test.rs` 与 `support.rs` | 让人以为存在「导入到项目根」的入口 | 需人工确认（保留就改文档，否则删）· **确认事实** |
-| 18 | `docker/docker-portainer.yml:70` | 硬编码 `ghcr.io/nnyjk/simple-post:0.1.34` | 发布清单只有四份版本号；`docker/docker-compose.yml:26` 的同类写法只是注释 | 升级后 Portainer 栈仍拉旧镜像，且没人会收到提醒 | 改流程（纳入发布清单）· **确认** |
+| 17 | `crates/simple-post-interchange/src/commit/mod.rs:70-72` | `ProjectRoot` 文档写「各自新建一个顶层模块。这是资源树里模块唯一的合法位置」 | 源码已注明生产路径仅支持 `CommitTarget::Module`，`ProjectRoot` 仅供内部测试验证顶层模块生成使用 | 让人以为存在「导入到项目根」的公开入口 | 改文档（注明为内部/测试支持）· **已闭环** |
+| 18 | `docker/docker-portainer.yml:70` | 硬编码特定镜像版本（当前 `0.1.38`） | 发布清单只有四份版本号；`docker/docker-compose.yml:26` 的同类写法只是注释 | 升级后 Portainer 栈仍拉旧镜像，且没人会收到提醒 | 改流程（纳入发布清单）· **确认** |
 | 19 | `.github/workflows/release.yml:82` | `tagName: ${{ inputs.tag \|\| format('refs/tags/{0}', github.ref_name) }}` | 发布说明与 `publish-image.yml` 都按裸 `vX.Y.Z` 叙述 | 若 tauri-action 不接受 `refs/tags/` 前缀，draft release 的 tag 会异常 | 需人工确认（跑一次 release 或查上游文档）· **确认事实，兼容性未核实** |
 | 20 | `crates/simple-post-core/src/db/mod.rs:7-8`、`crates/simple-post-server/src/main.rs:50-54`、`crates/simple-post-core/src/port_file.rs:53-55`、`crates/simple-post-server/src/daemon_supervisor.rs:62-65` | 数据目录/`store.db` 落点四处说法不一：`db/mod.rs` 写 Windows 是 `%APPDATA%\store.db`（与默认落点一致，但没提 `--data-dir`）；`server/main.rs` 的 `--data-dir` 文档写默认 `dirs::data_dir()/simple-post`；`port_file.rs` 注释让调用方 `.join("com.simple-post")`，实际代码 join 的是 `"simple-post"`（`:61`）；`host_data_dir()` 返回 `dirs::data_dir()/simple-post` | `db/pool.rs:24-26` + 三个 `db::init` 调用点（`src-tauri/src/lib.rs:138`、`web_api/serve.rs:35`、`server/src/lib.rs:121`）：库 = 传入目录 + `store.db`；`mcp.port` = 同一基准目录 + `simple-post/mcp.port`（`port_file.rs:60-63`）。Windows 默认即 `%APPDATA%\store.db` 与 `%APPDATA%\simple-post\mcp.port` | 按 `%APPDATA%\simple-post` 找库会落空、按它删库会删错位置；`serve-web --data-dir` 只搬主进程的库，daemon 仍读环境变量/`%APPDATA%` | 改注释与文档（不动代码）· **确认** |
-| 21 | `AGENTS.md` §Key Directories（`:181` 起）、§Important Files（`:409` 起） | 文件地图缺条目：`docker-portainer.yml`（已随 Docker 文件迁入 `docker/`，并在 AGENTS 的 `docker/` 条目中列出）、`crates-guide.html`、`src/lib/error-text.ts`、`src/hooks/useLocalExpansion.ts`（§Key Directories 连 `src/hooks/` 整个目录都没提）、`.thinkrail/` | 仓库实际树：这五个路径都存在（`docker/docker-portainer.yml` 在 `docker/`，`crates-guide.html` 在根，另三个在 `src/`、`src/lib`、`src/hooks`） | 按地图找 Portainer 栈文件、错误文案或本地展开 hook 会空手；新文件不知道归到哪一类 | 改文档（补条目）· **确认** |
+| 21 | `AGENTS.md` §Key Directories（`:234` 起）、§Important Files | 文件地图缺条目：`docker/docker-portainer.yml`、`crates-guide.html`、`src/lib/error-text.ts`、`src/hooks/useLocalExpansion.ts`、`.thinkrail/` | `src/hooks/useLocalExpansion.ts`、`.thinkrail/` 与 `docker/` 条目已补入 AGENTS.md | 按地图找文件或 hook 会空手 | 改文档（已基本补齐）· **已闭环** |
 
 ## 修复记录（2026-11-17，注释/文档纠错 + 守卫收口）
 
@@ -53,11 +53,13 @@
 | 9 | 改成「`loaded` 为真时早退；不按 `loading` 去重」 | `src/main.tsx:30-32` |
 | 10 | 改成「`ProjectTree` 只在项目激活后挂载」 | `src/features/workspace/WorkspaceShell.tsx:9-10` |
 | 11 | 默认 `false` → 默认 `true`，与 `raw.unwrap_or(true)` 一致 | `crates/simple-post-core/src/db/preferences.rs:94-98,135-139` |
+| 12 | 顶部注释补上「项目级权限与全局 `mcp.policy` 取更严档位」，不再读成 AI 默认可写 | `crates/simple-post-core/src/db/permissions.rs:1-6` |
 | 14 | 补上 `domain/` 段 | `src/lib/__tests__/placement-parity.test.ts:5` |
 | 15 | 四个 parity 读取器补 `deny_unknown_fields` 与精确条数（32 / 5·15·11 / 13 / 2），TS 侧七处同样钉住条数 | `crates/simple-post-core/src/path_params_test.rs:50`、`dynamic/resolve_parity_test.rs:87`、`oauth2/inject_parity_test.rs:93`、`crates/simple-post-mcp/src/mcp/http_ops/multipart_parity_test.rs:126` |
-| 20 | `port_file.rs` 的后缀写作 `simple-post`（与 `port_file_path_at` 一致）；`mcp.port` 落在其下 | `crates/simple-post-core/src/port_file.rs:50-55` |
+| 20 | `port_file.rs` 的后缀写作 `simple-post`（与 `port_file_path_at` 一致）；`mcp.port` 落在其下；`db/mod.rs` 与 `server/main.rs` 均对齐 `dirs::data_dir()` 统一基准 | `crates/simple-post-core/src/port_file.rs:50-55`、`db/mod.rs:7-9` |
+| 21 | `AGENTS.md` 补齐 `src/hooks/useLocalExpansion.ts`、`.thinkrail/` 等条目 | `AGENTS.md` §Key Directories |
 
-仍未修：**#7**（桌面与 REST 路径缺 schema 拒收门）、**#12**、**#13**、**#16**（两份 fixture 仍缺 `$comment`）、**#17**、**#18**、**#19**、**#21**，以及 #20 里 `crates/simple-post-core/src/db/mod.rs:7-8` 与 `crates/simple-post-server/src/main.rs:50-54` 两处对默认数据目录的说法。
+仍未修：**#7**（桌面与 REST 路径缺 schema 拒收门）、**#13**（外键约束行为友好度待定）、**#16**（两份 fixture 仍缺 `$comment`）、**#18**（Portainer 镜像标签未入发版清单）、**#19**（release.yml 的 tagName 格式）。
 
 ## 结构：接手后建议的核对顺序
 

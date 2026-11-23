@@ -526,7 +526,7 @@ export const createDynamicSlice: StateCreator<AppState, [], [], DynamicSlice> = 
         // 浅合并：一个项目一份草稿，改一格就换一个新对象，别的项目的引用原样保留（选择器靠
         // 引用比较，重建整张表会让没在编辑的项目的面板也重渲染一次）。
         //
-        // 没有草稿时兜底的那份既不是新建表也不是编辑表：兜底若带 `creating: true`，一次没人
+        // 没有草稿时回退的那份既不是新建表也不是编辑表：回退若带 `creating: true`，一次没人
         // 开表单的 patch 就会在面板上凭空长出一张新建表。
         const draft = s.dynamicDrafts[projectId] ?? {
           ...emptyDynamicVariableDraft(),

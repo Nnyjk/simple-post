@@ -55,7 +55,7 @@ export interface DynamicVariableFormProps {
   ) => void;
 }
 
-/** 没有草稿时的兜底：面板只在草稿存在时挂载表单，故这一份不会出现在正常路径上。 */
+/** 没有草稿时的回退：面板只在草稿存在时挂载表单，故这一份不会出现在正常路径上。 */
 const EMPTY_DRAFT = emptyDynamicVariableDraft();
 
 /** 表单行的骨架：左列是字段标签（固定 5rem，各行标签对齐），右列占满剩余宽度。八行共用
@@ -138,7 +138,7 @@ export function DynamicVariableForm({
   const usesEndpoint = sourceKind === 'endpoint';
 
   // 数据源接口所属项目里的环境，按名字排序。选哪一格是用户的事，故给一份稳定的次序：
-  // 名字相同的按 id 兜底，这样同一个项目两次打开表单的顺序一致。
+  // 名字相同的按 id 次序排列，这样同一个项目两次打开表单的顺序一致。
   const projectEnvironments = useMemo(
     () =>
       environments
@@ -187,7 +187,7 @@ export function DynamicVariableForm({
       // 发出去的那份 patch：收尾时按它决定推进基线的哪几格（没提到的格保持原基线）。
       let patch: Partial<DynamicVariable> = {};
       if (variable) {
-        // `baseline` 兜底用此刻这条定义：草稿是被 `patchDynamicVariableDraft` 凭空垫出来的那种
+        // `baseline` 缺失时回退到此刻这条定义：草稿是被 `patchDynamicVariableDraft` 凭空垫出来的那种
         // 极端情形，也不能把「编辑」错走成「新建」。
         patch = buildEditPatch(baseline ?? variable, draft);
         saved = await updateDynamicVariable(variable.id, patch);

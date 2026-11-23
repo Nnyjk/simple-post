@@ -2,7 +2,7 @@
 
 - 适用范围：本地开发、测试、CI、发布与容器部署的流程面；架构与数据模型见其它篇。
 - 权威来源：`package.json`、`.github/workflows/{ci,release,publish-image}.yml`、`docker/`（`Dockerfile`、`docker-*.yml`、`Dockerfile.dockerignore`）、`scripts/`、`AGENTS.md`、`.github/CONTRIBUTING.md`。
-- 最后核对：2026-11-13（v0.1.34）
+- 最后核对：2026-11-23（v0.1.41）
 - 前置阅读：01-overview.md
 
 ## 结论
@@ -200,6 +200,6 @@ MCP 专用端口必须是**独立的容器端口**（同一容器端口只能承
 
 ## 文档与实现不一致
 
-1. **`docker/docker-portainer.yml:70` 把镜像固定成 `ghcr.io/nnyjk/simple-post:0.1.34`**，但发布流程只列了四份版本号（`package.json`、根 `Cargo.toml`、`tauri.conf.json`、README 徽章）。这一行不在清单里，升级时容易漏改，导致 Portainer 栈仍拉旧镜像。
-2. `docker/docker-compose.yml:26` 的注释示例同样写着 `:0.1.34`（仅注释，不影响运行）；`README.md` 另有多处 `0.1.34`（拉取命令、`SP_IMAGE` 示例、标签说明、v0.3 描述），只有徽章被列为「版本源」，其余是叙述性副本，会随版本漂移。
+1. **`docker/docker-portainer.yml:70` 把镜像固定成特定标签（当前为 `0.1.38`）**，但发布流程清单只列了四份版本号（`package.json`、根 `Cargo.toml`、`tauri.conf.json`、README 徽章）。该文件未纳入清单，发布升级时容易漏改。
+2. `docker/docker-compose.yml:26` 的注释示例同样写着历史版本示例（仅注释，不影响运行）；`README.md` 另有多处历史版本叙述性副本，会随版本漂移。
 3. `.github/workflows/release.yml` 的 `tagName` 传的是 `format('refs/tags/{0}', github.ref_name)`，即 `refs/tags/vX.Y.Z` 而非裸 tag 名；tauri-action 是否原样接受该前缀 `[未核实]`，但发布说明与 `publish-image.yml` 都按裸 `vX.Y.Z` 叙述。

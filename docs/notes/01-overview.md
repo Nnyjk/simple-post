@@ -1,6 +1,6 @@
 > 适用范围：第一次接手、要在一小时内跑起来并看懂仓库形状的人或 agent
 > 权威来源：README.md §这是什么/§部署、AGENTS.md §Project Overview/§Key Directories/§Development Commands、src-tauri/src/main.rs、crates/simple-post-server/src/main.rs、package.json、Cargo.toml
-> 最后核对：2026-11-13（v0.1.34）
+> 最后核对：2026-11-23（v0.1.41）
 > 前置阅读：README.md
 
 # 01 总览
@@ -107,5 +107,4 @@ npm run dev:split
 
 ## 文档与实现不一致
 
-- `AGENTS.md §Important Files` 把 `vite.config.ts` 描述为「`/api` + `/mcp` proxy（ws disabled on `/mcp`）」，但实际的 `vite.config.ts:45-52` **只有 `/api`**，并有一段注释明确说明「这里**没有** `/mcp` 的代理，因为守护进程的端口在开发态由 OS 分配」。以源码为准。
-- `AGENTS.md §Important Files` 称 MCP 工具注册表是「47-tool registry」，而 `README.md`、`crates/simple-post-mcp/README.md:122` 与实际 `REQUIRED_CAPABILITY` 表都是 **48**（`crates/simple-post-mcp/src/mcp/registry.rs:56` 起，48 条）。以 48 为准。
+暂无未闭环项。
