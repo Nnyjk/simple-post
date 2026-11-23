@@ -73,9 +73,9 @@
 - z-index 只从 `src/components/ui/layers.ts` 取：`popover 50` / `contextMenu 60` / `tooltip 70` / `modal 100` / `tooltipInModal 110`。手写 `z-[200]` 等于另立一层。
 - 语义色：`--*-foreground` 是**压在饱和填充上的文字色**，不是「同色的浅版」。`--destructive` 深浅两档互换极性（light `5 59% 44%` + 白字；dark `354 100% 80%` + 近黑字），`--primary` 同理。hover/选中用 `bg-overlay-hover`/`bg-surface-hover` 而非 `bg-accent/40`。概念色走 `--hue-*` + `src/lib/hue.ts`（八色，角度固定）。
 - 树行三块（`rows/TreeRow.tsx`）：箭头（`w-[16px]` 前导槽，`ChevronRight`）/ 名称方块（`h-[26px]`，悬停淡入边框覆盖层）/ 行尾「+」。**箭头与名称是两个独立按钮**：箭头 → `toggleNodeExpanded`，名称 → `openTab`。回归网 `project-tree/__tests__/tree-toggle-split.test.ts`（读源码断言，见测试节）。
-- **标签条 GSAP 单通道**（`workspace/WorkspaceTabs.tsx`）：宽度、位置、激活指示条、横向滚动全部交给 GSAP，混入 CSS 过渡会互相打架（标签宽度刻意没有 `transition-width`）。
+- **标签条 GSAP 单通道**（`workspace/WorkspaceTabs.tsx`）：位置、激活指示条、横向滚动全部交给 GSAP，混入 CSS 过渡会互相打架（标签宽度刻意没有 `transition-width`）。
+  - **标签宽度恒定 160px，没有 compact 档**，宽度不参与补间：Flip 的依赖只有 `openTabs`。标签多到放不下时条横向滚动，底部是 3px 的覆盖式滚动条（不占布局、不改标签高度），几何由 `tab-scroll.ts::scrollbarThumb` 算出、滑块可拖动；尾部「关闭其他标签」按钮在滚动区之外，不随内容滚走。
   - Flip 记**视口坐标**，故滚动停稳后必须重记（`captureFlipState`，滚轮 120ms 去抖），否则下次增删标签整条先跳一截。
-  - 依赖必须带 `isCompact`：normal 160px / compact 92px 也是补间的一部分。
   - 激活指示条挂在条级、逐帧读激活标签实时 `rect`（`x = rect.left - stripRect.left + scrollLeft`），指数逼近 `BAR_APPROACH=0.24`，窗口 `BAR_SETTLE_MS=480`；补间中被打断的那一轮不滚。
   - 滚动目标由纯函数 `tab-scroll.ts::scrollTargetForActiveTab` 算出（三条规则：放得下不滚、已在可视区不滚、夹在 `[0, maxScroll]`、差 <0.5px 不滚），GSAP `to({scrollLeft})` 执行。
   - 批量关闭：`dirty-tabs-slice.ts` 的 `requestClose*` 先过脏守卫。右键菜单的「关闭其他/左/右」以**被右键的标签**为基准，标签条尾部按钮不传参时以**活动标签**为基准。「直接关闭」丢弃当前标签**并中止队列**；DirtyCloseDialog 的 ×/Esc/取消都是「一个都不关」；`closeSavedTabs()` 返回 0 时弹只讲事实的提示 Dialog（同时所有卡片都脏时也算取消）。

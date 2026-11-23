@@ -4,10 +4,11 @@
  *
  * - 底层实体（或其父级）被删的标签会在每次状态变化时自动剪除；同一清理也以
  *   `pruneStaleTabs` 暴露给绕过 delete* 动作的变更路径。
- * - 标签放不下时进入 **compact 模式**，不出横向滚动条。两种模式都是**固定宽度**
- *   （normal=160px、compact=92px），条内每个标签等宽；标题在 normal 下截到 ≈ 5–6 个
- *   汉字、compact 下 ≈ 2 个，hint 只在 normal 下显示。宽度与位置都由 GSAP Flip
- *   一起补间，横向滚动也由 GSAP 补间 —— 这三件事各走各的，就会互相打架。
+ * - 标签宽度**恒定 160px**，不随标签数变化。标签多到一条放不下时，条**横向滚动**，
+ *   底部给一条覆盖式的细滚动条（3px），滑块可拖动。
+ * - 尾部「关闭其他标签」按钮在滚动区**之外**，故内容溢出时它仍固定在右侧。
+ * - 位置由 GSAP Flip 补间、横向滚动由 GSAP 补间，两条通道各管各的；宽度恒定，不参与
+ *   动画。
  * - 激活标签与下方面板融合（浏览器惯例，见 `TabJoinCorners`），且条上只有它的标签用
  *   加粗字重。
  * - 标签位置在增删 / 重排时滑动而非瞬移（GSAP Flip，见下方 useLayoutEffect）。
@@ -22,6 +23,7 @@ import {
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
 } from 'react';
 import { X, ScrollText } from 'lucide-react';
 import { useAppStore } from '@/stores/app-store';
@@ -32,7 +34,7 @@ import { Tooltip } from '@/components/ui/tooltip';
 import { cn, focusRingInset } from '@/lib/utils';
 import { Flip, gsap } from '@/lib/gsap';
 import { useTabDescriptors } from './useTabDescriptors';
-import { scrollTargetForActiveTab } from './tab-scroll';
+import { scrollTargetForActiveTab, scrollbarThumb } from './tab-scroll';
 import { nextTabFocusIndex } from './tab-keyboard';
 import { TabContextMenu } from './TabContextMenu';
 
@@ -43,11 +45,11 @@ import { TabContextMenu } from './TabContextMenu';
  * 0.28s 落定 —— 正好与 Flip 时长一致。
  *
  * `BAR_SETTLE_MS` 是变化之后继续读实时 rect 的时长，必须长过任何能移动标签的动画：
- * 280ms Flip + 200ms 标题截断上限过渡。
+ * 280ms 的 Flip。标签宽度恒定，不参与动画，故窗口只需盖住这一段。
  *
- * 缓动还是直接就位，由标签在 `openTabs` 里的**下标距离**与 compact 模式是否翻转决定，
- * 不看像素距离：横条压不压住中间标签的名字是标签相邻性问题，不是距离问题。
- * 用户要求减弱动效时一律直接就位，不论下标距离。
+ * 缓动还是直接就位，只看标签在 `openTabs` 里的**下标距离**，不看像素距离：横条压不压
+ * 住中间标签的名字是标签相邻性问题，不是距离问题。用户要求减弱动效时一律直接就位，
+ * 不论下标距离。
  */
 const BAR_APPROACH = 0.24;
 const BAR_SETTLE_MS = 480;
@@ -110,31 +112,17 @@ export function WorkspaceTabs() {
   // 回调不该闭包住过期的激活标签 id。
   const scrollActiveIntoViewRef = useRef<() => void>(() => {});
 
-  // compact 模式的判定：条里放不下全宽标签时，让每个标签缩到更小的下限（图标 + 4-5 字 +
-  // 关闭），而不是出横向滚动条。标题靠 `max-w` 截断，绝不退化成纯图标。
-  //
-  // 两种模式都是固定宽度（normal=160px、compact=92px）。阈值按「能放下多少个 *normal*
-  // 标签」计算，放不下就整体降到 compact 宽度。
-  //
-  // 标签集变化、激活标签切换、窗口 resize 时重新测量；用 resize 监听而非
-  // ResizeObserver，因为只需要条自己的 clientWidth。
-  const [isCompact, setIsCompact] = useState(false);
-  const measureCompact = useCallback(() => {
-    const el = stripRef.current;
-    if (!el) return;
-    const NORMAL_TAB = 160; // px, fixed width in normal mode
-    const TRAILING = 76; // px reserved for the trailing "关闭其他" button + padding
-    const tabs = el.querySelectorAll<HTMLElement>('[data-tab-id]');
-    const minTotal = tabs.length * NORMAL_TAB;
-    setIsCompact(minTotal > el.clientWidth - TRAILING);
-  }, []);
-  useLayoutEffect(() => {
-    measureCompact();
-  }, [measureCompact, activeTabId, openTabs.length]);
-  useEffect(() => {
-    window.addEventListener('resize', measureCompact);
-    return () => window.removeEventListener('resize', measureCompact);
-  }, [measureCompact]);
+  // 覆盖式滚动条的滑块。滑块几何逐帧写，故它是一个 ref 而不是状态：滚一次就重渲染
+  // 整条标签，代价太大。
+  const thumbRef = useRef<HTMLDivElement>(null);
+
+  // 滚动条几何的最新实现。用 ref 存，是因为 Flip 落定的回调不该闭包住上一轮的实现 ——
+  // 同 `scrollActiveIntoViewRef` 的理由。
+  const syncScrollbarRef = useRef<() => void>(() => {});
+  // 条能否横向滚动。滑块的可见性由它决定（状态），几何由 `syncScrollbar` 逐帧写。
+  const [overflowing, setOverflowing] = useState(false);
+  // 上面那个状态的镜像：滚动事件每帧都来，只在翻转时改状态。
+  const overflowRef = useRef(false);
 
   // ------------------------------------------------------------------
   //  Tab position animation (GSAP Flip, FLIP pattern)
@@ -144,10 +132,8 @@ export function WorkspaceTabs() {
   // `Flip.getState` 取到的是本次提交后的最终布局，它与上一次记录的那份一比，就是
   // 补间的两端。
   //
-  // 依赖里必须带 `isCompact`：标签宽度在 normal（160px）与 compact（92px）之间变，
-  // 而宽度也是 Flip 补间的一部分。少了它，上一次记下的是 160px 宽的那一套位置，
-  // 下一次增删标签时标签会凭空涨回 160px —— 条的内容宽度随之暴涨，标签条里的内容
-  // 全部重排一遍。
+  // 依赖里只有 `openTabs`：只有一个宽度模式，宽度不参与补间，故少一次重录就少一次
+  // 把上一轮的位置记错的机会。
   //
   // 清理函数让上一次补间立刻落定：Flip 的补间期间把标签移出文档流
   //（`absolute: true`），不落定的话下一轮 `getState` 量到的是动画中途的位置。
@@ -185,6 +171,9 @@ export function WorkspaceTabs() {
           interruptedRef.current = false;
           return;
         }
+        // 补间期间标签被移出文档流，条的内容宽度是塌的；落定后宽度才是真的，
+        // 滚动条这时才重算。
+        syncScrollbarRef.current();
         scrollActiveIntoViewRef.current();
       },
     });
@@ -197,7 +186,7 @@ export function WorkspaceTabs() {
       tween.progress(1);
       flipRunningRef.current = false;
     };
-  }, [openTabs, isCompact]);
+  }, [openTabs]);
 
   // ------------------------------------------------------------------
   //  Keeping the recorded layout in sync with the scroll
@@ -249,34 +238,29 @@ export function WorkspaceTabs() {
   // ------------------------------------------------------------------
   // 逐帧推导，绝不量一次。
   //
-  // 有三件互不相干的事会移动这些标签，且「量一次激活标签再补间过去」的读数时刻，三者都可能
+  // 有两件互不相干的事会移动这些标签，且「量一次激活标签再补间过去」的读数时刻，二者都可能
   // 仍在飞行中：
   //
   //   1. 上面的 Flip。`absolute: true` 会把被补间的标签放到它**提交前**的位置，故补间期间
   //      读到的 `offsetLeft` 是动画位置而非最终位置。
-  //   2. 标签宽度的补间。宽度由 Flip 逐帧写下（见上方 useLayoutEffect），条在 normal
-  //      与 compact 之间翻转时，整条标签的位置随宽度一起变。
-  //   3. 条自己的 `scrollLeft`（滚轮处理与补间滚动都会动它）。
+  //   2. 条自己的 `scrollLeft`（滚轮处理与补间滚动都会动它）。
   //
-  // 所以只要这三者之一可能在跑，条的目标就每帧从实时 rect 重读。当前位置再以固定比例向该
+  // 所以只要这两者之一可能在跑，条的目标就每帧从实时 rect 重读。当前位置再以固定比例向该
   // 目标缓动，于是条既能滑向相邻标签，也能跟住动画中的标签。
   //
-  // 但缓动只用于**相邻标签**：跨过中间标签的缓动，那条 92px 的横条会依次压过它们
-  // 的名字，读起来就是「效果条乱跑 + 卡」，故换到非相邻标签就直接就位；宽度只在
-  // normal ⇄ compact 翻转时直接就位。用户要求减弱动效时一律直接就位，不看相邻性。
+  // 但缓动只用于**相邻标签**：跨过中间标签的缓动，那条横条会依次压过它们的
+  // 名字，读起来就是「效果条乱跑 + 卡」，故换到非相邻标签就直接就位。用户要求减弱动效时
+  // 一律直接就位，不看相邻性。
   //
-  // 循环不是常驻的：任何能移动标签的东西变化时（激活标签、标签集、compact 模式）重跑一个
-  // 有时限的窗口，窗口结束即停。窗口长到覆盖 280ms Flip 与 200ms 标题截断上限过渡。
+  // 循环不是常驻的：任何能移动标签的东西变化时（激活标签、标签集）重跑一个
+  // 有时限的窗口，窗口结束即停。窗口长到覆盖 280ms 的 Flip。
   const barRef = useRef<HTMLSpanElement>(null);
   // `started` 区分「放置」与「移动」：某次激活的首帧是直接就位（没有值得动画的上一位置 ——
   // 全新挂载，或条从无标签状态回来），之后每帧才缓动或就位。
-  const barState = useRef({ x: 0, width: 0, started: false });
-  // 上一次放置时的激活标签与宽度模式：这一次该缓动还是直接就位，由它俩的差决定 ——
-  // 缓动只在「换到相邻标签」时成立，跨标签的横扫会压住中间标签的名字。
-  const prevBarKey = useRef<{ tabId: string | null; compact: boolean }>({
-    tabId: null,
-    compact: false,
-  });
+  const barState = useRef({ x: 0, started: false });
+  // 上一次放置时的激活标签：这一次该缓动还是直接就位，由下标距离决定 —— 缓动只在「换到
+  // 相邻标签」时成立，跨标签的横扫会压住中间标签的名字。
+  const prevBarKey = useRef<{ tabId: string | null }>({ tabId: null });
 
   const placeBar = useCallback(
     (reduced: boolean) => {
@@ -286,7 +270,7 @@ export function WorkspaceTabs() {
         // 标签在最后一个关闭时整条卸载（上面的 `descriptors.length === 0` 返回 null）。此处
         // 忘掉上一位置，下一条出现的条就会直接就位到自己的标签上，而不是从过期坐标滑进来。
         barState.current.started = false;
-        prevBarKey.current = { tabId: null, compact: isCompact };
+        prevBarKey.current = { tabId: null };
         return;
       }
       const activeEl = activeTabId
@@ -295,7 +279,7 @@ export function WorkspaceTabs() {
       if (!activeEl) {
         // 没有任何激活项（全部关闭）—— 收起条，而不是让它停在一个已经不存在的标签下。
         barState.current.started = false;
-        prevBarKey.current = { tabId: null, compact: isCompact };
+        prevBarKey.current = { tabId: null };
         gsap.set(bar, { width: 0, opacity: 0 });
         return;
       }
@@ -307,32 +291,24 @@ export function WorkspaceTabs() {
       const targetW = tabRect.width;
       const cur = barState.current;
       const prev = prevBarKey.current;
-      const compactChanged = prev.compact !== isCompact;
       const prevIndex = prev.tabId ? openTabs.findIndex((t) => t.id === prev.tabId) : -1;
       const nextIndex = openTabs.findIndex((t) => t.id === activeTabId);
       // 相邻（含同一个）才缓动：跨两个以上标签的缓动 = 横条擦过中间标签。
       const adjacent = prevIndex >= 0 && nextIndex >= 0 && Math.abs(nextIndex - prevIndex) <= 1;
       if (cur.started && !reduced) {
         const dx = targetX - cur.x;
-        const dw = targetW - cur.width;
-        if (adjacent && !compactChanged) cur.x += dx * BAR_APPROACH;
+        if (adjacent) cur.x += dx * BAR_APPROACH;
         else cur.x = targetX;
-        // 宽度只在两种模式（160 / 92）间跳，模式没变就没有值得动画的宽度差。
-        if (compactChanged) cur.width = targetW;
-        else cur.width += dw * BAR_APPROACH;
-        if (Math.abs(targetX - cur.x) < 0.25 && Math.abs(targetW - cur.width) < 0.25) {
-          cur.x = targetX;
-          cur.width = targetW;
-        }
+        if (Math.abs(targetX - cur.x) < 0.25) cur.x = targetX;
       } else {
         cur.x = targetX;
-        cur.width = targetW;
         cur.started = true;
       }
-      prevBarKey.current = { tabId: activeTabId, compact: isCompact };
-      gsap.set(bar, { x: cur.x, width: cur.width, opacity: 1 });
+      prevBarKey.current = { tabId: activeTabId };
+      // 宽度恒定（160px），不参与动画：每帧直接取目标的宽度。
+      gsap.set(bar, { x: cur.x, width: targetW, opacity: 1 });
     },
-    [activeTabId, openTabs, isCompact],
+    [activeTabId, openTabs],
   );
 
   useEffect(() => {
@@ -352,10 +328,9 @@ export function WorkspaceTabs() {
     // 位置，而不是一个即将被动画带走的已提交位置。
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-    // 依赖里列 `openTabs`（不只是它的 length）与 `isCompact`：关掉一个**非**激活
-    // 标签时 `activeTabId` 不变，但它右侧的所有标签都会左滑；compact 翻转则
-    // 一次性重排全部。
-  }, [placeBar, openTabs, isCompact]);
+    // 依赖里列 `openTabs`（不只是它的 length）：关掉一个**非**激活
+    // 标签时 `activeTabId` 不变，但它右侧的所有标签都会左滑。
+  }, [placeBar, openTabs]);
 
   // ------------------------------------------------------------------
   //  Keeping the active tab visible
@@ -434,6 +409,118 @@ export function WorkspaceTabs() {
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
   }, [scheduleFlipStateRefresh]);
+  // ------------------------------------------------------------------
+  //  Overlay scrollbar
+  // ------------------------------------------------------------------
+  //  标签宽度恒定，标签多到一条放不下时只能横向滚动。原生滚动条会占掉标签的高度、并把
+  //  分隔线挤歪，故改成一条**覆盖式**的细条：它浮在条的下缘，不参与布局。
+  //
+  //  几何由 `scrollbarThumb` 算出（纯函数，可单测），这里只负责把它写进 DOM。
+  /**
+   * 把滚动条滑块的几何写进 DOM。
+   *
+   * 内容放得下时（`scrollbarThumb` 返回 null）滑块隐藏 —— 看不见的滑块不该还能被拖。
+   */
+  const syncScrollbar = useCallback(() => {
+    const strip = stripRef.current;
+    const thumb = thumbRef.current;
+    if (!strip || !thumb) return;
+    // Flip 补间期间标签被移出文档流，条的内容宽度是塌的：这时算出来的几何是错的，
+    // 还会让滑块在补间期间闪一下。补间落定后 `onComplete` 里会重算一次。
+    if (flipRunningRef.current) return;
+    const box = scrollbarThumb(strip);
+    // 能否滚动只决定滑块**可不可见**（一次状态翻转），位置与宽度逐帧写 inline style。
+    if (box === null) {
+      if (overflowRef.current) {
+        overflowRef.current = false;
+        setOverflowing(false);
+      }
+      return;
+    }
+    if (!overflowRef.current) {
+      overflowRef.current = true;
+      setOverflowing(true);
+    }
+    thumb.style.left = `${box.left}px`;
+    thumb.style.width = `${box.width}px`;
+  }, []);
+
+  useEffect(() => {
+    syncScrollbarRef.current = syncScrollbar;
+  }, [syncScrollbar]);
+
+  // 滚动条要跟上三种变化：条自己滚了、标签集或激活标签变了、窗口尺寸变了。
+  // 滚动补间逐帧改 `scrollLeft`，会逐帧触发 `scroll` 事件，故补间期间也不缺更新。
+  //
+  // 窗口变窄时条也跟着窄，激活标签可能被挤出可视区（标签宽度恒定，不会自己收窄），
+  // 故 resize 一并把它滚回来。
+  useEffect(() => {
+    const strip = stripRef.current;
+    if (!strip) return;
+    const onResize = () => {
+      syncScrollbar();
+      scrollActiveIntoViewRef.current();
+    };
+    strip.addEventListener('scroll', syncScrollbar);
+    window.addEventListener('resize', onResize);
+    return () => {
+      strip.removeEventListener('scroll', syncScrollbar);
+      window.removeEventListener('resize', onResize);
+    };
+  }, [syncScrollbar]);
+
+  useEffect(() => {
+    syncScrollbar();
+  }, [syncScrollbar, openTabs, activeTabId]);
+
+  // 拖动滑块：指针按下后捕获它，故指针移出滑块仍然跟手。
+  const dragStateRef = useRef<{
+    startX: number;
+    startScroll: number;
+    thumbWidth: number;
+  } | null>(null);
+  /**
+   * 按下滑块，开始拖动。
+   */
+  const onThumbPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const el = stripRef.current;
+    if (!el) return;
+    e.preventDefault();
+    e.stopPropagation();
+    // 程序滚动那个补间每帧都在写 scrollLeft，会把拖动的结果抹掉：先停掉它。
+    gsap.killTweensOf(el);
+    dragStateRef.current = {
+      startX: e.clientX,
+      startScroll: el.scrollLeft,
+      thumbWidth: thumbRef.current?.getBoundingClientRect().width ?? 0,
+    };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  /**
+   * 拖动滑块：把指针的横向位移折算成滚动量。
+   */
+  const onThumbPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = dragStateRef.current;
+    const el = stripRef.current;
+    if (!drag || !el) return;
+    const maxScroll = el.scrollWidth - el.clientWidth;
+    const travel = el.clientWidth - drag.thumbWidth;
+    if (travel <= 0) return;
+    // 拖动是用户手势，与滚轮同一性质：直接写 scrollLeft，不补间。
+    const next = drag.startScroll + ((e.clientX - drag.startX) * maxScroll) / travel;
+    el.scrollLeft = Math.min(Math.max(next, 0), maxScroll);
+    // 滚动改动了视口坐标，重新记一次布局。
+    scheduleFlipStateRefresh();
+  };
+  /**
+   * 松开滑块：结束拖动。
+   */
+  const onThumbPointerUp = (e: ReactPointerEvent<HTMLDivElement>) => {
+    dragStateRef.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+  };
 
   // 方向键在标签之间移动**焦点**，不激活 —— 激活是标签自己的 Enter/Space，好让键盘用
   // 户能先看清落到哪个标签上（自动激活会在方向键连按时逐个拉取/渲染面板）。
@@ -452,178 +539,193 @@ export function WorkspaceTabs() {
   if (descriptors.length === 0) return null;
 
   return (
-    <div
-      ref={stripRef}
-      role="tablist"
-      aria-label="工作区标签"
-      onKeyDown={onStripKeyDown}
-      className={cn(
-        // 这条标签条不用 `border-b`：分隔线是子元素（`below`）而不是边框。本条按
-        // padding box 裁剪，自带边框会落在裁剪之外，激活标签就无法与下方面板融合。
-        'relative flex h-9 shrink-0 items-stretch gap-0.5 overflow-hidden bg-card/40 pl-0 pr-1.5',
-        // 条是 `overflow-hidden`，滚动条不会出现在这里。
-        'scrollbar-none',
-      )}
-    >
+    // 外层：分隔线与尾部按钮都在**滚动区之外**，故内容溢出时尾部按钮仍固定在右侧，
+    // 滚动区的 clientWidth 也不含它。
+    //
+    // 这条标签条不用 `border-b`：分隔线是子元素而不是边框。本条按 padding box 裁剪，
+    // 自带边框会落在裁剪之外，激活标签就无法与下方面板融合。
+    <div className="relative flex h-9 shrink-0 items-stretch bg-card/40 pr-1.5">
       {/* 分隔线。`z-0` 让激活标签的填充（z-10）压过底下那条横线。 */}
       <span
         aria-hidden
         className="pointer-events-none absolute inset-x-0 bottom-0 z-0 h-px bg-border"
       />
-      {descriptors.map((d) => {
-        const active = d.tab.id === activeTabId;
-        const dirty = dirtyTabIds.has(d.tab.id);
-        // 悬停时给出的完整说明。接口标签额外带上它所在容器的路径——重名的接口靠这条路径
-        // 分辨，标签条本身只放得下其中一段。
-        const titleText = d.path
-          ? `${d.title} · ${d.path}`
-          : d.kindLabel
-            ? `${d.kindLabel} · ${d.title}`
-            : d.title;
-        return (
-          <div
-            key={`${d.tab.kind}:${d.tab.id}`}
-            data-tab-id={d.tab.id}
-            role="tab"
-            aria-selected={active}
-            tabIndex={0}
-            onKeyDown={(e) => {
-              // 从标签内关闭按钮冒上来的 Enter 属于那个按钮，不能同时激活标签。
-              if (e.target !== e.currentTarget) return;
-              if (e.key === 'Enter' || e.key === ' ') {
+      {/* 滚动区。`role="tablist"` 必须落在真正包含 `role="tab"` 的这一层。 */}
+      <div
+        ref={stripRef}
+        role="tablist"
+        aria-label="工作区标签"
+        onKeyDown={onStripKeyDown}
+        className="relative flex h-full min-w-0 flex-1 items-stretch gap-0.5 overflow-hidden"
+      >
+        {descriptors.map((d) => {
+          const active = d.tab.id === activeTabId;
+          const dirty = dirtyTabIds.has(d.tab.id);
+          // 悬停时给出的完整说明。接口标签额外带上它所在容器的路径——重名的接口靠这条路径
+          // 分辨，标签条本身只放得下其中一段。
+          const titleText = d.path
+            ? `${d.title} · ${d.path}`
+            : d.kindLabel
+              ? `${d.kindLabel} · ${d.title}`
+              : d.title;
+          return (
+            <div
+              key={`${d.tab.kind}:${d.tab.id}`}
+              data-tab-id={d.tab.id}
+              role="tab"
+              aria-selected={active}
+              tabIndex={0}
+              onKeyDown={(e) => {
+                // 从标签内关闭按钮冒上来的 Enter 属于那个按钮，不能同时激活标签。
+                if (e.target !== e.currentTarget) return;
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setActiveTab(d.tab.id);
+                } else if (e.key === 'Delete') {
+                  // 与中键同义：关闭，但不激活。
+                  e.preventDefault();
+                  requestCloseTab(d.tab.id);
+                }
+              }}
+              onMouseDown={(e) => {
+                // 中键关闭标签（浏览器惯例）。
+                if (e.button === 1) {
+                  e.preventDefault();
+                  requestCloseTab(d.tab.id);
+                }
+              }}
+              onAuxClick={(e) => {
+                if (e.button === 1) {
+                  e.preventDefault();
+                  requestCloseTab(d.tab.id);
+                }
+              }}
+              onContextMenu={(e) => {
                 e.preventDefault();
-                setActiveTab(d.tab.id);
-              } else if (e.key === 'Delete') {
-                // 与中键同义：关闭，但不激活。
-                e.preventDefault();
-                requestCloseTab(d.tab.id);
-              }
-            }}
-            onMouseDown={(e) => {
-              // 中键关闭标签（浏览器惯例）。
-              if (e.button === 1) {
-                e.preventDefault();
-                requestCloseTab(d.tab.id);
-              }
-            }}
-            onAuxClick={(e) => {
-              if (e.button === 1) {
-                e.preventDefault();
-                requestCloseTab(d.tab.id);
-              }
-            }}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              setMenu({ tabId: d.tab.id, x: e.clientX, y: e.clientY });
-            }}
-            className={cn(
-              // 宽度策略（整条内统一）：normal 每个标签恰好 `w-[160px]`，条读起来是等宽
-              // 单元格网格，标题约容 5–6 个汉字后截断，过长的 hint 在标签内截成 `...`；
-              // compact 每个标签恰好 `w-[92px]`，标题截到 ≈ 2 个汉字，hint 隐藏 ——
-              // 它的 `shrink-0` 会在视觉上破坏固定的 92px。
-              //
-              // 这里**没有**宽度的 CSS 过渡：宽度与位置都由上方的 Flip 一起补间。
-              // 两者各管一半时，CSS 过渡会把 Flip 逐帧写下的 inline width 再过渡一次，
-              // 标签在动画结束后还要慢慢收回去 —— 与位置补间对不上账。
-              'group relative flex h-full shrink-0 cursor-pointer items-center gap-1.5 rounded-t-md border-x border-t border-transparent px-2.5 text-xs',
-              focusRingInset,
-              isCompact ? 'w-[92px]' : 'w-[160px]',
-              active
-                ? 'border-border bg-background text-foreground'
-                : // 用 `bg-overlay-hover` 而非手写 `bg-accent/40`：新暗色阶梯上 `--accent`
-                  // （17.6%）与条自身的底色几乎相同，实心 accent 的 hover 只差约一个亮度级，
-                  // 读起来等于没变。overlay token 是一个真实台阶。
-                  'text-muted-foreground hover:bg-overlay-hover hover:text-foreground',
-              // `z-10` 是激活标签与面板融合的关键：它必须盖过条的分隔线，否则 `z-0` 的
-              // 发丝线子元素会横穿它的底边。
-              active && 'z-10',
-            )}
-            onClick={() => setActiveTab(d.tab.id)}
-          >
-            {/* 先切肩：切口必须擦掉标签自己的两个下角（填充*与*侧边框），
-                所以要盖在它之上、又盖在任何用户看得见的东西之下。 */}
-            {active && <TabJoinCorners stripClass="bg-card/40" />}
-            <span className={cn('shrink-0', active && d.iconColor)}>{d.icon}</span>
-            <span
-              // 标题是唯一会伸展的元素，始终截断 —— 但能给它的空间随模式变化：normal 约
-              // 84px（≈ 5 个汉字），hint 在其右侧；compact 约 36px（≈ 2 个汉字），hint 隐藏。
-              // 完整标题通过 `title` 属性在 hover 时可得。
-              //
-              // 字重步进挂在标签文字上而不是整个标签：method pill 与旁边的图标不该跟着加粗。
+                setMenu({ tabId: d.tab.id, x: e.clientX, y: e.clientY });
+              }}
               className={cn(
-                // 截断上限跟着模式变（88px → 36px），故它自己有过渡：否则容器收窄的
-                // 同一瞬间标题会突然少几个字，与容器宽度的变化对不上。
-                'min-w-0 truncate transition-[max-width] duration-200 ease-out',
-                isCompact ? 'max-w-[36px]' : 'max-w-[88px] flex-1',
-                active && 'font-semibold',
+                // 宽度恒定：每个标签恰好 `w-[160px]`，条读起来是等宽单元格网格，标题约容
+                // 5–6 个汉字后截断，过长的 hint 在标签内截成 `...`。标签多到一条放不下时
+                // 条**横向滚动**（见下方「Overlay scrollbar」），标签本身不变窄。
+                //
+                // 这里**没有**宽度的 CSS 过渡：宽度恒定、不参与动画，位置由上方的 Flip 补间。
+                'group relative flex h-full shrink-0 cursor-pointer items-center gap-1.5 rounded-t-md border-x border-t border-transparent px-2.5 text-xs',
+                focusRingInset,
+                'w-[160px]',
+                active
+                  ? 'border-border bg-background text-foreground'
+                  : // 用 `bg-overlay-hover` 而非手写 `bg-accent/40`：新暗色阶梯上 `--accent`
+                    // （17.6%）与条自身的底色几乎相同，实心 accent 的 hover 只差约一个亮度级，
+                    // 读起来等于没变。overlay token 是一个真实台阶。
+                    'text-muted-foreground hover:bg-overlay-hover hover:text-foreground',
+                // `z-10` 是激活标签与面板融合的关键：它必须盖过条的分隔线，否则 `z-0` 的
+                // 发丝线子元素会横穿它的底边。
+                active && 'z-10',
               )}
-              title={titleText}
+              onClick={() => setActiveTab(d.tab.id)}
             >
-              {d.title}
-            </span>
-            {/*
-             * 尾部控件作为一个 flex item 整体出行，才能用 `ml-auto` 推到标签右缘。
-             *
-             * 标题带 `flex-1` 但又被 `max-w-[88px]` 封顶，这正是 hint 的空间来源。该上限也
-             * 意味着短标题会留下 flexbox 无处安放的空隙，它会落在行的*末端*、关闭按钮之后。
-             * `ml-auto` 把这段空隙移到这一组控件之前，也就是浏览器标签放它的位置：
-             * 标题靠左、× 钉在右。
-             *
-             * 用一个包裹元素而不是直接给关闭按钮加 `ml-auto`：`Tooltip` 会把子元素
-             * 包在 `relative inline-flex` 的 span 里，那个 span 才是 flex item。
-             */}
-            <span className="ml-auto inline-flex shrink-0 items-center gap-1.5">
-              {dirty && (
-                <Tooltip content="有未保存的修改" side="bottom">
-                  <span
-                    className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning"
-                    aria-label="有未保存的修改"
-                  />
+              {/* 先切肩：切口必须擦掉标签自己的两个下角（填充*与*侧边框），
+                所以要盖在它之上、又盖在任何用户看得见的东西之下。 */}
+              {active && <TabJoinCorners stripClass="bg-card/40" />}
+              <span className={cn('shrink-0', active && d.iconColor)}>{d.icon}</span>
+              <span
+                // 标题是唯一会伸展的元素，始终截断：上限 `max-w-[88px]`（≈ 5 个汉字），
+                // 右侧留给 hint。完整标题通过 `title` 属性在 hover 时可得。
+                //
+                // 字重步进挂在标签文字上而不是整个标签：method pill 与旁边的图标不该跟着加粗。
+                className={cn('min-w-0 flex-1 truncate max-w-[88px]', active && 'font-semibold')}
+                title={titleText}
+              >
+                {d.title}
+              </span>
+              {/*
+               * 尾部控件作为一个 flex item 整体出行，才能用 `ml-auto` 推到标签右缘。
+               *
+               * 标题带 `flex-1` 但又被 `max-w-[88px]` 封顶，这正是 hint 的空间来源。该上限也
+               * 意味着短标题会留下 flexbox 无处安放的空隙，它会落在行的*末端*、关闭按钮之后。
+               * `ml-auto` 把这段空隙移到这一组控件之前，也就是浏览器标签放它的位置：
+               * 标题靠左、× 钉在右。
+               *
+               * 用一个包裹元素而不是直接给关闭按钮加 `ml-auto`：`Tooltip` 会把子元素
+               * 包在 `relative inline-flex` 的 span 里，那个 span 才是 flex item。
+               */}
+              <span className="ml-auto inline-flex shrink-0 items-center gap-1.5">
+                {dirty && (
+                  <Tooltip content="有未保存的修改" side="bottom">
+                    <span
+                      className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning"
+                      aria-label="有未保存的修改"
+                    />
+                  </Tooltip>
+                )}
+                {d.hint && (
+                  <Tooltip content={d.path || d.hint} side="bottom">
+                    <span className="max-w-[40px] truncate text-nano text-faint">{d.hint}</span>
+                  </Tooltip>
+                )}
+                <Tooltip content="关闭" side="bottom">
+                  <button
+                    type="button"
+                    aria-label="关闭标签"
+                    // 阻止冒泡，关闭点击不会顺带激活标签。
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      requestCloseTab(d.tab.id);
+                    }}
+                    className={cn(
+                      'flex h-4 w-4 shrink-0 items-center justify-center rounded-sm text-faint hover:bg-overlay-hover hover:text-foreground',
+                      // hover 时始终显示，但激活标签上保持可见；`group-focus-within` 让键盘
+                      // 落到标签上时 × 也现形，否则它是个不可见的焦点目标。
+                      active
+                        ? 'opacity-100'
+                        : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100',
+                    )}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
                 </Tooltip>
-              )}
-              {d.hint && !isCompact && (
-                <Tooltip content={d.path || d.hint} side="bottom">
-                  <span className="max-w-[40px] truncate text-nano text-faint">{d.hint}</span>
-                </Tooltip>
-              )}
-              <Tooltip content="关闭" side="bottom">
-                <button
-                  type="button"
-                  aria-label="关闭标签"
-                  // 阻止冒泡，关闭点击不会顺带激活标签。
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    requestCloseTab(d.tab.id);
-                  }}
-                  className={cn(
-                    'flex h-4 w-4 shrink-0 items-center justify-center rounded-sm text-faint hover:bg-overlay-hover hover:text-foreground',
-                    // hover 时始终显示，但激活标签上保持可见；`group-focus-within` 让键盘
-                    // 落到标签上时 × 也现形，否则它是个不可见的焦点目标。
-                    active
-                      ? 'opacity-100'
-                      : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100',
-                  )}
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </Tooltip>
-            </span>
-            {/* 激活标签指示条移到条级元素（见下方），才能作为单一常驻节点在
+              </span>
+              {/* 激活标签指示条移到条级元素（见下方），才能作为单一常驻节点在
                 标签之间补间。 */}
-          </div>
-        );
-      })}
-
-      {/* 常驻的激活标签指示条。挂在条级以跨标签集变化作为单一元素存活，几何在布局运动
+            </div>
+          );
+        })}
+        {/* 常驻的激活标签指示条。挂在条级以跨标签集变化作为单一元素存活，几何在布局运动
           期间逐帧写入 —— 见上方「Active-tab indicator」。class 里刻意不含 `w-0`：宽度完全
           由驱动逐帧写，class 级宽度只会变成与它打架的行内覆盖。 */}
-      <span
-        ref={barRef}
-        aria-hidden
-        className="pointer-events-none absolute left-0 top-0 z-20 h-0.5 rounded-t-md bg-primary opacity-0"
-      />
+        <span
+          ref={barRef}
+          aria-hidden
+          className="pointer-events-none absolute left-0 top-0 z-20 h-0.5 rounded-t-md bg-primary opacity-0"
+        />
+      </div>
 
-      <div className="ml-auto flex items-center pr-1">
+      {/* 覆盖式滚动条。浮在条的下缘，不占布局 —— 标签高度与分隔线都不受影响。
+
+          它在滚动区**之外**：绝对定位的子元素会跟着内容一起滚走，放在里面的话滑块会
+          随标签飘走。放在外面，它的位置就是纯视口坐标 —— 滑块的几何（left / width）
+          由 `scrollbarThumb` 算出，它落在滚动区的可视范围内（宽度按滚动区的
+          clientWidth 算，故不会伸到尾部按钮上）。
+
+          滑块停在分隔线**上方** 2px：不压掉那条发丝线，也不切断激活标签与面板的贴合。 */}
+      <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 z-30 h-2">
+        <div
+          ref={thumbRef}
+          onPointerDown={onThumbPointerDown}
+          onPointerMove={onThumbPointerMove}
+          onPointerUp={onThumbPointerUp}
+          onPointerCancel={onThumbPointerUp}
+          className={cn(
+            'absolute bottom-0.5 h-[3px] rounded-full bg-muted-foreground/35 transition-[height,background-color,opacity] duration-150 hover:h-[4px] hover:bg-muted-foreground/60',
+            // 内容放得下时滑块整体消失，也不再接收指针 —— 看不见的东西不该还能被拖。
+            overflowing ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0',
+          )}
+        />
+      </div>
+
+      {/* 尾部按钮在滚动区**之外**：内容溢出时它仍固定在右侧，滚动区的可视宽度也不含它。 */}
+      <div className="ml-1 flex shrink-0 items-center">
         <Button
           variant="ghost"
           size="icon"

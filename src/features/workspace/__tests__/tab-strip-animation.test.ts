@@ -1,18 +1,15 @@
 /**
  * 标签条动画的结构约定（源码哨兵）。
  *
- * 这一组缺陷的共同点是：**三套动画机制各自为政** —— 位置与宽度由 GSAP Flip 补间、
- * 宽度另有一层 CSS 过渡、横向滚动由原生 `scrollIntoView` 直接改 `scrollLeft`。它们
- * 对「标签最终在哪」给出三个不同的答案，标签多到条放不下时（用户报的症状：长度稍长
- * 以后）就表现为整条标签猛地变宽、猛跳一下，再慢慢缩回并滑回。
+ * 这一组缺陷的共同点是：**几套动画机制各自为政** —— 位置由 GSAP Flip 补间、宽度另有一层
+ * CSS 过渡、横向滚动由原生 `scrollIntoView` 直接改 `scrollLeft`。它们对「标签最终在哪」
+ * 给出不同的答案，标签多到条放不下时就表现为整条标签猛跳一下、再慢慢滑回。
  *
  * 这些约定靠代码评审看不出来、坏了也不一定立刻出事，故在这里钉住：
  *
- * 1. Flip 的依赖里必须有 `isCompact`。宽度在 normal（160px）与 compact（92px）之间
- *    变，宽度也是 Flip 补间的一部分；少了它，上一次记下的位置是另一套宽度，标签会
- *    凭空涨回旧宽度。
- * 2. 标签上不能有宽度的 CSS 过渡。Flip 逐帧写下的 inline width 与 CSS 过渡各改一次
- *    宽度，动画结束后还要再慢慢收回去。
+ * 1. Flip 的依赖里只有 `openTabs`；标签宽度恒定 160px，宽度不参与补间。
+ * 2. 标签上不能有宽度的 CSS 过渡。宽度恒定，两侧任何一处过渡都会让动画期间量到的宽度
+ *    与最终宽度对不上，Flip 的记录与滚动计算跟着一起错。
  * 3. 不能用原生 `scrollIntoView`。它瞬间改掉 `scrollLeft`，所有标签的视口位置在同一
  *    帧里挪一截，那一下不参与任何动画。
  * 4. 横向滚动由 GSAP 补间完成，目标位置由 `scrollTargetForActiveTab` 算出。
@@ -48,8 +45,15 @@ function stripComments(src: string): string {
 const code = stripComments(readFileSync(FILE, 'utf8'));
 
 describe('标签条动画的结构约定', () => {
-  it('Flip 的依赖里有 compact 模式', () => {
-    assert.match(code, /\[\s*openTabs\s*,\s*isCompact\s*\]/);
+  it('Flip 的依赖里只有 openTabs，不再有宽度模式', () => {
+    // 宽度恒定，宽度变化不再是一个触发条件。
+    assert.match(code, /\[\s*openTabs\s*\]\s*\)/);
+    assert.doesNotMatch(code, /isCompact|compact/);
+  });
+
+  it('标签多时用覆盖式滚动条，几何由纯函数算出', () => {
+    assert.match(code, /scrollbarThumb\(/);
+    assert.match(code, /ref=\{thumbRef\}/);
   });
 
   it('标签上没有宽度的 CSS 过渡', () => {
