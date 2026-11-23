@@ -96,6 +96,13 @@ export function WorkspaceTabs() {
 
   // 标签加得多时把激活标签保持在可见区。
   const stripRef = useRef<HTMLDivElement>(null);
+  // 滚动区节点本身进 state：它在最后一个标签关闭时整条卸载、下一条标签出现时重新挂载，
+  // 而 ref 的变化不触发副作用重跑 —— 只认 ref 的话重挂后的条上就没有滚动监听了。
+  const [stripEl, setStripEl] = useState<HTMLDivElement | null>(null);
+  const attachStrip = useCallback((node: HTMLDivElement | null) => {
+    stripRef.current = node;
+    setStripEl(node);
+  }, []);
 
   // 上一次记录的标签布局 —— Flip 补间的起点。
   const flipStateRef = useRef<ReturnType<typeof Flip.getState> | null>(null);
@@ -346,6 +353,9 @@ export function WorkspaceTabs() {
    * 挪一截，那一下不参与任何动画。
    */
   const scrollActiveIntoView = useCallback(() => {
+    // Flip 补间期间标签停在动画中途的位置上，这时量出来的滚动目标是错的。守卫放在这里
+    // 而不是只放在下面那个效果里：resize 也会调它，那条路径同样要挡住。
+    if (flipRunningRef.current) return;
     const strip = stripRef.current;
     if (!strip || !activeTabId) return;
     const el = strip.querySelector<HTMLElement>(`[data-tab-id="${activeTabId}"]`);
@@ -380,35 +390,35 @@ export function WorkspaceTabs() {
 
   // 什么时候滚：标签集变了（增删、换项目）→ 由 Flip 补间落定后的 `onComplete` 滚，
   // 那时标签已回到文档流，位置才是最终位置；只是切换激活标签 → 没有 Flip 参与，
-  // 这里立即滚。
+  // 这里立即滚（Flip 进行中时 `scrollActiveIntoView` 自己会拒绝）。
   const prevOpenTabsRef = useRef(openTabs);
   useEffect(() => {
     const tabsChanged = prevOpenTabsRef.current !== openTabs;
     prevOpenTabsRef.current = openTabs;
     if (tabsChanged) return;
-    // Flip 补间还在跑时不要立刻滚：此刻标签的位置是动画中途的位置，算出来的滚动
-    // 目标是错的。补间结束后由它自己滚，那时位置才是最终位置。
-    if (flipRunningRef.current) return;
     scrollActiveIntoView();
   }, [activeTabId, openTabs, scrollActiveIntoView]);
 
-  // 垂直滚轮转横向滚动，与各浏览器标签栏一致。
+  // 滚轮转横向滚动，与各浏览器标签栏一致：竖轮给 `deltaY`，触控板的横向手势只给
+  // `deltaX`，故取主导轴那个量。`overflow-hidden` 关掉了原生滚动，不接 `deltaX` 时
+  // 横滑手势什么也不会发生。
   useEffect(() => {
-    const el = stripRef.current;
+    const el = stripEl;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
-      if (e.deltaY === 0 || Math.abs(e.deltaY) < Math.abs(e.deltaX)) return;
+      const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      if (delta === 0) return;
       if (el.scrollWidth <= el.clientWidth) return;
       e.preventDefault();
       // 程序滚动那个补间每帧都在写 scrollLeft，会把滚轮的结果抹掉：先停掉它。
       gsap.killTweensOf(el);
-      el.scrollLeft += e.deltaY;
+      el.scrollLeft += delta;
       // 滚动改动了视口坐标，重新记一次布局。
       scheduleFlipStateRefresh();
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
-  }, [scheduleFlipStateRefresh]);
+  }, [stripEl, scheduleFlipStateRefresh]);
   // ------------------------------------------------------------------
   //  Overlay scrollbar
   // ------------------------------------------------------------------
@@ -455,19 +465,18 @@ export function WorkspaceTabs() {
   // 窗口变窄时条也跟着窄，激活标签可能被挤出可视区（标签宽度恒定，不会自己收窄），
   // 故 resize 一并把它滚回来。
   useEffect(() => {
-    const strip = stripRef.current;
-    if (!strip) return;
+    if (!stripEl) return;
     const onResize = () => {
       syncScrollbar();
       scrollActiveIntoViewRef.current();
     };
-    strip.addEventListener('scroll', syncScrollbar);
+    stripEl.addEventListener('scroll', syncScrollbar);
     window.addEventListener('resize', onResize);
     return () => {
-      strip.removeEventListener('scroll', syncScrollbar);
+      stripEl.removeEventListener('scroll', syncScrollbar);
       window.removeEventListener('resize', onResize);
     };
-  }, [syncScrollbar]);
+  }, [stripEl, syncScrollbar]);
 
   useEffect(() => {
     syncScrollbar();
@@ -552,7 +561,7 @@ export function WorkspaceTabs() {
       />
       {/* 滚动区。`role="tablist"` 必须落在真正包含 `role="tab"` 的这一层。 */}
       <div
-        ref={stripRef}
+        ref={attachStrip}
         role="tablist"
         aria-label="工作区标签"
         onKeyDown={onStripKeyDown}

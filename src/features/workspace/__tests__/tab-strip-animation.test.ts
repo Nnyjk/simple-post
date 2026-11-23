@@ -106,13 +106,25 @@ describe('标签条动画的结构约定', () => {
     assert.match(code, /onWheel[\s\S]{0,600}?gsap\.killTweensOf\(el\)/);
   });
 
-  it('Flip 补间还在跑时不立刻滚动', () => {
-    // 此刻标签的位置是动画中途的位置，算出来的滚动目标是错的。
-    // 这道守卫在「立刻滚动」那个效果里，不是文件里任意一处。
-    assert.match(
-      code,
-      /if \(tabsChanged\) return;[\s\S]{0,300}?if \(flipRunningRef\.current\) return;/,
-    );
+  it('Flip 补间还在跑时不算滚动目标', () => {
+    // 此刻标签的位置是动画中途的位置，算出来的滚动目标是错的。守卫在
+    // `scrollActiveIntoView` 里，故 resize 那条路径同样被挡住。
+    const body = code.slice(code.indexOf('const scrollActiveIntoView = useCallback'));
+    assert.match(body.slice(0, 400), /if \(flipRunningRef\.current\) return;/);
+  });
+
+  it('滚轮接住触控板的横向手势', () => {
+    // `overflow-hidden` 关掉了原生滚动，只认 deltaY 时 deltaX=80 / deltaY=0 的手势什么都
+    // 不会发生。
+    assert.match(code, /Math\.abs\(e\.deltaX\) > Math\.abs\(e\.deltaY\) \? e\.deltaX : e\.deltaY/);
+  });
+
+  it('滚动区的监听器跟着节点走', () => {
+    // 条在最后一个标签关闭时整条卸载、下一条标签出现时重新挂载；监听器只认 ref 的话，
+    // 重挂后的条上收不到 scroll，滑块不再跟手。
+    assert.match(code, /const \[stripEl, setStripEl\] = useState<HTMLDivElement \| null>\(null\)/);
+    assert.match(code, /ref=\{attachStrip\}/);
+    assert.match(code, /\[stripEl, syncScrollbar\]/);
   });
 
   it('位置补间不再走 useGSAP 的清理函数', () => {
