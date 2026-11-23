@@ -40,8 +40,8 @@ pub(crate) async fn environments_list(
 /// —— 与桌面命令调的是同一个函数，故两侧建出的环境必然同形。
 ///
 /// 两种 body 形状：
-/// - `{ "projectId": …, "name": …, "opts": { variables } }` —— `invokeCmd(COMMANDS.environmentsCreate, …)`
-///   发的就是这个（`WEB_ROUTES.environmentsCreate` 没有 `body:` mapper，参数对象*就是* payload），
+/// - 嵌套结构 `{ "projectId": …, "name": …, "opts": { variables } }` —— 前端调用 `invokeCmd(COMMANDS.environmentsCreate, …)`
+///   发的就是这个（`WEB_ROUTES.environmentsCreate` 没有 `body:` mapper，参数对象就是 payload），
 ///   与 Tauri 命令的参数名一一对应。
 /// - 打平的 `{ "projectId", "name", "variables"? , "id"? }` —— 文档化的公共 v1 形状，外部
 ///   REST 客户端使用。

@@ -36,8 +36,6 @@ const COLUMNS: &str = "rh.id, rh.endpoint_id, rh.status, rh.status_text, rh.dura
                        rh.error, rh.method, rh.url, rh.body_truncated, rh.created_at, \
                        rh.is_favorite, rh.request_json";
 
-// 读。
-
 /// 一个 endpoint 的历史，最新的在前。
 ///
 /// 返回的是「全部收藏行 + 最新的 N 条未收藏行」，N 由 [`keep_count`] 读出。未收藏的部分不可能
@@ -66,8 +64,6 @@ pub fn list_by_endpoint(
     }
     Ok(out)
 }
-
-// 写。
 
 /// 存下一条响应，并把该 endpoint 的未收藏历史裁回上限。返回落库后的行（含响应体裁剪），
 /// 关心的调用方无需再读一次即可展示。

@@ -31,18 +31,16 @@ pub struct ResolvedBaseUrl {
 
 /// 算出端点最终生效的模块地址与路径前缀改写规则。
 ///
-/// 地址的优先级（从高到低）：
-///   1. `endpoint.base_url_override` —— 每端点的自定义模式。`None` 落到模块那一格；
-///      `Some(host)` 固定该 host；`Some("")` 表示「完全没有前缀」—— 端点处于自定义模式，
-///      URL 字段里已经是完整地址。
-///   2. `env.module_base_urls[module_id]` —— 环境 × 模块那一格。它的 `url` 是模块地址。
-///   3. `""` —— 什么都没有。
+/// 地址解析次序：端点 override → 环境 × 模块格 → 没有地址。
+///   1. `endpoint.base_url_override`：`Some(host)` 固定该 host；`Some("")` 表示端点处于自定义模式，
+///      URL 字段里已经是完整地址；`None` 读下一层。
+///   2. `env.module_base_urls[module_id]`：读环境 × 模块那一格的 `url`。
+///   3. `""`：前两处都没有时为空。
 ///
 /// 路径前缀改写规则只作用在**端点自己的 URL** 上，与地址来源无关：端点自带自定义主机时，
 /// 路径照样按那一格的规则改写——主机是端点自己的事，路径前缀是这一格的事。
 ///
-/// **没有回退层**：格子里没有值就是没有地址，不借用别的模块的格子。格子缺失是一个真实答案，
-/// 不是一个洞。
+/// **没有回退层**：格子里没有值就是没有地址，不借用别的模块的格子；缺失即最终结果。
 /// `env.module_base_urls` 按 `module_id` 建键。环境由调用方给出：端点行不再绑定环境，故它要么
 /// 是这次调用点名的那一个，要么是项目的默认环境；两者都没有时（`None`）直接短路成空。
 pub fn resolve_base_url(
@@ -88,10 +86,9 @@ pub fn resolve_base_url(
 /// 实现住在 `simple_post_core::url::apply_rewrite`：核心库那一层是中立位置，MCP 侧与导入
 /// 导出侧都要用它，三处各写一份就会分叉。
 ///
-///   apply_rewrite("/api/air/xxxxx",
-///                 Some(&RewriteRule { from: "/api/air".into(), to: "/api/project-a/air".into() }))
-///     → "/api/project-a/air/xxxxx"
-///
+/// 示例：
+///   `apply_rewrite("/api/air/xxxxx", Some(&rule))`（规则由 `from: "/api/air"` 改写为 `to: "/api/project-a/air"`）
+///   求值为 `"/api/project-a/air/xxxxx"`。
 /// 与 `src/lib/url.ts` 的 `applyRewrite` 对应；两边必须一致，否则预览与真正发出的请求描述的
 /// 是两个 URL。共享样本是 `fixtures/base-url-parity.json`。
 pub fn apply_rewrite(url: &str, rule: Option<&RewriteRule>) -> String {
@@ -101,14 +98,11 @@ pub fn apply_rewrite(url: &str, rule: Option<&RewriteRule>) -> String {
 /// 安全地拼接 `base_url` 与 `path`。`path` 自带 scheme 时按已是绝对地址处理，拼接处
 /// 的重复斜杠也会被收掉。
 ///
-///   join_base_url("https://api.example.com", "/users/1")
-///     → "https://api.example.com/users/1"
-///   join_base_url("https://api.example.com/", "users/1")
-///     → "https://api.example.com/users/1"
-///   join_base_url("", "/users/1")
-///     → "/users/1"
-///   join_base_url("https://api.example.com", "https://other/")
-///     → "https://other/"  (path 胜出 —— 它自带 scheme)
+/// 拼接示例：
+/// - `join_base_url("https://api.example.com", "/users/1")` 得到 `"https://api.example.com/users/1"`。
+/// - `join_base_url("https://api.example.com/", "users/1")` 得到 `"https://api.example.com/users/1"`。
+/// - `join_base_url("", "/users/1")` 得到 `"/users/1"`。
+/// - `join_base_url("https://api.example.com", "https://other/")` 得到 `"https://other/"`（`path` 自带 scheme 胜出）。
 pub fn join_base_url(base_url: &str, path: &str) -> String {
     if path.is_empty() {
         return base_url.to_string();

@@ -3,7 +3,8 @@
  *
  * 与 `tauri-commands-routes-tree.test.ts` 同构，断言 `(method, url, body)`，好让路由
  * 的静默漂移响亮地失败。
- */ import { describe, it, beforeEach, after } from 'node:test';
+ */
+import { describe, it, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { COMMANDS, invokeCmd } from '../tauri-commands';

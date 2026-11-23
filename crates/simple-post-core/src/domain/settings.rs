@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 // agent 权限
 
-/// 逐项目的 MCP 权限。`Read < ReadCall < Full`；序关系本身在
+/// 逐项目的 MCP 权限。`Read < ReadCall < Full`；序关系判定实现见
 /// [`crate::permissions::permission_at_least`]。
 ///
 /// 用 `snake_case` 而非 `lowercase`：后者把 `ReadCall` 映射成 `"readcall"`，既不匹配

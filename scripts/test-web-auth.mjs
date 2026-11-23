@@ -91,17 +91,10 @@ async function runPhase(label, scratch, tracked, testBody) {
 }
 
 /**
- * Assert the SPA's own JS/CSS actually load as their real MIME types.
+ * 断言 SPA 的 JS/CSS 静态资源以真实 MIME 类型正确加载。
  *
- * Regression net for a bug that every status-code assertion missed: the
- * router mounted `ServeDir` rooted at `dist/assets` while request paths
- * already carry the `/assets/` prefix, so every asset resolved to
- * `dist/assets/assets/<file>`, missed, and fell through to the
- * `index.html` fallback. Each request still returned **200** — with
- * `text/html` and the 839-byte shell. A browser then refused to execute
- * it and `#root` stayed empty, so `serve-web` never booted.
- *
- * The tell is the content type and the byte count, never the status.
+ * 防范静态路由前缀路径重叠回归：ServeDir 挂载路径若与 /assets/ 前缀重叠，会导致文件未命中并回落到 index.html。
+ * 回落响应仍为 200 text/html，纯状态码检查会漏报导致 SPA 启动失败；因此必须断言 content-type 与字节数。
  */
 async function assertSpaAssetsLoad(label) {
   const shell = await fetch(`${BASE}/`);
@@ -232,11 +225,8 @@ await runPhase('phase 2', scratch2, proc2, async () => {
 
 if (failures > 0) {
   console.error(`\n[test:web-auth] FAILED with ${failures} assertion failure(s)`);
-  // Set the code and fall through to a natural exit. `process.exit(1)`
-  // tears the event loop down while undici's keep-alive sockets are still
-  // registered, which on Windows aborts the process inside libuv
-  // (`src\win\async.c:76`, 0xC0000409) *after* the failure message has
-  // printed — burying the real diagnostics under a crash dump.
+  // 仅设置 exitCode 允许事件循环自然退出；避免 Windows 下 undici 的 keep-alive 套接字
+  // 在 process.exit() 销毁事件循环时触发 libuv 0xC0000409 崩溃并掩盖失败原因。
   process.exitCode = 1;
 }
 console.log('\n[test:web-auth] all assertions passed');

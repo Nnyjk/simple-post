@@ -50,8 +50,7 @@ fn clear_returns_to_default() {
 
 #[test]
 fn schema_rejects_unknown_permission_via_check() {
-    // The schema's `CHECK(permission IN ('read','read_call','full'))`
-    // is the authoritative guard — verify it actually fires.
+    // 验证 schema 的 `CHECK(permission IN ('read','read_call','full'))` 约束生效。
     let pool = fresh_pool();
     let err = db::with_tx(&pool, |c| {
         c.execute(
@@ -67,7 +66,7 @@ fn schema_rejects_unknown_permission_via_check() {
 
 #[test]
 fn parse_known_values_round_trip() {
-    // `Permission::parse` is the inverse of `as_str`.
+    // `Permission::parse` 与 `as_str` 互为逆操作。
     for p in [Permission::Read, Permission::ReadCall, Permission::Full] {
         assert_eq!(Permission::parse(p.as_str()), Some(p));
     }

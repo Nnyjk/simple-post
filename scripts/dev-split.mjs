@@ -1,27 +1,15 @@
 #!/usr/bin/env node
-// scripts/dev-split.mjs — run Vite dev server + Rust serve-web together so
-// an AI agent (or a browser pointed at http://localhost:5173) gets HMR
-// from Vite while /api requests are proxied (see `proxy` in
-// vite.config.ts) to the Rust axum server on http://127.0.0.1:4173.
+// 同时启动 Vite 开发服务器（端口 5173）与 Rust serve-web（端口 4173）。
+// Vite 将 /api 请求代理至 127.0.0.1:4173（见 vite.config.ts 的 proxy 配置）。
 //
-//   npm run dev:split
+// 进程说明：
+//   [vite]      → `npm run dev`（端口 5173，提供前端 HMR）
+//   [serve-web] → `cargo run … serve-web`（端口 4173，提供 REST 与 SPA 外壳）
 //
-// Layout:
-//   [vite]      → stdout/stderr from `npm run dev`           (port 5173)
-//   [serve-web] → stdout/stderr from `cargo run … serve-web` (port 4173 — REST + SPA shell)
-//
-// Notes:
-//   - First run of serve-web will compile the Rust binary (cargo build
-//     step). That can take 10–60s on a cold cache. Subsequent runs are
-//     incremental and quick.
-//   - vite.config.ts proxies /api → http://127.0.0.1:4173.
-//     If serve-web isn't up yet, those requests 502 — that's expected.
-//   - On Ctrl-C we SIGTERM both children, wait 3s, then SIGKILL any
-//     survivors. On Windows we use `taskkill /T /F` because plain
-//     TerminateProcess on the parent doesn't reach grandchildren
-//     (cargo→simple-post.exe, npm.cmd→node.exe → vite).
-//
-// Pure stdlib. No concurrently, no cross-spawn — keeps the dev deps lean.
+// 约束与清理：
+//   - serve-web 首次编译需 10–60 秒，未就绪前 /api 请求返回 502。
+//   - 收到 SIGINT/SIGTERM 时向子进程发送终止信号，超时 3 秒后强制终止。Windows 下使用 `taskkill /T /F` 递归清理孙进程。
+//   - 仅依赖 Node 原生模块，不引入第三方多进程依赖。
 
 import { spawn } from 'node:child_process';
 import process from 'node:process';
@@ -32,28 +20,22 @@ const VITE_PREFIX = '[vite] ';
 const SERVE_PREFIX = '[serve-web] ';
 const SHUTDOWN_GRACE_MS = 3000;
 
-// Track every child we spawn so the signal handler / exit handler can
-// reach all of them.
+// 记录已启动的子进程句柄，用于信号与退出时统一清理。
 const children = [];
 let shuttingDown = false;
 let forceKillTimer = null;
-// Default to 0; overwritten the moment a child exits non-cleanly.
+// 默认退出码为 0；任一子进程异常退出时写为非零值。
 let exitCode = 0;
 
 function prefixWrite(stream, chunk, prefix) {
-  // Prefix the whole chunk in one go. Splitting on newlines would lose
-  // partial-line ordering between stdout and stderr; for a dev tool this
-  // is plenty.
+  // 逐块添加前缀输出，避免按换行切分导致 stdout 与 stderr 错序。
   stream.write(prefix + chunk.toString());
 }
 
 function spawnChild(label, cmd, args) {
   const prefix = label === 'vite' ? VITE_PREFIX : SERVE_PREFIX;
   console.error(`[dev-split] starting ${label}: ${cmd} ${args.join(' ')}`);
-  // Node 20+ (post-CVE-2024-27980) refuses to spawn .cmd/.bat without
-  // shell: true. cargo and vite (when run directly) don't have that
-  // problem; npm on Windows IS a .cmd, so we need the shell. Safe here:
-  // all args are hardcoded, no user input flows through.
+  // Windows 下执行 .cmd/.bat 需开启 shell: true（Node 20+ 安全限制）；参数均为硬编码。
   const needsShell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(cmd);
   const child = spawn(cmd, args, {
     cwd: REPO,
@@ -69,7 +51,7 @@ function spawnChild(label, cmd, args) {
   child.stderr.on('data', (b) => prefixWrite(process.stderr, b, prefix));
 
   child.on('exit', (code, signal) => {
-    if (shuttingDown) return; // we triggered the exit; ignore
+    if (shuttingDown) return; // 收到退出信号触发的主动关闭，忽略
     shuttingDown = true;
     if (code === 0 || signal === 'SIGTERM' || signal === 'SIGINT') {
       console.error(`[dev-split] ${label} exited cleanly (code=${code} signal=${signal})`);
@@ -81,7 +63,7 @@ function spawnChild(label, cmd, args) {
   });
 
   child.on('error', (err) => {
-    // ENOENT etc. — surface immediately, don't silently hang.
+    // 启动失败立即报错退出，避免静默挂起。
     console.error(`[dev-split] ${label} failed to spawn: ${err.message}`);
     if (!shuttingDown) {
       shuttingDown = true;
@@ -93,7 +75,7 @@ function spawnChild(label, cmd, args) {
   return child;
 }
 
-// Send SIGTERM (or taskkill-equivalent) to every still-live child.
+// 向存活的子进程发送终止信号。
 function shutdownAll() {
   for (const { child } of children) {
     if (child.exitCode !== null) continue;
@@ -113,30 +95,28 @@ function shutdownAll() {
   }, SHUTDOWN_GRACE_MS);
 }
 
-// Cross-platform "kill this process and all of its children".
+// 跨平台递归清理子进程树。
 function killTree(child, force) {
   if (!child || child.exitCode !== null) return;
   if (process.platform === 'win32') {
-    // /T = walk tree (kill grandchildren too — cargo→simple-post.exe,
-    // npm.cmd→node.exe→vite). /F = force. No graceful variant on
-    // Windows; /T /F is the closest equivalent to SIGKILL.
+    // Windows 下用 /T 递归清理孙进程（cargo→simple-post.exe、npm.cmd→node.exe→vite），/F 强制终止。
     try {
       const killer = spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], {
         stdio: 'ignore',
         windowsHide: true,
       });
       killer.on('error', () => {
-        /* already dead */
+        /* 进程已退出，忽略错误 */
       });
     } catch {
-      /* already dead */
+      /* 进程已退出，忽略错误 */
     }
     return;
   }
   try {
     child.kill(force ? 'SIGKILL' : 'SIGTERM');
   } catch {
-    /* already dead */
+    /* 进程已退出，忽略错误 */
   }
 }
 
@@ -154,12 +134,8 @@ process.on('SIGTERM', () => {
   shutdownAll();
 });
 
-// ----- Boot -----------------------------------------------------------------
-// 1. serve-web first. Its port (4173) has to be listening before the
-//    browser opens localhost:5173, otherwise Vite's proxy 502s on the
-//    first /api or /mcp hit. We don't block the Vite spawn on readiness
-//    — Vite comes up instantly and proxies will reconnect once axum
-//    binds.
+// ----- 启动 -----------------------------------------------------------------
+// 1. 优先启动 serve-web。服务绑定端口前 Vite 的 /api 代理会返回 502，axum 监听就绪后恢复。
 console.error('[dev-split] hint: first cargo build of serve-web can take 10–60s');
 spawnChild('serve-web', 'cargo', [
   'run',
@@ -177,7 +153,6 @@ spawnChild('serve-web', 'cargo', [
   './dist',
 ]);
 
-// 2. Vite. `npm` resolves to `npm.cmd` on Windows automatically since
-//    Node 16, but we name it explicitly to be safe across CI runners.
+// 2. 启动 Vite。Windows 下显式使用 npm.cmd。
 const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 spawnChild('vite', npmCmd, ['run', 'dev']);

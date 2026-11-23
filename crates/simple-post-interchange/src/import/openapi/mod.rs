@@ -18,7 +18,7 @@
 //!
 //! 结构兼容的 3.1 文档也收：联合类型数组（`["string","null"]`）按可选处理，`$ref`
 //! 旁边的兄弟字段按覆盖处理。不做 JSON Schema 2020-12 求值，也不碰
-//! `webhooks` / `jsonSchemaDialect` / `components.pathItems`。
+//! `webhooks` / `jsonSchemaDialect` / `components.pathItems` 等高级特性字段。
 
 mod auth;
 mod params;

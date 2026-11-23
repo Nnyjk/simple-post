@@ -11,17 +11,16 @@
 //!     permissions.rs    ← 按项目的权限门与环境解析
 //!     env_ops.rs        ← 7 个 env_* 工具
 //!     key_value.rs      ← 共享的键值对 JSON Schema
-//!     project_ops/      ← project / module / collection / endpoint / spec
-//!     http_ops/         ← api_run_request, api_call_endpoint, api_run_collection
-//!     variable_fill.rs  ← api_resolve_template / endpoint / validate
-//!     response_parse.rs ← api_parse_response / diff / extract_jsonpath
+//!     project_ops/      ← project / module / collection / endpoint / spec 操作集
+//!     http_ops/         ← api_run_request、api_call_endpoint、api_run_collection 请求操作
+//!     variable_fill.rs  ← api_resolve_template / endpoint / validate 变量解析
+//!     response_parse.rs ← api_parse_response / diff / extract_jsonpath 响应解析
 //!     dynamic_ops.rs    ← 动态变量 7 个
 //! ```
 //!
-//! 本模块只做胶水，不定义任何域概念：域类型、DB、HTTP 执行、变量解析、响应解析、权限全在
-//! `simple_post_core::domain` / `::db` / `::http_executor` / `::permissions` 与
-//! `crate::variable_fill` / `crate::response_parse` 里，这里只有 dispatch 接线和 JSON-RPC
-//! 信封类型。
+//! 这层只管分派与 JSON-RPC 信封，不定义域概念：域类型、DB、HTTP 执行、变量解析、响应解析与
+//! 权限分别在 `simple_post_core::domain` / `::db` / `::http_executor` / `::permissions` 与
+//! 内部模块 `crate::variable_fill` / `crate::response_parse`。
 
 pub mod dynamic_ops;
 pub mod env_ops;
@@ -63,7 +62,7 @@ pub(crate) use registry::tool_table;
 /// `ToolFn`。每个 `func:` 槽位都用它：
 ///
 /// ```ignore
-/// ToolEntry { name: ..., func: tool_fn!(tool_xxx), ... }
+/// // 注册项示例：ToolEntry { name: ..., func: tool_fn!(tool_xxx), ... }
 /// ```
 ///
 /// `#[macro_export]` 把它放在 crate 根，调用处只写 `crate::tool_fn!(...)`。宏体里的路径除

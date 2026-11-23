@@ -182,9 +182,8 @@ pub(crate) async fn mcp_stop(
 /// 什么都没被跟踪时才 spawn。
 /// 一条例外：端口记录里的配置指纹与当前这份配置不一致时，那个 daemon 服务的不是要的这份配置，
 /// 故它被替换掉（判据见 `daemon_supervisor::reuse_decision`）。指纹一致时绝不杀。
-/// 响应信封与 `/api/mcp/stop`、`/api/mcp/restart` 同为 `RestartResult` 形状：
-/// `{ ok, pid, port }`。底层失败（spawn 错误、healthz 超时）按 restart 的做法折叠成
-/// `{ ok: false, pid: null, port: null }`。
+/// 响应信封与 `/api/mcp/stop`、`/api/mcp/restart` 同为 `RestartResult` 形状 `{ ok, pid, port }`。
+/// 底层失败（spawn 错误或探活超时）按 restart 的做法统一折叠为 `{ ok: false, pid: null, port: null }`。
 pub(crate) async fn mcp_start(
     State(s): State<Arc<WebState>>,
 ) -> Result<Json<crate::dto::RestartResult>, HttpErrorResponse> {

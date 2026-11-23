@@ -361,7 +361,7 @@ export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
   // 配置里的 `{{var}}`（规则在 core 的 `simple_post_core::oauth2`）。
   [COMMANDS.oauth2Token]: { method: 'POST', path: () => '/api/oauth2/token' },
 
-  // ----- low-level HTTP executor -----
+  // ----- 底层 HTTP 执行器 -----
   // 两侧 args 形状相同（camelCase）；Rust 的 `HttpSendBody` 直接从 `args` 反序列化，
   // 这里无需翻译。
   [COMMANDS.httpRequest]: { method: 'POST', path: () => '/api/http/send' },
@@ -456,7 +456,7 @@ export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
     path: () => '/api/mcp/capability/tools',
   },
 
-  // ----- Streamable HTTP listener config -----
+  // ----- 流式 HTTP 监听器配置 -----
   // 两个动词共用一条路径。设置面板在 `serve-web` 形态下同样可达，所以这一对
   // 必须存在于此处，否则该分区在浏览器模式下静默无效（双传输不变量）。
   [COMMANDS.mcpHttpConfigGet]: {

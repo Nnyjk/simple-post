@@ -103,7 +103,7 @@ fn delete_removes_a_key() {
 #[test]
 fn get_with_wrong_type_errors() {
     let pool = fresh_pool();
-    // Store a number, try to read as a struct.
+    // 写入数字后尝试按结构体读取，预期反序列化失败。
     db::with_tx(&pool, |c| set(c, "x", &42_i64)).unwrap();
     let err: Result<Option<Theme>, _> = db::with_conn(&pool, |c| get(c, "x"));
     assert!(err.is_err());

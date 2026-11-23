@@ -8,8 +8,7 @@
 //!
 //! 免鉴权：`/api/healthz`、`/mcp/healthz`、`/healthz`，以及 SPA shell（`GET /`）——浏览器从
 //! `localStorage` 取 token，在自己的 REST 请求上带上，`<script type="module">` 带不上。
-//! 守护进程另有自己的一份公开路径：配置里的挂载路径对应的 `<mount>/healthz`（见
-//! [`AuthState::with_public_paths`])。
+//! 守护进程另有自己的一份公开路径：配置里的挂载路径对应的 `<mount>/healthz`（参见方法定义 [`AuthState::with_public_paths`]）。
 //! token 存 `localStorage` 而非 HttpOnly cookie：这里的鉴权按进程而非按用户，SSR 之前也没有别的
 //! 地方能放。
 
@@ -99,9 +98,7 @@ fn is_public_path(path: &str) -> bool {
     matches!(path, "/healthz" | "/api/healthz" | "/mcp/healthz" | "/")
 }
 
-/// 常量时间字节比较。抄自 `subtle`
-/// （https://docs.rs/subtle/2.6.1/src/subtle/lib.rs.html#128-140），
-/// 为一个函数不值得多拉一个依赖。
+/// 常量时间字节比较。参考 subtle crate 实现，避免为单一函数引入额外外部依赖。
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;

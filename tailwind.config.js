@@ -14,7 +14,7 @@
  * `bg-primary`，渐变被丢掉），而 v4 的原生名 `bg-linear-to-br` 不与颜色冲突。
  * 两个名字在 v4 的 CSS 里都还能用，故本项目一律用 `bg-linear-*`。
  *
- * @type {import('tailwindcss').Config}
+ * @type {import('tailwindcss').Config} Tailwind 配置类型定义
  */
 export default {
   darkMode: 'class',
@@ -22,7 +22,7 @@ export default {
   theme: {
     extend: {
       colors: {
-        // shadcn/ui-style neutrals
+        // shadcn/ui 中性灰阶色
         border: 'hsl(var(--border))',
         input: 'hsl(var(--input))',
         ring: 'hsl(var(--ring))',
@@ -44,19 +44,12 @@ export default {
           DEFAULT: 'hsl(var(--card))',
           foreground: 'hsl(var(--card-foreground))',
         },
-        // Primary brand color (used by buttons, active tab bar, badges,
-        // focus rings, etc.). Defined as its own HSL variable so the
-        // `text-primary` / `bg-primary` / `border-primary` utilities work
-        // both in JSX className and in @apply.
+        // 主品牌色（按钮、活动 Tab、徽标、聚焦环等）。定义为独立 HSL 变量以支持 JSX 类名与 @apply。
         primary: {
           DEFAULT: 'hsl(var(--primary))',
           foreground: 'hsl(var(--primary-foreground))',
         },
-        // Semantic status colors — light/dark aware via the matching
-        // CSS variables in src/styles/globals.css. Components reach for
-        // `bg-success / text-warning-foreground / border-destructive/30`
-        // rather than hardcoded emerald-500/amber-500/red-500 hexes so
-        // dark-mode and future theme tweaks stay centralized.
+        // 语义状态色。由 globals.css 的 CSS 变量驱动明暗模式，避免在组件中硬编码十六进制色值。
         success: {
           DEFAULT: 'hsl(var(--success))',
           foreground: 'hsl(var(--success-foreground))',
@@ -69,39 +62,20 @@ export default {
           DEFAULT: 'hsl(var(--destructive))',
           foreground: 'hsl(var(--destructive-foreground))',
         },
-        // Third text level, for information that is present rather than
-        // actionable — timestamps, counts, breadcrumb trails. Gives
-        // `muted-foreground` back to descriptive text. See globals.css.
+        // 三级弱文本（时间戳、计数、面包屑等展示类信息），保留 muted-foreground 用于说明性文本。
         faint: 'hsl(var(--text-faint))',
-        // Hover / selection, in the two flavours globals.css defines: an
-        // alpha overlay for translucent surfaces, a solid fill for opaque
-        // ones. Components should prefer these over a hand-written
-        // `bg-accent/40` so the backdrop can change without a redesign.
+        // 悬浮与选中态（半透明表面用 alpha 叠加，不透明表面用实体填充），避免手写 bg-accent/40。
         'overlay-hover': 'var(--overlay-hover)',
         'overlay-select': 'var(--overlay-select)',
         'surface-hover': 'hsl(var(--surface-hover))',
         'surface-select': 'hsl(var(--surface-select))',
-        // 1px edge for the window frame. Windows' own drop shadow does not
-        // read against a dark surface, so the edge is drawn explicitly.
+        // 窗口边框 1px 描边：Windows 自带阴影在暗色表面不易分辨，需显式绘制边框。
         'edge-window': 'hsl(var(--edge-window))',
-        // Raised thumb of a segmented control, inside a `bg-muted` trough.
-        // Has to stay a *separate* key from `card`: on the surfaces these
-        // sit on, `--card` and the thumb need opposite lightness in dark
-        // mode, so aliasing one to the other would make the selected
-        // segment vanish.
+        // 分段控件滑块高亮背景。暗色模式下滑块与底槽的明度关系与 card 相反，必须保持独立键名。
         chip: 'hsl(var(--chip))',
-        // HTTP method colors deliberately do NOT live here. `MethodPill`
-        // paints its swatch through an inline `style` because the mapping
-        // has to be computed per-method at runtime (see `methodColorVar` in
-        // src/lib/utils.ts), which a static Tailwind color key cannot
-        // express. An earlier `method: { … }` block existed here and was
-        // removed: nothing ever emitted a `*-method-*` class, and it had
-        // silently drifted from `methodColorVar` (POST/PUT were swapped).
-        // Single source of truth: src/lib/utils.ts.
+        // HTTP 方法色不在配置中静态定义：由 MethodPill 在运行时通过内联 style 绑定 CSS 变量（真值见 src/lib/utils.ts 的 methodColorVar）。
         //
-        // Semantic hue accents (project / module / collection / endpoint /
-        // baseUrl / variable / connection / request) DO live here, under
-        // `hue` — see src/lib/hue.ts for the concept→class map.
+        // 资源语义色相（project / module / collection / endpoint / baseurl / variable / connection / request）收拢在 hue 下（概念映射见 src/lib/hue.ts）。
         hue: {
           project: 'hsl(var(--hue-project))',
           module: 'hsl(var(--hue-module))',
@@ -113,34 +87,21 @@ export default {
           request: 'hsl(var(--hue-request))',
         },
       },
-      // An explicit ladder rather than a derived one. The old chain
-      // (`lg: var(--radius)`, `md: calc(-2px)`, `sm: calc(-4px)`) meant
-      // rounding a card and rounding a button were always tied together,
-      // which is the opposite of how native Windows does it: 8px for the
-      // window (the native frame's, so no CSS stop for it), 6px for cards
-      // and rows, 4px for controls.
+      // 显式圆角阶梯（卡片与容器 6px，控件 4px，内部徽标 3px），不使用相对计算链，贴合 Windows 桌面规范。
       borderRadius: {
         pill: 'var(--radius-pill)',
-        lg: 'var(--radius)', // 6px — cards, rows, popovers, menus
-        md: '4px', // 4px — buttons, inputs, chips
-        sm: '3px', // 3px — inner detail, e.g. a badge inside a chip
-        DEFAULT: '4px', // controls; `rounded` reads as "a control"
+        lg: 'var(--radius)', // 6px：卡片、列表行、弹出层、菜单
+        md: '4px', // 4px：按钮、输入框、分段项
+        sm: '3px', // 3px：内部徽标与细节
+        DEFAULT: '4px', // 默认控件圆角
       },
-      // Type scale, shifted up one step. Chrome in this app was running at
-      // 10–12px, which is what reads as "web app" rather than "desktop
-      // app". Overriding here rather than editing every `text-xs` call
-      // site means one file moves the whole interface.
-      //
-      // `text-xs` 12 → 13px is the load-bearing one (tree rows, tab strip,
-      // settings nav). 14px is unchanged: this is a dense multi-panel
-      // workspace with a 256px tree pane, so the 14px floor that suits a
-      // search-box UI would start truncating here.
+      // 字号阶梯整体上调一档：text-xs 设为 13px（适配资源树、Tab 栏、设置导航），保持桌面端排版密度；text-sm 维持 14px。
       fontSize: {
         xs: ['0.8125rem', { lineHeight: '1.25rem' }], // 13px
-        sm: ['0.875rem', { lineHeight: '1.25rem' }], // 14px (unchanged)
-        base: ['1rem', { lineHeight: '1.5rem' }], // 16px (unchanged)
-        lg: ['1.125rem', { lineHeight: '1.625rem' }], // 18px — section titles
-        '2xl': ['1.75rem', { lineHeight: '2rem' }], // 28px — welcome hero
+        sm: ['0.875rem', { lineHeight: '1.25rem' }], // 14px
+        base: ['1rem', { lineHeight: '1.5rem' }], // 16px
+        lg: ['1.125rem', { lineHeight: '1.625rem' }], // 18px：分组标题
+        '2xl': ['1.75rem', { lineHeight: '2rem' }], // 28px：欢迎屏标题
         // 11px / 10px。全仓 219 处手写 `text-[11px]` / `text-[10px]` 已迁到这两个名字
         // 上，「任意字号」由 `src/lib/__tests__/style-guards.test.ts` 禁止 —— 再要新档位
         // 先加在这里，别在组件里发明 `text-[9px]`（中文字形在那之下糊成一片）。

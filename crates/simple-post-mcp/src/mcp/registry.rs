@@ -19,7 +19,7 @@ pub(crate) fn tool_table() -> &'static [ToolEntry] {
         // env_ops：7 个
         v.extend(env_ops::table());
 
-        // project_ops：project + module + collection + endpoint + spec
+        // project_ops：包含 project、module、collection、endpoint 与 spec 操作
         v.extend(project_ops::table());
 
         // http_ops：3 个

@@ -49,7 +49,7 @@ fn get_missing_returns_not_found() {
 fn list_returns_seeded_projects() {
     let pool = fresh_pool();
     let ps = db::with_conn(&pool, list).unwrap();
-    // fixtures.json seeds 3 projects
+    // fixtures.json 播种了 3 个项目。
     assert_eq!(ps.len(), 3);
     assert_eq!(ps[0].id, "p_demo");
 }
@@ -176,8 +176,7 @@ fn delete_missing_returns_not_found() {
 
 #[test]
 fn round_trip_via_the_project_struct() {
-    // Smoke test: serialise + deserialise a Project and confirm the wire form
-    // matches the TS interface.
+    // 冒烟测试：序列化与反序列化 Project 并确认传输格式与 TS 接口一致。
     let p = Project {
         id: "p1".into(),
         name: "x".into(),
@@ -216,7 +215,7 @@ fn create_with_defaults_seeds_a_project_and_one_environment() {
         "and it has no values to resolve against yet"
     );
 
-    // And the row is really there, not just in the echo.
+    // 验证数据库真实存在该行，不仅是回显正确。
     let got = db::with_conn(&pool, |c| get(c, "p_new")).unwrap();
     assert_eq!(got.id, "p_new");
 }

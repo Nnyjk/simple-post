@@ -7,7 +7,7 @@
 //!   拉起内嵌 MCP daemon，供 UI 展示实时状态。
 //!
 //! ## 无头的一半
-//! `web_api`、`daemon_supervisor`、`auth`、`port_registry`、`dto`、
+//! 对应无头组件（`web_api`、`daemon_supervisor`、`auth`、`port_registry`、`dto`、
 //! `http_config` 与 `mcp` / `serve-web` 入口）在 `simple-post-server`，
 //! 下方整体 `pub use` 回来，`commands/` 里的 `crate::…` 路径因此照旧可解析。
 //!
@@ -147,8 +147,8 @@ pub fn run() {
 
     tauri::Builder::default()
         // 导出的「另存为」。`serve-web` 形态没有 Tauri，前端在浏览器里退回 Blob 下载，
-        // 故这两个插件只在桌面壳注册，且前端侧是动态 import——见
-        // `src/lib/transfer-file-save.ts`。
+        // 故这两个插件只在桌面壳注册，且前端侧动态导入，
+        // 对应保存逻辑见前端 `src/lib/transfer-file-save.ts`。
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         // 自动更新。检查与下载由前端 `src/lib/updater.ts` 动态 import 后调用；
@@ -259,7 +259,7 @@ pub fn run() {
             let app_handle = app.handle().clone();
             // 必须用 `tauri::async_runtime::spawn`，不是 `tokio::spawn`：`.setup()`
             // 在 tokio runtime 之外同步执行，裸 `tokio::spawn` 会 panic
-            // "there is no reactor running"。
+            // 并提示 "there is no reactor running"。
             tauri::async_runtime::spawn(async move {
                 if !auto_start {
                     eprintln!(

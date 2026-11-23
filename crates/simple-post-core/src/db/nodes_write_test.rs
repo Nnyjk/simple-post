@@ -172,7 +172,7 @@ fn root_id_must_match_the_parents() {
 }
 
 // -------------------------------------------------------------------------
-// Cascade delete.
+// 级联删除。
 // -------------------------------------------------------------------------
 
 #[test]
@@ -215,9 +215,7 @@ fn deleting_a_project_takes_the_whole_tree() {
 
 #[test]
 fn deep_nesting_survives_a_cascade_delete() {
-    // The old layout had no depth ceiling on collection nesting, so the
-    // merge must not introduce one. 200 is well past anything a user
-    // builds and well under SQLite's recursion ceiling.
+    // 集合嵌套不设深度上限；测试使用 200 层验证 SQLite 递归与级联删除正常。
     let (pool, _dir) = fresh_pool();
     put(&pool, &module("p1", "m1", 0), None);
     let mut parent = "m1".to_string();

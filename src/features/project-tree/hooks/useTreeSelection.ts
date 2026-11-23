@@ -14,7 +14,7 @@ export function useTreeSelection() {
   const openTab = useAppStore((s) => s.openTab);
   const toggleNodeExpanded = useAppStore((s) => s.toggleNodeExpanded);
 
-  // ---------- click handlers (open tab + activate) ----------
+  // ---------- 点击处理函数（打开标签 + 激活） ----------
   // `useTreeSelection` 里没有 `openProjectTab`：项目不是这棵树里的一行，故树内没有任何
   // 可点击进入项目的元素。进入项目是 store 里的 `openProject`，由欢迎页选择器、顶栏选择器、
   // 命令面板与面包屑调用。

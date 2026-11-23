@@ -12,9 +12,9 @@
 //!     mod.rs           ← 当前文件（模块地图 + 重导出）
 //!     args.rs          ← 三个工具的入参形状
 //!     table.rs         ← dispatch 表（三条 schema）
-//!     run_request.rs   ← api_run_request
-//!     call_endpoint.rs ← api_call_endpoint
-//!     batch.rs         ← api_run_collection
+//!     run_request.rs   ← 单次临时请求 api_run_request
+//!     call_endpoint.rs ← 调用已存端点 api_call_endpoint
+//!     batch.rs         ← 批量执行集合 api_run_collection
 //!     dynamic.rs       ← 动态变量取值
 //!     send.rs          ← 发送路径、脚本环境快照、出站旋钮、调用历史写入
 //!     project.rs       ← 临时请求的项目行
@@ -23,10 +23,10 @@
 //!     multipart.rs     ← multipart 装配
 //! ```
 //!
-//! 测试文件：`http_ops_test.rs` / `dynamic_test.rs` / `oauth2_test.rs` /
-//! `multipart_mode_test.rs` / `multipart_parity_test.rs` / `multipart_wire_test.rs` /
-//! `run_request_test.rs` / `overrides_test.rs` / `env_fallback_test.rs` /
-//! `script_test.rs` / `tls_test.rs` / `batch_test.rs` / `history_record_test.rs`。
+//! 对应测试：包含 `http_ops_test.rs`、`dynamic_test.rs`、`oauth2_test.rs`，
+//! 以及 multipart 相关的 `multipart_mode_test.rs`、`multipart_parity_test.rs`、`multipart_wire_test.rs`，
+//! 执行验证相关的 `run_request_test.rs`、`overrides_test.rs`、`env_fallback_test.rs`，
+//! 和扩展测试 `script_test.rs`、`tls_test.rs`、`batch_test.rs`、`history_record_test.rs`。
 
 mod args;
 mod batch;

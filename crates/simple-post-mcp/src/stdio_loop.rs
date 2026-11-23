@@ -1,4 +1,4 @@
-// crates/simple-post-mcp/src/stdio_loop.rs
+// 桥接实现：crates/simple-post-mcp/src/stdio_loop.rs
 //
 // `simple-post-mcp` 二进制的 stdio ↔ HTTP 桥。
 //
@@ -8,11 +8,11 @@
 // 出错不 panic：HTTP 失败与解析失败都转成 JSON-RPC `error` 块写回 stdout，
 // 只有真正致命的 I/O 失败（stdin 管道关闭）才结束循环。
 //
-// 帧形态：
-//   in:  {"jsonrpc":"2.0","id":N,"method":"tools/list","params":{}}
-//   out: {"jsonrpc":"2.0","id":N,"result":{...}}
-//        {"jsonrpc":"2.0","id":N,"error":{"code":N,"message":"..."}}
-//        {"jsonrpc":"2.0","method":"...","params":{...}} (notifications, no id)
+// 帧形态约束（stdout 严格只允许输出单行 JSON-RPC 响应帧）：
+//   输入请求：{"jsonrpc":"2.0","id":N,"method":"tools/list","params":{}}
+//   成功响应：{"jsonrpc":"2.0","id":N,"result":{...}}
+//   错误响应：{"jsonrpc":"2.0","id":N,"error":{"code":N,"message":"..."}}
+//   通知事件：{"jsonrpc":"2.0","method":"...","params":{...}}（通知无 id 字段）
 //
 // `tools/list` 的结果先过一遍 `capability::filter_tools` 再写回，客户端看到的
 // 就是「本地档位收窄之后」那份清单。

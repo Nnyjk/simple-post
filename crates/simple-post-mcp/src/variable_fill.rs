@@ -19,7 +19,7 @@
 //!     auth.rs          ← bearer / basic / apikey / oauth2 字段替换
 //!     request.rs       ← 请求头排序、query 追加、Basic 的 base64
 //!     resolve.rs       ← resolve_endpoint（主 API）
-//!     types.rs         ← EndpointOverrides / ResolvedEndpoint
+//!     types.rs         ← 结构体定义 EndpointOverrides / ResolvedEndpoint
 //! ```
 //!
 //! `{{var}}` 的实现住在 `simple_post_core::template`：导入器要按同一套语法判定外来格式里

@@ -25,8 +25,6 @@ const COLUMNS: &str =
                        body_json, auth_json, docs, notes, tags_json, pre_request_script, \
                        test_script, tls_json, responses_json, protocol, graphql_json";
 
-// 读。
-
 /// 一个 endpoint 的配置。节点存在却没有 detail 行时为 `NotFound`——那意味着 `nodes` 与
 /// `endpoint_details` 两张表不一致，值得暴露出来而不是给它一个默认值。
 pub fn get(conn: &mut Connection, node_id: &str) -> Result<EndpointDetail, AppError> {
@@ -84,8 +82,6 @@ pub fn list_by_root(conn: &mut Connection, root_id: &str) -> Result<Vec<Endpoint
     }
     Ok(out)
 }
-
-// 写。
 
 /// 建一行端点的配置。
 ///

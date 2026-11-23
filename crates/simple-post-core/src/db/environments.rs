@@ -26,8 +26,6 @@ use super::json_col_err;
 /// 都解析成 `''` 的环境。
 const COLUMNS: &str = "id, project_id, name, created_at, module_base_urls_json, variables_json, disabled_variables_json";
 
-// 读。
-
 /// 一个项目下的全部环境，按 `name` 排序以让选择器显示稳定。
 pub fn list_by_project(
     conn: &mut Connection,
@@ -105,8 +103,6 @@ pub fn lookup_project_id(conn: &mut Connection, env_id: &str) -> Result<String, 
         .optional()?;
     pid.ok_or_else(|| AppError::NotFound(format!("environment {env_id}")))
 }
-
-// 写。
 
 /// 新建一个环境。返回**落库之后**的那一行。
 ///

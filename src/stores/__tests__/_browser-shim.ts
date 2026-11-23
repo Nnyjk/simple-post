@@ -1,43 +1,22 @@
 /**
- * Browser + Tauri IPC shim for running store slice tests under Node.
+ * Node 环境下的浏览器与 Tauri IPC 模拟桩。
  *
- * Why this file exists
- * --------------------
- * `src/stores/*.ts` is designed to run inside the Tauri webview, so it
- * freely references `window.setInterval`, `document.visibilityState`,
- * `window.localStorage`, and `window.__TAURI_INTERNALS__.invoke` — none
- * of which exist in plain Node. This module exports a tiny shim that
- * gives each slice enough of a browser-shaped surface to run, plus a
- * Tauri-IPC mock delegated to `@tauri-apps/api/mocks#mockIPC`.
- *
- * Public surface:
- *   - `installBrowserShim()` — installs `window`, `document`,
- *      `localStorage` on `globalThis` if they aren't already there.
- *      Returns helpers to dispatch `visibilitychange` events from tests.
- *   - `installIpcMock(handler)` — installs
- *      `window.__TAURI_INTERNALS__.invoke` resolved through the supplied
- *      handler. Pass-through promises; throwing in the handler makes
- *      the invoke promise reject (which is how the slice's catch
- *      branches get exercised).
- *   - `clearIpcMock()` — clears the previous mockIPC state.
- *
- * The slice tests call these from `beforeEach`/`afterEach` so the
- * test-specific handler can be different per test (and not leak
- * across files).
+ * `src/stores/*.ts` 面向 Tauri webview 运行，直接引用 `window.setInterval`、
+ * `document.visibilityState`、`window.localStorage` 与 `window.__TAURI_INTERNALS__.invoke`。
+ * 本模块补齐切片运行所需的浏览器 API，并基于 `@tauri-apps/api/mocks#mockIPC` 桩化 Tauri IPC。
+ * 导出：
+ *   - `installBrowserShim()`：挂载 `window`、`document`、`localStorage`，提供 `visibilitychange` 调度；
+ *   - `installIpcMock(handler)`：拦截 `invoke`，handler 抛错触发切片 catch；
+ *   - `clearIpcMock()`：重置 mockIPC。
  */
 
 import { mockIPC, clearMocks } from '@tauri-apps/api/mocks';
 
 // ---------------------------------------------------------------------------
-// Module-load bootstrap — installed BEFORE any store slice (and therefore
-// before `@/lib/tauri-commands.ts`) is imported, so the renderer-side
-// `IS_TAURI_SHELL` constant — captured at module evaluation — resolves to
-// `true` for the entire test run.
-//
-// Without this bootstrap `IS_TAURI_SHELL` would be `false` and the slices
-// would route through `webInvokeCmd` (fetch → /api/*), which has no
-// matching REST endpoint in the Node test environment.
-// ---------------------------------------------------------------------------
+// 模块加载引导：必须在引入任何 store 切片（及 `@/lib/tauri-commands.ts`）前执行，
+// 确保模块求值期捕获的 `IS_TAURI_SHELL` 在测试全程为 `true`。
+// 未注入时 `IS_TAURI_SHELL` 为 `false`，切片会走 Node 测试环境不存在对应 REST 端点的
+// `webInvokeCmd`（fetch → /api/*）。
 const g: any = globalThis;
 if (!g.window) g.window = g;
 if (!g.window.__TAURI_INTERNALS__) g.window.__TAURI_INTERNALS__ = {};
@@ -45,11 +24,11 @@ if (!g.window.__TAURI_INTERNALS__) g.window.__TAURI_INTERNALS__ = {};
 type EventListener = (event: any) => unknown;
 
 export interface ShimGlobals {
-  /** Force the document.visibilityState; dispatches `visibilitychange`. */
+  /** 强制修改 `document.visibilityState` 并派发 `visibilitychange` 事件。 */
   setVisibility(v: 'visible' | 'hidden'): void;
-  /** The shim-bound `document` object (use `globalThis.document` too). */
+  /** 绑定的 `document` 桩对象（也可通过 `globalThis.document` 访问）。 */
   document: any;
-  /** Reset everything the shim attached, restoring globals. */
+  /** 清理桩注入的属性，恢复全局变量。 */
   teardown(): void;
 }
 
@@ -66,13 +45,11 @@ export function installBrowserShim(): ShimGlobals {
   const hadClearInterval = Object.prototype.hasOwnProperty.call(g, 'clearInterval');
   const prevClearInterval = g.clearInterval;
 
-  // The slice uses `window.setInterval` / `window.clearInterval`. Alias
-  // `window` to the global object so the timer functions exist on the
-  // property the code reaches through.
+  // 切片调用 `window.setInterval` / `window.clearInterval`。
+  // 将 `window` 别名到全局对象，保证属性可访问。
   if (!g.window) g.window = g;
 
-  // localStorage — backing Map so ui-slice's `loadPrefs` doesn't throw
-  // when it tries to read prefs during module evaluation.
+  // localStorage：基于 Map 的实现，避免 `ui-slice` 的 `loadPrefs` 在模块求值期抛错。
   //
   // Node 自带一个 `localStorage` 全局变量，但它是个**空壳**（没有 getItem /
   // setItem），所以判据是「有没有那些方法」而不是「存不存在」—— 否则这个 shim
@@ -101,10 +78,8 @@ export function installBrowserShim(): ShimGlobals {
     };
   }
 
-  // Timer functions — the slice stacks a single shared timer across
-  // visibility transitions. Per-test interval counting lives in the
-  // exported `SetIntervalCounter` below; here we only make sure the
-  // window-aliased globals resolve.
+  // 定时器函数：切片在可见性切换间共用单个定时器。测试内的调用计数由 `SetIntervalCounter`
+  // 负责，此处确保 `window` 别名上的全局函数可解析。
   g.setInterval = ((handler: any, ms?: number, ...rest: any[]) => {
     return (prevSetInterval as any)(handler, ms, ...rest);
   }) as any;
@@ -112,9 +87,8 @@ export function installBrowserShim(): ShimGlobals {
     return (prevClearInterval as any)(id);
   }) as any;
 
-  // Minimal `document` object. The slice adds a visibilitychange
-  // listener and the handler reads `visibilityState`. We don't need
-  // anything else from the DOM API.
+  // 极简 `document`：切片只注册 `visibilitychange` 监听并读取 `visibilityState`，
+  // 无需其他 DOM API。
   const listeners: Record<string, Set<EventListener>> = {};
   let visibility: 'visible' | 'hidden' = 'visible';
   const documentShim: any = {};
@@ -164,10 +138,8 @@ export function installBrowserShim(): ShimGlobals {
 export type IpcHandler = (cmd: string, args: any) => unknown | Promise<unknown>;
 
 export function installIpcMock(handler: IpcHandler): void {
-  // mockIPC installs `window.__TAURI_INTERNALS__.invoke` returning
-  // whatever the supplied callback resolves to. The callback can be
-  // async; throwing makes the invoke promise reject, which is how
-  // the slice's catch branches are exercised.
+  // mockIPC 挂载 `window.__TAURI_INTERNALS__.invoke` 并透传回调结果；
+  // 回调抛错会使 invoke promise reject，用于覆盖切片中的 catch 分支。
   mockIPC(async (cmd: string, args: any) => handler(cmd, args));
 }
 
@@ -175,14 +147,13 @@ export function clearIpcMock(): void {
   try {
     clearMocks();
   } catch {
-    // mockIPC was never installed; clearing is a no-op.
+    // 未安装 mockIPC，清除为 no-op。
   }
 }
 
 /**
- * Counter that lets a test assert how many times `setInterval` was
- * called between two snapshots. Use alongside `installBrowserShim`,
- * which keeps its own counter for assertions during the same test.
+ * 统计两次快照间 `setInterval` 调用次数的计数器。
+ * 配合 `installBrowserShim` 使用。
  */
 export class SetIntervalCounter {
   private prev: any;
@@ -191,8 +162,7 @@ export class SetIntervalCounter {
   install() {
     const g: any = globalThis;
     this.prev = g.setInterval;
-    // Arrow callback: `this` stays bound to the instance, so no
-    // `const that = this` alias is needed.
+    // 箭头函数绑定当前实例，无需保留 `this` 别名。
     g.setInterval = ((handler: any, ms?: number, ...rest: any[]) => {
       this.calls++;
       return this.prev(handler, ms, ...rest);

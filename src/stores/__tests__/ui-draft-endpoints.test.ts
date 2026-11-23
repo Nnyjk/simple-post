@@ -63,7 +63,7 @@ beforeEach(() => {
   ipcCalls = [];
   failCreate = false;
   origError = console.error.bind(console);
-  console.error = () => {}; // addNode logs its own failure; keep output clean
+  console.error = () => {}; // 抑制 addNode 内部失败日志，保持测试输出整洁
 
   installIpcMock((cmd, args) => {
     ipcCalls.push({ cmd, args: args ?? {} });

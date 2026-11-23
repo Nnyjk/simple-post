@@ -126,7 +126,7 @@ export const COMMANDS = {
   mcpCapabilitySet: 'mcp_capability_set',
   mcpCapabilityListTools: 'mcp_capability_list_tools',
 
-  // ----- Streamable HTTP listener config -----
+  // ----- 流式 HTTP 监听器配置 -----
   // MCP 端点的 host / port / path，加上远程访问开关与 Host/Origin 白名单。读返回
   // 已持久化的配置；写返回 `{ config, requiresRestart }` ——
   // 监听器无法就地重绑，所以由调用方给出重启提示，而不是假装改动已生效。两条判断分属
@@ -156,7 +156,7 @@ export const COMMANDS = {
   updateDeployment: 'update_deployment',
   updateApply: 'update_apply',
 
-  // ----- low-level HTTP executor (Tauri side) -----
+  // ----- 底层 HTTP 执行器（Tauri 端） -----
   httpRequest: 'http_request',
   // 一次性 HTTP 流（SSE）：建连、取消。事件经 `tauri::ipc::Channel` 逐条推回渲染层。
   streamRequest: 'stream_request',

@@ -1,63 +1,37 @@
 #!/usr/bin/env node
-// scripts/dump-openapi.mjs
+// 解析 `crates/simple-post-server/src/web_api/spec/table.rs`（或 web_api/ 树下）的
+// `public_route_specs()` 表，渲染 OpenAPI 3.1 YAML 文档。
 //
-// Generate an OpenAPI 3.1 document from the canonical
-// `public_route_specs()` table in
-// `crates/simple-post-server/src/web_api/spec/table.rs`.
+// 为什么解析 Rust 源码而非调用二进制：
+//   - 即使 Rust 暂时编译失败（如半合并提交或仅文档构建 CI），生成仍可独立运行。
+//   - 避免生成脚本依赖 Rust 编译工具链。
 //
-// Why parse Rust source instead of calling the binary?
-//   - The OpenAPI doc should stay valid even when the Rust crate fails
-//     to compile (e.g. after a half-merged commit, or during CI
-//     docs-only builds).
-//   - It keeps the dumper free of any Rust toolchain dependency.
+// 为什么不将生成物提交进仓库：
+//   - `public_route_specs()` 表是唯一真值，生成物写入 `target/openapi.yaml`（已被 git 忽略），
+//     门禁按需生成并校验，避免版本库中出现双份真值与状态分叉。
 //
-// The dumper:
-//   1. Locates the `public_route_specs()` table anywhere under
-//      `crates/simple-post-server/src/web_api{,/**.rs}` and greps the
-//      `RouteSpec { ... }` literal rows in it.
-//   2. Groups rows by path (one path may have multiple methods).
-//   3. Emits an OpenAPI 3.1 yaml document with `paths` keyed by path.
+// 流程：
+//   1. 遍历定位包含 `public_route_specs()` 的文件，提取所有 `RouteSpec { ... }` 字面量；
+//   2. 按 path 聚合多 HTTP method；
+//   3. 输出 OpenAPI 3.1 YAML 文档。
 //
-// The table may be one inline `vec![…]` inside `public_route_specs()`, or
-// one `routes()` call per resource group (each group in its own file). The
-// dumper reads the group names from the call order, so the emitted document
-// keeps the table's own order in either shape.
-//
-// Usage:
-//   node scripts/dump-openapi.mjs > openapi.yaml
-//   node scripts/dump-openapi.mjs --out target/openapi.yaml   # writes + asserts non-empty
-//
-// `--out` is what `npm run lint:openapi` uses: it writes the document outside
-// the repository (default `target/openapi.yaml`) and fails if the written file
-// has no `paths:` entries, so a table refactor cannot silently empty the gate.
-//
-// Caveat:
-//   - This dumper trusts the literal shape of the `RouteSpec` table —
-//     a Rust refactor that breaks the table (different field names,
-//     different row layout) will silently emit empty yaml.
-//   - The `summary` text is human-readable; the dumper does no
-//     schema synthesis.
-
+// 用法示例：
+//   node scripts/dump-openapi.mjs > openapi.yaml              # 输出至标准输出
+//   node scripts/dump-openapi.mjs --out target/openapi.yaml   # 输出并校验 paths 非空
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, basename, join, resolve } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
-// web_api moved to the headless server crate when the Tauri split happened;
-// the table moved with it.
+// 模块随前后端拆分移至 server crate，表定义位于 crates/simple-post-server/src。
 const SRC_DIR = join(ROOT, 'crates', 'simple-post-server', 'src');
 const WEB_API_FILE = join(SRC_DIR, 'web_api.rs');
 const WEB_API_DIR = join(SRC_DIR, 'web_api');
 
 const SPEC_FN = 'pub fn public_route_specs() -> Vec<RouteSpec>';
 
-/**
- * Every Rust source under the `web_api/` module tree.
- *
- * The tree is walked rather than hard-coded, so the table may live in a flat
- * `web_api.rs` sibling or in any file below `web_api/`.
- */
+/** 遍历 web_api/ 下所有 Rust 源文件。表可能在 web_api.rs 或 web_api/ 子目录中。 */
 function allRustSources() {
   const out = [];
   if (existsSync(WEB_API_DIR)) {
@@ -74,13 +48,7 @@ function allRustSources() {
   return out;
 }
 
-/**
- * Resolve the Rust source that owns `public_route_specs()`.
- *
- * Walk the `web_api/` module tree and return the file holding the table.
- * A flat `web_api.rs` sibling is also accepted, since Rust resolves `mod
- * web_api;` to either layout.
- */
+/** 定位包含 public_route_specs() 的 Rust 源文件。 */
 function findSpecSource() {
   for (const path of allRustSources()) {
     const text = readFileSync(path, 'utf8');
@@ -91,7 +59,7 @@ function findSpecSource() {
   );
 }
 
-/** Brace-match the `{ … }` block whose opening brace is the first one at or after `from`. */
+/** 从 from 后的第一个 '{' 开始括号匹配，返回闭合代码块。 */
 function blockAfter(text, from) {
   const open = text.indexOf('{', from);
   if (open === -1) return null;
@@ -106,12 +74,10 @@ function blockAfter(text, from) {
   return null;
 }
 
-// ---------------------------------------------------------------------------
-// 1. Parse `public_route_specs()` from the web_api module.
-// ---------------------------------------------------------------------------
+// 1. 从 web_api 源码中解析 public_route_specs() 函数体。
 const { text: src } = findSpecSource();
 
-// Find the start of `pub fn public_route_specs() -> Vec<RouteSpec> {`
+// 定位 `pub fn public_route_specs() -> Vec<RouteSpec> {` 起始位置。
 const fnStart = src.indexOf(SPEC_FN);
 if (fnStart === -1) {
   throw new Error(
@@ -124,22 +90,13 @@ if (!body) {
   throw new Error('could not locate end of public_route_specs() body');
 }
 
-/**
- * The table has two shapes, and the dumper accepts both.
- *
- * Inline: `public_route_specs()` returns one `vec![ RouteSpec { … }, … ]`.
- * Split:  `public_route_specs()` calls one `routes()` per resource group, and
- *         each group lives in its own file (`…::routes()`).
- *
- * The group names are read from the call order in `public_route_specs()` so
- * the emitted document keeps the table's own order.
- */
+/** 表支持两种组织形式：内联单个 vec![RouteSpec { ... }]，或各资源分组单独调用 routes()。按调用顺序保持原表排序。 */
 const groupRe = /([A-Za-z_][A-Za-z0-9_]*)\s*::\s*routes\s*\(\s*\)/g;
 const groupNames = [];
 let gm;
 while ((gm = groupRe.exec(body)) !== null) groupNames.push(gm[1]);
 
-/** The body of the `routes()` function that the given group name points at. */
+/** 获取指定分组名称对应的 routes() 函数体代码块。 */
 function groupBody(name) {
   for (const path of allRustSources()) {
     if (basename(path, '.rs') !== name) continue;
@@ -165,14 +122,7 @@ if (groupNames.length > 0) {
   });
 }
 
-/**
- * The body of one `RouteSpec { … }` row.
- *
- * A row's `path` may contain `{param}` placeholders, so the body cannot be
- * matched with a brace-free character class — that drops every row whose path
- * carries a parameter. Scan from the opening brace and count braces outside
- * string literals instead.
- */
+/** 解析单个 RouteSpec { ... } 结构体字面量的内容，处理字符串内的花括号转义。 */
 function rowBody(text, from) {
   let depth = 1;
   let quote = null;
@@ -199,7 +149,7 @@ function rowBody(text, from) {
   return null;
 }
 
-// Match each `RouteSpec { ... }` row.
+// 提取所有 RouteSpec { ... } 行。
 const rows = [];
 for (const block of sourceBlocks) {
   const rowRe = /RouteSpec\s*\{/g;
@@ -235,8 +185,7 @@ if (rows.length === 0) {
   );
 }
 
-// A row that fails to parse would vanish from the document without a trace,
-// so the dumper checks that every `RouteSpec {` in the source became a row.
+// 校验提取行数与源码中的 RouteSpec { 出现次数一致，防止解析静默遗漏。
 const sourceRowCount = sourceBlocks.reduce(
   (n, b) => n + (b.match(/RouteSpec\s*\{/g) || []).length,
   0,
@@ -247,11 +196,9 @@ if (rows.length !== sourceRowCount) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// 2. Group rows by path. Emit yaml.
-// ---------------------------------------------------------------------------
+// 2. 按路径分组并生成 YAML。
 
-/** YAML string escape — only need to handle double-quotes and backslashes. */
+/** YAML 字符串转义（处理双引号与反斜杠）。 */
 function y(s) {
   return `"${String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
@@ -283,13 +230,10 @@ out.push('        default: localhost');
 out.push('        description: Hostname or LAN IP of the simple-post serve-web instance');
 out.push('paths:');
 for (const [path, methods] of [...byPath.entries()].sort()) {
-  // axum 0.7 writes path params as `:id`; OpenAPI requires `{id}`.
-  // Emitting the axum form verbatim produces a document that no OpenAPI
-  // 3.1 validator accepts. This is a presentation-only transform — the
-  // axum source keeps `:id`.
+  // axum 0.7 路径参数写作 :id，OpenAPI 规范要求写作 {id}，仅在此处做展示层转换。
   const template = path.replace(/:([A-Za-z_][A-Za-z0-9_]*)/g, '{$1}');
   out.push(`  ${template}:`);
-  // OpenAPI requires every `{param}` in a path template to be declared.
+  // 提取路径模板中的 {param} 并补全 parameters 声明。
   const params = [
     ...new Set([...template.matchAll(/\{([A-Za-z_][A-Za-z0-9_]*)\}/g)].map((m) => m[1])),
   ];

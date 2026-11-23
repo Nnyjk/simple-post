@@ -9,8 +9,6 @@ use rusqlite::{params, Connection};
 use crate::domain::Permission;
 use crate::error::AppError;
 
-// 读。
-
 /// 取 `project_id` 的权限。行不存在时为 `ReadCall`，与渲染层在启动时「在被告知之前从宽」
 /// 的立场一致。
 pub fn get(conn: &mut Connection, project_id: &str) -> Result<Permission, AppError> {
@@ -27,8 +25,6 @@ pub fn get(conn: &mut Connection, project_id: &str) -> Result<Permission, AppErr
         None => Ok(Permission::default()),
     }
 }
-
-// 写。
 
 /// Upsert 权限。使用 INSERT ... ON CONFLICT(project_id) DO UPDATE。
 /// 注意：函数不主动校验项目是否存在；若传入不存在的 `project_id`，底层外键约束

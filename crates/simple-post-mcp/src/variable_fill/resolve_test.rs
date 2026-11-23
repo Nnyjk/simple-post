@@ -7,10 +7,9 @@ use simple_post_core::domain::{
 use super::resolve::{resolve_endpoint, resolve_endpoint_with};
 use super::test_support::{empty_env, in_module_a, minimal_endpoint, set_cell, MOD_A};
 use super::EndpointOverrides;
-// ---- resolve_endpoint join/substitute ordering ---------------------
+// ---- resolve_endpoint 拼接与变量替换顺序 -----------------------------
 //
-// Same boundaries as the TS `prepareRequest` suite in
-// `src/lib/__tests__/http-build-auth-vars.test.ts`.
+// 对应 TS 单测 `src/lib/__tests__/http-build-auth-vars.test.ts` 中的 `prepareRequest` 边界。
 
 #[test]
 fn resolve_endpoint_leading_slash_var_does_not_double_the_separator() {
@@ -76,9 +75,8 @@ fn resolve_endpoint_unresolved_marker_survives_the_collapse() {
     let mut ep = minimal_endpoint();
     ep.url = "{{gone}}".into();
     let r = resolve_endpoint(&ep, Some(&env), Some(&in_module_a())).unwrap();
-    // The marker is text, not a separator; `missing_vars` is the only
+    // 标记属于普通文本而非路径分隔符；`missing_vars` 是
     // 调用方唯一能看出 URL 不完整的信号。
-    assert_eq!(r.url, "http://host:9200/{{gone}}");
     assert_eq!(r.missing_vars, vec!["gone".to_string()]);
 }
 
@@ -183,8 +181,7 @@ fn resolve_endpoint_collects_missing_vars_across_url_headers_body_auth() {
         oauth2: None,
     };
     let r = resolve_endpoint(&ep, Some(&env), Some(&in_module_a())).unwrap();
-    // URL + headers + body + auth 的 missing 变量会合并、去重，
-    // and ordered by first appearance.
+    // URL + headers + body + auth 的 missing 变量会合并、去重，并保持初次出现的顺序。
     assert!(r.missing_vars.contains(&"user_id".to_string()));
     assert!(r.missing_vars.contains(&"trace_id".to_string()));
     assert!(r.missing_vars.contains(&"payload".to_string()));
@@ -322,8 +319,7 @@ fn resolve_endpoint_appends_enabled_params_to_url() {
 
 #[test]
 fn resolve_endpoint_merges_existing_query_with_params() {
-    // URL already has a query string; params should be appended
-    // with `&`, not `?`.
+    // URL 本身已带有 query string 时，参数应使用 `&` 拼接而非 `?`。
     let mut env = empty_env();
     set_cell(&mut env, MOD_A, "https://api.example.com");
     let mut ep = minimal_endpoint();

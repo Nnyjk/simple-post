@@ -59,7 +59,7 @@ fn sink_into(tx: mpsc::Sender<WsEvent>, cancel_id: String) -> WsSink {
     })
 }
 
-/// `POST /api/ws/sessions`
+/// 发起 WebSocket 会话连接：`POST /api/ws/sessions`
 pub(crate) async fn ws_connect(
     Json(body): Json<WsConnectBody>,
 ) -> Result<Response, crate::web_api::error::HttpErrorResponse> {
@@ -111,7 +111,7 @@ pub(crate) async fn ws_connect(
     Ok(response)
 }
 
-/// `POST /api/ws/sessions/{id}/send`
+/// 发送 WebSocket 消息帧：`POST /api/ws/sessions/{id}/send`
 pub(crate) async fn ws_send(
     Path(id): Path<String>,
     Json(body): Json<WsSendBody>,

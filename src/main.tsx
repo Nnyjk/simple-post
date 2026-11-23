@@ -6,11 +6,9 @@ import { installGlobalErrorLogging } from './lib/log-client';
 import { useAppStore } from './stores/app-store';
 import './styles/globals.css';
 
-// When the reverse-proxy (or a hand-shared link) points at
-// `?token=<x>`, persist the bearer before the React tree mounts so
-// the very first `webFetch()` already carries the header. `ingest`
-// also strips the query from `window.history` so the token doesn't
-// end up in browser history / Referer headers / bookmarks.
+// 反向代理或手动分享链接带 `?token=<x>` 时，在 React 树挂载前存下 bearer，
+// 使初次 `webFetch()` 即带上请求头。`ingestBearerFromUrl` 会同步从 `window.history`
+// 剥离 query，防止 token 留在浏览器历史、Referer 或书签中。
 ingestBearerFromUrl();
 
 // 全局错误捕获要早于任何一次后端往返与 React 挂载：`bootstrap()` 在下面几行就发起，

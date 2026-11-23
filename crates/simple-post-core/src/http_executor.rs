@@ -227,9 +227,10 @@ pub(crate) fn split_response_payload(
 
 /// 这个 Content-Type 说它的内容是文本吗？
 ///
-/// 主类型是 `text`，或子类型以 `json` / `xml` 结尾，或子类型是那几个明确的文本类型
-/// （`javascript`、`x-www-form-urlencoded`、`graphql`）。`application/octet-stream`、
-/// `image/*`、`application/pdf`、`application/zip` 都不算：宽松解码会把它们弄坏。
+/// 主类型为 `text`，或子类型以 `json` / `xml` 结尾，或属于特定文本类型
+/// （包括 `javascript`、`x-www-form-urlencoded` 与 `graphql`）。
+/// 二进制类型（如 `application/octet-stream`、`image/*`、`application/pdf`、`application/zip`）
+/// 均不算文本：宽松解码会破坏原始字节。
 fn is_textual_content_type(content_type: &str) -> bool {
     let main = content_type
         .split(';')

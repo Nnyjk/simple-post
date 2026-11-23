@@ -163,8 +163,7 @@ fn search_matches_node_name() {
 
 #[test]
 fn search_reaches_into_endpoint_url() {
-    // `url` lives in endpoint_details, which is exactly why the search
-    // has to join rather than match on the node alone.
+    // `url` 存在 endpoint_details，搜索必须关联表而非只查 nodes。
     let (pool, _dir) = fresh_pool();
     put(&pool, &module("p1", "m1", 0), None);
     put(&pool, &collection("p1", "c1", "m1", 0), None);
@@ -181,8 +180,7 @@ fn search_reaches_into_endpoint_url() {
 
 #[test]
 fn search_does_not_match_a_null_url_on_a_non_endpoint() {
-    // Without the `n.type = 'endpoint'` guard, every module and
-    // collection would match a LIKE against its own NULL url column.
+    // 若无 `n.type = 'endpoint'` 守卫，模块与集合会因自身的 NULL url 列匹配到 LIKE。
     let (pool, _dir) = fresh_pool();
     put(&pool, &module("p1", "m1", 0), None);
     put(&pool, &collection("p1", "c1", "m1", 0), None);
@@ -266,11 +264,7 @@ fn duplicate_refuses_a_non_endpoint() {
 
 #[test]
 fn duplicate_adopts_the_id_the_caller_chose() {
-    // The SPA duplicates optimistically: it activates the tab and starts
-    // a rename against this id *before* the call returns, so an id minted
-    // here would leave every one of those pointing at a row that does not
-    // exist. `new_id` is therefore adopted verbatim, and `create` stays
-    // the place that refuses a collision.
+    // SPA 乐观复制并在调用返回前以此 id 重命名，故直接采纳 `new_id`，由 `create` 拒绝冲突。
     let (pool, _dir) = fresh_pool();
     put(&pool, &module("p1", "m1", 0), None);
     put(&pool, &collection("p1", "c1", "m1", 0), None);
@@ -284,8 +278,7 @@ fn duplicate_adopts_the_id_the_caller_chose() {
         "the suffix is the UI's, not an English one"
     );
 
-    // The detail row has to follow the same id, or the copy is a node the
-    // HTTP tester cannot open.
+    // detail 行必须跟随相同 id，否则端点无法在界面打开。
     let detail = db::with_conn(&pool, |c| {
         crate::db::endpoint_details::get(c, "picked-here")
     })

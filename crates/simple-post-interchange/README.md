@@ -1,17 +1,14 @@
 # simple-post-interchange
 
-导入导出的转换层：**外来格式 ↔ 本仓库的标准格式**。
+`simple-post-interchange` 是外来格式与 `simple-post-core::domain` 标准格式之间的转换适配层，不持有持久化模型。
 
-标准格式是 `simple-post-core::domain`（`ResourceNode` / `EndpointDetail` / `Environment`）。
-本 crate 不持有任何自己的持久化模型，只做标准格式两侧的适配。
+标准格式为 `simple-post-core::domain`（`ResourceNode` / `EndpointDetail` / `Environment`），本 crate 仅负责两端适配。
 
-依赖方向单箭头：`simple-post-interchange → simple-post-core`。core 不知道 Postman 或
-OpenAPI 的存在。`simple-post-mcp` **不依赖**本 crate —— scope 内没有任何 MCP 导入导出
-工具，独立成 crate 就是为了让它不必背上 YAML 解析器与两套外来格式模型。
+依赖方向为单向箭头：`simple-post-interchange → simple-post-core`。core 不感知 Postman 或 OpenAPI。`simple-post-mcp` **不依赖**本 crate；MCP 无导入导出需求，解耦可避免引入 YAML 解析器与外来格式数据结构。
 
 ## 三条边，三种性质
 
-这是整个设计的支点，不要把它们当同一种转换处理。
+三条转换边的性质各不相同：`format → ir` 有损且必带诊断，`ir → domain` 为无损全函数，`domain → ir` 为依赖环境选择的投影。
 
 | 边 | 性质 | 失败形态 |
 |---|---|---|
@@ -37,22 +34,17 @@ OpenAPI 的存在。`simple-post-mcp` **不依赖**本 crate —— scope 内没
 
 ## 为什么 `ir` 不能就是 `domain`
 
-三条独立理由，都指向同一个结论。缺任何一条都会有人重新发明它。
+`ir` 独立于 `domain` 存在：导入预览期节点尚无 ID，格式差异需诊断载荷承载，导出依赖跨表环境投影，多格式查重依赖通用指纹。
 
-1. **IR 里的节点还没有 id。** `EndpointDetail.node_id` 必填，`ResourceNode.id` 是主键。
-   而导入要求「先预览数量、确认后再落库」——预览阶段这些东西**根本不存在**。
-2. **诊断无处安放。** `EndpointDetail` 每个字段都是标称值，没有一个位置能说
-   「这里原本是个 multipart file 字段，我丢掉了」。没有诊断通道，「不静默丢弃」
-   只能靠 review 保证。
-3. **导出侧读不到自己需要的东西。** URL 住在 `environments.module_base_urls_json` 里按
-   `module_id` 一级索引，端点自己的地址在 `endpoint_details.base_url_override`。
-   所以导出必须自己决定**取哪个环境**——这是投影逻辑，不属于任何一行 endpoint。
+1. **IR 节点在预览期无 ID。** `EndpointDetail.node_id` 必填且 `ResourceNode.id` 为主键，但导入要求「先预览数量、确认后再落库」，预览阶段持久化 ID 尚不存在。
+2. **`domain` 无法承载非致命诊断。** `EndpointDetail` 字段均为标称值，无法表达「multipart file 字段已被舍弃」等非阻断信息；缺乏诊断通道将导致静默丢弃无法被审计。
+3. **导出投影依赖环境。** 模块 base URL 存放在 `environments.module_base_urls_json`（按 `module_id` 索引），端点自身地址存放在 `endpoint_details.base_url_override`；导出需指定目标环境以合成完整 URL，属于投影计算而非单行端点属性。
 
-**指纹去重算在 `ir` 上，两种导入器因此互相认得**：同一份接口用 Postman 导一次、
-OpenAPI 导一次，第二次能认出是同一个 endpoint。指纹若按格式各算各的，这个性质
-就没有了。指纹**不含** name / description / auth / tags（改名不该造出副本）。
+**指纹去重基于 `ir` 计算，跨格式去重全局一致。** 同一接口分别通过 Postman 与 OpenAPI 导入时可准确识别为同一端点。指纹由请求核心定义派生，**不包含** name / description / auth / tags，避免因重命名产生冗余条目。
 
 ## 模块布局
+
+模块按职责解耦划分：`import/` 负责外来格式嗅探与解析，`ir.rs` 与 `fingerprint.rs` 提供中间态与去重指纹，`commit/` 处理事务落库，`openapi/` 处理导出生成。
 
 ```
 src/
@@ -79,81 +71,54 @@ src/
     └── openapi/      # OpenAPI 3.0：refs（$ref 展开）/ params / auth / servers
 ```
 
-测试与源文件同目录同名前缀（`mod_test.rs` / `tree_test.rs` …），跨文件共用的夹具
-放同目录的 `support.rs`：`commit/support.rs` 放 `commit_all` 与 `nested_exchange`，
-`import/postman/support.rs` 放 `collection_fixture`，这类夹具只留一份。
+测试与源文件同目录同名前缀（如 `mod_test.rs`、`tree_test.rs`），跨文件夹具统一定义于同目录 `support.rs`（`commit/support.rs` 维护 `commit_all` 与 `nested_exchange`，`import/postman/support.rs` 维护 `collection_fixture`），禁止多处复制。
 
-`commit/` 住在本 crate 而不是 Tauri command 里，是刻意的：AGENTS.md 的
-dual-transport invariant 说的就是逻辑泄漏到传输层的代价。落库逻辑只有一份，
-Tauri command 与 REST route 都退化成薄壳。
+落库逻辑统一收敛于 `commit/` 模块，杜绝在传输层（Tauri command / REST route）编写业务逻辑，满足 dual-transport 不变量。
 
-`commit_in_tx` 单独暴露的理由是事务边界：一次导入要写的不止树，Postman 的环境是
-项目级的另一张表，它必须与树同生共死；而 `db::with_tx` 的闭包拿不到第二个连接
-（`BEGIN IMMEDIATE` 会与外层那个自己死锁）。编排层拿到的是「已持有连接」的那一版。
+`commit_in_tx` 显式暴露事务连接以保证原子性。Postman 导入需同步写入环境表与资源树，若在 `db::with_tx` 闭包内部再次建连会因 `BEGIN IMMEDIATE` 触发自身死锁，编排层必须复用已持有事务连接。
 
 ## `key`：IR 还没成为节点的那一半身份
 
-`IrModule` / `IrCollection` / `IrEndpoint` 各有一个 `#[serde(default)] key: String`：
+`key` 是 IR 节点的勾选身份句柄：导入期对应源格式指针（对齐诊断定位），导出期对应 `nodes.id`。
 
-- **导入时**是源格式的位置指针（`/item/0/item/2/request`），与 `Diagnostic::pointer`
-  同一套寻址纪律，故诊断能按前缀挂回它所在的行；
-- **导出时**是 `nodes.id`。
+`IrModule`、`IrCollection` 与 `IrEndpoint` 均包含 `#[serde(default)] key: String`：
 
-它是勾选集的成员身份，也是两侧引用同一个条目的唯一句柄。`#[serde(default)]` 是为了
-让没有 `key` 的旧 IR 仍能反序列化——新增字段不该让存量序列化数据失效。
+- **导入时**对应源格式位置指针（如 `/item/0/item/2/request`），与 `Diagnostic::pointer` 保持一致寻址规则，使诊断信息能按路径前缀挂回对应数据行；
+- **导出时**对应已持久化的 `nodes.id`。
 
-集合树深度**没有上限**（外来文件可以套一百层 folder），故凡是**只读走查**它的代码一律
-用显式栈而不是递归。本 crate 里的 `endpoint_keys_of`（`ir.rs`）与两个解析器
-（`import/postman/tree.rs`、`import/openapi/refs.rs`）都是显式工作栈；server crate 里的
-`all_endpoints` / `mark_duplicates`（`interchange_api.rs`）同样是。`retain_module` /
-`retain_collection` 是唯一两个递归的：它们在下降的同时就把空分支剪掉了，深度上限就是
-输入深度本身，而剪不剪得动与走不走得完是两件事。（`diagnostics_of` 不在这份名单上——
-它筛的是 IR 自带的扁平诊断列表，不走集合树。）
+`key` 既是勾选集合的身份标识，也是跨端引用条目的唯一句柄。保留 `#[serde(default)]` 可保证旧版未携带 `key` 的 IR 数据仍能兼容反序列化。
+
+所有只读遍历代码一律采用显式栈（防无限嵌套爆栈），仅剪除空分支的 `retain_*` 使用递归。集合树层级无上限约束，显式栈遍历包括 `endpoint_keys_of`（`ir.rs`）、解析器（`import/postman/tree.rs`、`import/openapi/refs.rs`）及上层服务的 `all_endpoints` / `mark_duplicates`（`interchange_api.rs`）。递归操作仅限于 `retain_module` 与 `retain_collection`，其下降过程即时剪枝，调用深度严格受限于输入本身。（`diagnostics_of` 直接过滤扁平诊断列表，不遍历树结构。）
 
 ## 导出侧的两个形状裁剪不是同一份
 
-`Exchange::retain_selected` 与 `commit` 都接受一个选择集，但**刻意是两份**：
-前者只需要形状裁剪（导出的文档里只留勾中的），后者要问指纹并记诊断（落库时要告诉
-用户「按指纹跳过了 N 个」）。把它们合并会让导出侧背上指纹账本，而导出根本不查重。
+导出裁剪（`Exchange::retain_selected`）与落库裁剪（`commit`）职责分离：前者仅按勾选过滤树形状，后者需计算指纹并统计跳过项。
+
+两处裁剪刻意保持独立：导出仅需依据勾选状态剔除未选项；落库除按勾选裁剪外，还需比对指纹并产出「已按指纹跳过 N 个」的诊断反馈。合并两处逻辑将导致导出流程无端背负指纹查重开销。
 
 ## 导入的「不猜」
 
-解析器遇到本仓库表达不了的构造时，一律出诊断 + 丢弃，**不静默降级**：
+导入器对无法映射的外来构造一律产出诊断并丢弃，绝不基于猜测进行静默兼容或降级。
 
-- Postman `formdata` 里 `type: file` 的分片 —— Postman 导出的文件字段只有**路径**，
-  没有文件本身的内容，故那份字节拿不到（分片结构能存字节，装的是别处读来的字节）。
-- Postman 的 `auth` 方案里 oauth2 / digest —— 导入器只映射 noauth / basic / bearer /
-  apikey 四种，其余方案出诊断并按无 auth 处理（`import/postman/auth.rs`）。
-- OpenAPI 的 `apiKey` `in: cookie` —— `ApiKeyLocation` 只有 `Header | Query`。
-- OpenAPI `paths` 里固定动词键集以外的动词 —— 塞进去会让整份文档不合法。
-- OpenAPI operation 的 `tags[1..]` —— 一个接口只归第一个 tag（见下）。
+- Postman `formdata` 中 `type: file` 的分片：Postman 导出仅提供文件路径而无字节内容，无法载入（分片结构仅承载预读入的实体字节）。
+- Postman `auth` 中的 oauth2 与 digest：导入器仅支持 noauth、basic、bearer 与 apikey，其余认证出诊断并按无认证回退（`import/postman/auth.rs`）。
+- OpenAPI `apiKey` 的 `in: cookie`：`ApiKeyLocation` 仅支持 `Header | Query`，遇到 cookie 出诊断（详见 [§已核实的陷阱](#已核实的陷阱)）。
+- OpenAPI `paths` 包含标准动词外的自定义操作：导出规范不支持，导入时遇到集合外动词出诊断（详见 [§已核实的陷阱](#已核实的陷阱)）。
+- OpenAPI operation 的多重 tags（`tags[1..]`）：单接口仅归入首个 tag 分组（详见下方分组规则）。
 
-**请求体上的 schema 读得进来。** OpenAPI 的 `requestBody.content[media].schema` 收进
-`body.schema`，本地 `$ref` **展开成内联内容** —— `body.schema` 存的是一段自足的文本，
-而导出时那份 `components` 是导出器自己生成的，存一段带 `$ref` 的文本进去，导出时那份引用
-指不到任何东西。布尔 schema（`true` / `false`）不是本仓库导出器认的那种（它要写成
-`components.schemas` 里的一个对象），故不收，并出一条 `Info` 说明。Postman 集合里没有
-请求体 schema 这个构造，那边没有可导入的东西。
+**请求体 schema 内联展开。** OpenAPI 的 `requestBody.content[media].schema` 提取至 `body.schema`，本地 `$ref` 一律展开为内联内容——`body.schema` 需独立自足，避免导出时因依赖重新生成的 `components` 导致引用悬空（存储结构详见 [§已核实的陷阱](#已核实的陷阱) §`body_schema 不是一列`）。布尔 schema（`true` / `false`）非对象定义，导入予以忽略并输出 `Info` 诊断。Postman 无请求体 schema 构造，导入时不作处理。
 
-**一处例外：multipart 降级成 `Raw` 时，那份定义不跟着走。** multipart 的请求体既没有
-样例、schema 里也没有字段时，导入器降级成 `BodyMode::Raw`（存原始文本）。而 Raw 的
-media type 是 `application/octet-stream`，multipart 的 schema 说的是有哪些表单字段 ——
-把它挂在 octet-stream 上，导出的文档就在宣称一个错的请求格式，而存下来的内容已经是
-原始文本了，这份定义描述的也不是它。故降级时分片与那份定义一起丢，诊断里点名。
+**multipart 降级为 `Raw` 时丢弃表单 schema。** 当 multipart 缺乏样例且无表单字段定义时，导入器降级为 `BodyMode::Raw`（媒体类型映射为 `application/octet-stream`）。此时保留针对表单字段的 schema 会导致导出的文档格式矛盾，因此降级时分片与 schema 一同丢弃并输出诊断说明。
 
-**分组只认 `tags[0]`，没打 tag 的整份归到一个以 `info.title` 命名的分组里。**
-落进已有模块时 IR 顶层模块一律降级成集合，故这条同时就是「OpenAPI tag → 目标模块下的
-集合」。曾经按「一个 operation 一个模块」实现，于是**一个 tag 都不打的文档**（Apifox、
-SpringDoc 导出的文件很常见）会变成 87 个同名集合——用户看到的是一屏重复的名字。
-复制到第二个 tag 下同样不行：那是两条指纹相同的接口，落库时第二条被当成重复跳过，
-预览里看起来像自己导了两份。多出来的 tag 全部留在端点的 `tags` 上，只是不再各自成组。
+**分组严格依据 `tags[0]`，缺失 tag 则收敛为项目文档标题组。** 导入已有模块时 IR 顶层模块均降级为集合，对应「OpenAPI tag → 目标模块子集合」。未声明 tag 的文档统一归入以 `info.title` 命名的单一分组，避免按 operation 拆分产生大量同名碎片集合。接口不在多个 tag 下重复生成，否则会因指纹冲突被落库查重过滤；多余的 tag 保留在端点 `tags` 属性中但不参与树分组。
 
-按路径前缀切分组是另一条路，但那是**猜**：文档没给的信息不猜。
+路径前缀切分属于推断行为，未在文档中明示的信息一律不作猜测。
 
 ## 脚本：导入，以及导入不了的那些
 
-脚本引擎（issue #7）落地之后本仓库能存脚本也能跑脚本，故导入器再把外来格式里的
-脚本丢掉就成了**真的丢数据**。Postman 的脚本挂在 `event[]` 上，逐条处理：
+条目级与 folder 级 Postman 脚本分别映射至端点与集合节点；集合根脚本因无宿主节点出诊断并丢弃；诊断日志严格过滤脚本源码。
+
+Postman 脚本按 `event[]` 逐条转换至对应层级：
 
 | 脚本挂在哪 | 落到哪 | 说明 |
 |---|---|---|
@@ -162,90 +127,63 @@ SpringDoc 导出的文件很常见）会变成 87 个同名集合——用户看
 | 顶层 folder | 该模块的两段脚本 | 模块**不能**存脚本；挂进已有模块时它降级成集合，脚本就有归宿了，落到项目顶层时它只能是模块 —— 那时出诊断说明 |
 | **集合根** | **没有落点** | 「整份集合」不是一个节点：顶层条目各自成一个模块，挂进已有模块时那些模块降级成集合，根上的脚本挂不到任何一个上 —— 逐条出诊断 |
 
-同一相位的**多项**脚本拼成一段，不是只留第一项：Postman 里它们依次执行，只留第一项
-等于悄悄改掉了用户的集合行为。
+同一相位的多个脚本按声明顺序拼接为单段执行脚本，避免仅保留首项破坏原有执行行为。
 
-认不出的相位（典型是测试运行器的监听器）与读不出源码的 `event[]` 条目都出诊断，
-指针指到那一条本身（`/item/3/event/0`）。**脚本源码不写进诊断** —— 用户的脚本里常有
-token 与环境变量名，诊断是要显示给人看的。
+未知执行相位或无法提取源码的 `event[]` 条目均输出诊断并定位至原始指针（如 `/item/3/event/0`）。诊断信息不包含脚本源码，防止泄漏脚本内的敏感 token 或环境凭据。
 
-反过来也一样：`AuthConfig` 是「判别字段 + 可选载荷」的**扁平**结构，解析器只在
-`kind` 匹配时才读对应载荷。未选中方案的载荷同样为 `Some`，按载荷存在性分派会把
-用户没选中的凭据注入请求。
+`AuthConfig` 采用「判别字段 + 可选载荷」的扁平结构，解析器仅在 `kind` 匹配时读取对应载荷，未选中的载荷虽存有 `Some` 亦不参与分派，避免注入无效认证信息。
 
 ## 环境与地址的分工
 
-Postman 的每个 environment 落成一个新 `Environment`，变量进 `variables`，
-导入的环境不改变任何「当前环境」——当前环境是每个客户端自己的实时状态，不落库。
-
-**环境不导成地址**：地址是 per (环境 × 模块) 那一格，而 Postman 的 `variable[]` 给不出
-「模块」这一层，硬塞会造出项目里并不存在的模块地址。
+Postman 的环境只变成一个新建的 `Environment` 及其 `variables` 键值。它不改客户端当前环境（那是各客户端的运行时状态，不落库），也不被当成 base URL：模块地址属于 (环境 × 模块) 单元格，Postman 的全局 `variable[]` 没有模块维度，推断出来的只会是错的基准地址。
 
 ## 域模型加宽契约
 
-`BodyMode` 已加宽（决策：加宽而非冻结）。**加宽是存储决策，代价是发送链路必须跟上。**
+`BodyMode` 变体加宽属于存储层决策，要求协议装配、编辑器与请求发送全链路同步支持，且不修改 `SCHEMA_VERSION`。
 
-新增的 body 变体若只有存储、没有发送实现，会出现最坏的一种失败：
-导入进来的 endpoint **存得对、发得错**。用户看不出任何异常，只会觉得「这个接口导入
-之后行为不一样了」。所以下面几处是**前置**，不是后续：
+新增 body 变体必须前置落实端到端支持，防止出现「存储有效但发送异常」的隐式缺陷：
 
-- `src/lib/body/` —— 七种 body 形态的内容形状与装配规则（与 Rust 侧 `core::body`
-  是同一套规则的两份实现，由 `fixtures/body-parity.json` 钉住）
-- `src/lib/multipart.ts` —— 真正拼出 multipart body（与 Rust 侧
-  `mcp/http_ops/multipart.rs` 是同一套规则的两份实现）
-- 请求体编辑器 —— 能渲染并编辑新模式
-- `variable_fill` —— `ResolvedEndpoint.body_mode`（`variable_fill/types.rs`）带着套用过
-  `overrides` 之后的 mode，`auto_content_type`（`variable_fill/request.rs`）对 `Multipart`
-  返回 `None`，boundary 由发送方在 execute 之前补上
+- `src/lib/body/` —— 覆盖七种 body 类型的结构定义与装配逻辑（与 Rust `core::body` 逻辑统一，由 `fixtures/body-parity.json` 约束）。
+- `src/lib/multipart.ts` —— 实现 multipart 请求体组装（与 Rust `mcp/http_ops/multipart.rs` 逻辑统一）。
+- 请求体编辑器 —— 支持新模式的渲染与交互编辑。
+- `variable_fill` —— `ResolvedEndpoint.body_mode`（`variable_fill/types.rs`）携带应用 `overrides` 后的 mode；`auto_content_type`（`variable_fill/request.rs`）针对 `Multipart` 返回 `None`，统一在发送执行前补全 boundary。
 
-`form` 模式的内容形状也一并改了：它从「一个拼好的 urlencoded 串」变成「行数组的
-JSON 文本」。导入器因此写出**行数组**（`import/postman/body.rs`），界面上的表格才有
-地方放，而被 Postman 禁用的字段也留得下来（标成不参与发送）。旧内容仍能读——
-读不出行数组时按旧格式读。
+`form` 模式的内容现在是行数组的 JSON 文本，导入器直接产出这个形状（`import/postman/body.rs`），表格与字段禁用状态因此存得下；早期存的是拼好的 urlencoded 串，读的时候仍然认得。
 
-`BodyMode` 加变体对已存的 `body_json` 是向后兼容的（旧值继续反序列化成功），
-**不要**为此 bump `SCHEMA_VERSION` —— 那会让 `ensure_current_schema` 删掉用户的库。
+`BodyMode` 新增变体不影响既有 `body_json` 的反序列化。这条改动不许递增 `SCHEMA_VERSION`：版本号一涨，`ensure_current_schema` 会删掉用户的库。
 
 ## 导出的三个约定
 
-**`responses`：合成默认，不猜。** 每个 operation 输出一个 `200: {description: "OK"}`。
-`StoredResponse` 存的是实际响应，里面没有响应 schema；请求体那份定义
-（`RequestBody.schema`）说的是**这个接口接受什么**，不能拿来当响应形状。所以没有可信
-数据源，猜出来的 schema 看不出不可靠，比不猜更糟。
+导出有三条约定：`responses` 用端点自己的定义，没定义才合成 `200`；`servers` 逐模块取，根上没有回退；`tags` 只取最外层集合名。
 
-**`servers`：逐模块取，不回退。** 地址是 per (环境 × 模块) 且**刻意没有任何
-回退层**。导出必须先选定一个环境，然后每个模块各取各的；该模块没配就是没有地址，
-不写 `servers` 条目，不借用别的模块的。
+**`responses` 用端点自己的定义，一条都没有才合成默认值。** 导出 operation 用端点声明的 `ep.responses`；一条都没配时才写 `200: {description: "OK"}`。`StoredResponse` 存的是运行时响应实例，不是 schema，故不从调用历史反推入参结构。
 
-因为这条，文档**根上没有 `servers`** —— 提到根就成了全局默认，等于让没配的模块借到
-兄弟模块的地址。`servers` 逐 operation 携带。
+**`servers` 逐模块取，没有全局回退。** 地址属于 (环境 × 模块) 单元格，本身就没有继承层。导出是对选定的目标环境做的：没配地址的模块不输出 `servers`，也不借用兄弟模块的地址。
 
-**`tags`：就是最外层集合的名字。** tag 是 OpenAPI 里唯一的分组机制，不写它集合这一层
-在产物里就彻底消失，「导出再导入」会把所有接口压平进一个分组（`roundtrip_test.rs`
-里那条 `a_collection_comes_back_as_a_tag_named_group` 就是钉这个的）。
+文档根上不声明 `servers`，否则没配地址的模块会借到全局默认地址；`servers` 一律挂在 operation 上。
 
-两条限定：
+**`tags` 只取最外层集合名。** OpenAPI 分组全靠 tag；缺 tag 时重新导入会把所有接口并成一个平铺分组（`roundtrip_test.rs` 的 `a_collection_comes_back_as_a_tag_named_group` 守着这条）。
 
-- **端点自己填了 tags 就不动。** 那是用户在请求上写的分类，与树结构无关。
-- **只落最外层，因为 tag 是扁平字符串。** 集合的嵌套在 OpenAPI 里没有对应构造，
-  `订单/明细` 导出成 tag `订单`，多出来那层读不回来。取最外层而不是最内层，是因为
-  两个不同的顶层集合下各有一个同名子集合时，取内层会让它们在重新导入时并成一处。
+导出规则约束：
+
+- **端点自定义 tags 优先保留。** 端点自带的 tags 属于用户自定义分类，与资源树层级解耦。
+- **层级仅取最外层。** OpenAPI tag 仅支持扁平字符串，深层路径无法映射；取最外层可防止不同父集合下的同名子集合在重新导入时发生冲突合并。
 
 ### 已拍板：嵌套集合在 OpenAPI 往返中最多保留一层
 
-这是 issue #67 的结论，**选 A（保持现状）**，理由与被否掉的另外两条一起记在这里，
-免得下一个人重新推一遍：
+OpenAPI 仅支持扁平 tag，故嵌套集合导出时仅保留最外层作为 tag，往返导入后深层集合会被压平（Postman 导入不受此限）。
+
+依据 issue #67 裁定保持方案 A：
 
 | 方案 | 代价 | 结论 |
 |---|---|---|
 | **A. 只落最外层**（现状） | 三层以上的树导出再导入会变浅一层 | **采用** |
-| B. tag 用路径（`订单/明细`） | 交给第三方的文档里会出现一个字面叫「订单/明细」的 tag —— Swagger UI / Apifox / YAPI 都直接显示 tag 字符串，斜杠让那边看起来像路径而不是分组 | 否 |
-| C. 一个接口挂多个 tag | 导入侧只认 `tags[0]`，多挂的 tag 不带来层级，只在产物里多出一个被忽略的 tag | 否 |
+| B. tag 用路径（`订单/明细`） | 第三方工具（Swagger UI / Apifox / YAPI）直接展示原始 tag 字符串，导致路径字符破坏界面分组 | 否 |
+| C. 一个接口挂多个 tag | 导入端仅识别 `tags[0]`，其余 tag 均被忽略，且产物冗余 | 否 |
 
-**B 的代价落在别人读的产物上，收益只对「导出再导回自己」这一条路径有意义** —— 这条
-不对称决定了选 A。
+方案 B 的兼容代价影响所有外部阅读者，且仅在「导出后再导回自身」的单一闭环路径获益，故维持方案 A。
 
-三层的样子：
+层级映射示例：
 
 ```
 模块
@@ -255,48 +193,27 @@ JSON 文本」。导入器因此写出**行数组**（`import/postman/body.rs`�
             └── 接口 z
 ```
 
-导出成 `tags: [订单]`，读回来变成：
+导出生成 `tags: [订单]`，再次导入还原为：
 
 ```
 模块 → 集合 订单 → 接口 z
 ```
 
-**`明细` 与 `支付` 两层都没了。** 这不是缺陷，是格式本身的限制；本仓库的树契约允许
-集合无限嵌套，OpenAPI 的 tag 表达不了一层的概念。
+中间层级丢失是 OpenAPI 格式本身的能力上限，不是实现缺陷：资源树允许无限制嵌套。
 
-**Postman 侧不受影响**：Postman 的 folder 树在导入侧是**原样保留**的（folder → 集合，
-嵌套多深都留着），只有 OpenAPI 走 tag 这条路。故这条限制只影响 OpenAPI 往返，
-Postman → 本仓库的导入是保真的。
+Postman 导入不受此限制：Postman 的 folder 层级结构在导入期可保真映射为多层嵌套集合。
 
 ## 导出的另外三个约定
 
-**`operationId`：`动词 + 路径`，路径分隔符落成双下划线。**
-`operationId` 在多数代码生成器里会被直接变成方法名，而 `/` 与 `{}` 都不是标识符
-字符，故它们都要换掉。**分隔符必须与其余字符区分开**：否则 `/api/user-info` 与
-`/api/user/info` 撞成同一个名字 —— 规范要求 `operationId` 在文档内唯一，撞名之后
-代码生成器会生成两个同名方法。现在两者分别是 `get___api__user_info` 与
-`get___api__user__info`（确切的值由 `parameters_test.rs` 钉住）。
+导出扩展约定覆盖：`operationId` 生成与防重、`requestBody` 独立抽取与引用、请求头作为参数导出且不输出值。
 
-这仍不是**单射**（`/a-b` 与 `/a_b` 仍会得到同一个名字），故另有一道编号规则：撞上时后一个拿
-`_2` 后缀。规范要的是「文档内唯一」，不是「映射可逆」。
+**`operationId` 格式为「动词 + 双下划线路径」，保证文档内唯一。** 多数代码生成器将 `operationId` 映射为方法标识符，需将 `/` 与 `{}` 替换为合规符号。路径分隔符使用双下划线，以区分 `/api/user-info`（生成 `get___api__user_info`）与 `/api/user/info`（生成 `get___api__user__info`），确切规则由 `parameters_test.rs` 约束。
 
-`openapiv3` 校验的是模型（不校验唯一性），Redocly 也没开那条规则，故这条由
-`openapi_model_test.rs` 里那条 `every_operation_id_is_unique_in_the_document` 守住，
-夹具里放了一对会撞的路径。
+为处理非单射碰撞（如 `/a-b` 与 `/a_b`），冲突标识符递增 `_2` 后缀，满足规范对文档内唯一性的要求。该约束由 `openapi_model_test.rs` 中的 `every_operation_id_is_unique_in_the_document` 守住。
 
-**`requestBody`：端点带 `body.schema` 就 `$ref`，没带就只声明「这是一个 object」。**
-字段**不猜**：端点没写 `body.schema` 时，导出器不知道这个接口接受哪些参数，故只声明
-「这是一个 object」，不编一份形状出来。
+**`requestBody` 引用具名 Schema，缺失定义时声明为通用 Object。** 未提供 `body.schema` 时仅声明类型为 object，不猜测字段。携带 schema 时将其存入 `components.schemas`，并在 `requestBody` 中以 `{"$ref": "#/components/schemas/<名字>"}` 引用。定义收集与引用保持同步，`mode = none` 的端点不收集 schema，避免产生孤立未引用定义。
 
-带 schema 时它进 `components.schemas`，`requestBody` 里写
-`{"$ref": "#/components/schemas/<名字>"}`。**收集了却不被引用是三种选择里最差的一种**：
-读文档的人看到一堆没人引用的定义会以为它们有意义，而每个 requestBody 都在宣称一个错的
-请求体形状。故收集与引用**同进同出** —— `mode = none` 的端点没有 requestBody，收集了也
-没人引用，导出器索性不收集。
-
-**名字由内容派生，不按出现顺序编号。** 位置编号（`Schema1`、`Schema2`…）有两个毛病：
-它与内容无关，读者什么也看不出来；而删掉一个接口之后，后面每一个的名字都往前挪，同一份
-文档在两次导出之间对不上号。派生规则：
+**Schema 命名基于内容哈希派生，不依赖出现位置。** 派生规则如下：
 
 | 情况 | 名字 | 例子 |
 |---|---|---|
@@ -304,133 +221,73 @@ Postman → 本仓库的导入是保真的。
 | 没有 `title` | `Schema_` + 该内容规范文本的短哈希 | `{"type":"object",…}` → `Schema_2d0515b0` |
 | 上面的名字已被**另一份内容**占用 | 追加 `_` + 内容短哈希 | 两份都叫 `User` → `User` 与 `User_5b1c…` |
 
-三点补充：
+命名约束：
 
-- **`title` 是 JSON Schema 自己的字段**，用户在请求体的 Schema 编辑区里写它，就是在给
-  这份定义起名。界面上那份 Schema 区与载荷区并排常驻，写了 `title` 的定义导出后就是这个
-  可读的名字。
-- **没有 `title` 的那份一律带哈希。** 若给它一个裸的 `Schema`，「哪个拿到 `Schema`」就
-  取决于它在文档里的先后 —— 那还是按位置命名。
-- **同一份内容恒定同一个名字**：去重按**规范文本**（键序无关）比对，故同一份定义出现在
-  两个接口上时只写一份，两个 operation 都 `$ref` 它。
+- `title` 取自 JSON Schema 自身属性，用户在编辑器 Schema 区输入的标题即为导出名称。
+- 无 `title` 的 schema 强制追加哈希，避免依据扫描顺序分配裸名称导致命名不稳定。
+- 相同内容依据规范文本去重并共用唯一命名与 `$ref`，不同内容严禁重名以防定义覆盖。
+- 短哈希采用 FNV-1a 128 位截取前 8 个十六进制字符，与 `fingerprint.rs` 算法保持一致。
 
-两份内容不同的定义**绝不共用一个名字**：共用之后，后写的那份会覆盖前一份，产物里只剩一份
-定义而两个 operation 都指着它 —— 读到的是错的形状，比没有更糟。
+端点 Schema 由前端独立维护并落库。请求体编辑器区分左栏载荷（`body.content`）与右栏定义（`body.schema`），定义经由 `endpoint_details` 持久化并供导出读取；导入时读取逻辑详见 [§导入的「不猜」](#导入的不猜)。
 
-短哈希用 FNV-1a 128 位取前 8 个十六进制字符，与 `fingerprint.rs` 同一套算法：不依赖
-`DefaultHasher`（它不保证跨版本稳定），也不为一个短标识拖进哈希依赖。
-
-**「前端能不能写 `body.schema`」的结论：能写，已经实现了。**
-请求体编辑器分左右两栏 —— 左边是这一次发出去的**载荷**（`body.content`），右边是文档里
-那份**参数定义**（`body.schema`）—— 两者是两个字段，不是一份输入框（合成一个的话，写接口
-定义时会把 Schema 当载荷发出去）。界面上写的定义经 `endpoint_details` 落库，导出时读它。
-
-导入侧相应地也读它：OpenAPI 的 `requestBody.content[media].schema` 会被收进
-`body.schema`（本地 `$ref` 展开成内联内容），故「导出再导入」不会丢掉这份定义。
-Postman 集合里没有请求体 schema 这个构造，故那边没有可导入的东西。
-
-**请求头：写成 `in: header` 的参数条目，不写值。**
-OpenAPI 没有独立的「请求头」段落，头就是参数的一种位置；导入侧正是按 `in: header`
-把它映回 `headers`，故导出侧写 `in: header`，「导出再导入」这条路才接得上 —— 否则头
-在往返里整个消失。
-
-值不写：值里常有凭据与 `{{变量}}`，一份面向人的契约文档不该带它们（本仓库导出凭据时
-也只写「有这个凭据」不写值）。头**在不在**这件事由条目本身表达了。
-
-同一个头名只写一条 —— OpenAPI 要求 `(name, in)` 唯一，重复的条目会让文档不合规；
-被丢的那条出 `Info` 说明，不静默。
+**请求头导出为 `in: header` 参数，不输出具体值。** OpenAPI 将头信息作为参数建模，导出端写入 `in: header` 条目以保障往返导入完整还原。请求头参数仅保留名称，省略实际值以避免泄露环境敏感凭据。重复头名称按规范去重，被忽略项输出 `Info` 诊断。
 
 ## 导出侧还丢了什么：逐条结论
 
-本 crate 的纪律是「IR 里有而文档表达不了的，必须回诊断」。逐条过一遍外来格式里
-本仓库读不到、或者读了但写不出的构造：
+IR 存在而目标格式无法表达的构造，统一产出诊断并做丢弃处理；非请求模型的构造则直接忽略且不诊断。
 
 | 构造 | 处理 | 理由 |
 |---|---|---|
-| Postman `event[]`（前置 / 测试脚本） | **导入**（条目级）；集合根级的没有落点，出诊断 | 脚本引擎落地后本仓库能存能跑脚本，导入器再丢掉它就成了真的丢数据。集合根不是节点，挂不上去 |
-| Postman `protocolProfileBehavior` | 不读，**不诊断** | Postman 自己的传输层行为开关，本仓库没有对应概念，读了也没有地方放 |
-| OpenAPI `webhooks` | 不读，**不诊断** | 3.1 的构造，本仓库只做 3.0；`paths` 之外的构造一律不认 |
-| OpenAPI `jsonSchemaDialect` | 不读，**不诊断** | 声明 schema 方言，本仓库不校验 schema 方言 |
-| OpenAPI `components.pathItems` | 不读，**不诊断** | 3.1 的构造 |
-| OpenAPI `callbacks` | 不读，**不诊断** | 本仓库的请求模型是「一个端点一次请求」，回调没有对应形状 |
-| OpenAPI `servers[1..]` | 不读，**不诊断** | 一个 operation 只带一个 `servers` 数组，取文档根的那一份；多出来的 host 是「同一操作打到多个地址」，本仓库的地址是 per (环境 × 模块) 的单元格，表达不了 |
-| 请求头的**值** | 不写进文档（头名写成 `in: header` 的参数条目） | 值里常有凭据与 `{{变量}}`；本仓库导出凭据时也只写「有这个凭据」不写值 |
-| 端点 / 集合 / 模块上的**脚本** | 出诊断 | OpenAPI 没有脚本的构造 |
+| Postman `event[]`（前置 / 测试脚本） | **导入**（条目级）；集合根级出诊断 | 详见 [§脚本：导入，以及导入不了的那些](#脚本导入以及导入不了的那些) |
+| Postman `protocolProfileBehavior` | 不读，**不诊断** | Postman 传输层私有开关，本仓库没有对应概念 |
+| OpenAPI `webhooks` | 不读，**不诊断** | 属 OpenAPI 3.1 构造，当前仅支持 3.0，忽略 `paths` 外结构 |
+| OpenAPI `jsonSchemaDialect` | 不读，**不诊断** | `body.schema` 不按方言校验 |
+| OpenAPI `components.pathItems` | 不读，**不诊断** | 属 OpenAPI 3.1 构造 |
+| OpenAPI `callbacks` | 不读，**不诊断** | 本仓库只有单次请求模型，没有异步回调拓扑 |
+| OpenAPI `servers[1..]` | 不读，**不诊断** | 单个 operation 只带一个 server；地址以 (环境 × 模块) 为单元，表达不了多主机矩阵 |
+| 请求头的**值** | 不写进文档（仅导出 `in: header` 参数条目） | 值常包含凭据或动态变量，文档仅声明参数存在性 |
+| 端点 / 集合 / 模块上的**脚本** | 出诊断 | OpenAPI 规范无脚本定义模型 |
 
 ## 产物怎么被校验：两层，都不是自家解析器
 
-自家导入器对自家产物永远宽容：导出器漏写 `responses`，导入器不会报错，它只是安静地
-少一个响应，而那份文档已经不合法了。故校验走两个外部视角：
+OpenAPI 导出产物通过 `openapiv3` 模型断言与 Redocly 规范规则两层外部校验，并共用 `fixtures/sample-exchange.json` 输入源。
 
 | 层 | 工具 | 跑在哪 | 查什么 |
 |---|---|---|---|
 | 模型 | `openapiv3`（dev-dep） | `cargo test`（`src/openapi_model_test.rs`） | OpenAPI 3.0 的 REQUIRED：`info.title`/`version`、每个 operation 的 `responses` 与 response 的 `description`；请求体的 `$ref` 指得到 `components.schemas` 里那一份 |
 | 规则 | Redocly | `npm run lint:openapi` → CI 的 web job | `path-parameters-defined`、`operation-operationId`、`security-defined`、`no-server-example.com`、`no-unused-components` 等 |
 
-**两层读的是同一棵树**：`fixtures/sample-exchange.json`。Rust 测试与
-`examples/export_sample.rs` 都从它出发，故 linter 看到的与 `cargo test` 校验过的是
-同一份东西。两边各写一份构造的话，它们迟早只覆盖一半。
+单测与 linter 统一以 `fixtures/sample-exchange.json` 为基准输入源，避免多份测试用例产生覆盖盲区。
 
-**夹具里必须有带 `body.schema` 的接口。** 夹具是这两层唯一的输入，而 Redocly 的
-`no-unused-components`（`recommended` 里没有，故 `redocly.yaml` 显式打开）查的正是
-「`components.schemas` 里躺着没人引用的定义」。夹具里一个带 schema 的接口都没有时，
-那条规则看不见任何东西 —— 这条缺陷当初正是这样在门禁里全绿的。故夹具里放了两个用同一份
-定义的接口（只写一份、两个 operation 都 `$ref` 它）与一个没有 `title` 的定义
-（名字由内容派生）。
+测试夹具必须包含携带 `body.schema` 的接口，以确保 Redocly 的 `no-unused-components` 规则能够有效覆盖组件引用校验。夹具中配对设置了共用 Schema 的端点及无 `title` 的端点。
 
-Redocly 要的是磁盘上的文档，所以 `npm run lint:openapi` 先跑
-`cargo run -p simple-post-interchange --example export_sample` 现场生成——**不提交
-快照**，快照会长过期。规则取舍在仓库根的 `redocly.yaml`，**关掉的每一条都写了理由**；
-关规则不是消错音的手段，下一个报错该去改生成器。
+Redocly 针对磁盘实体文件进行校验，通过 `cargo run -p simple-post-interchange --example export_sample` 动态生成目标文档，禁止提交静态快照。校验规则由根目录 `redocly.yaml` 管理，关闭的规则均显式注明原因。
 
 ## Redocly 抓出来的三处真缺陷（都已修）
 
-接 linter 之前，单测全绿、自家导入器也读得回自己的产物：
+引入 Redocly 规则校验修复了三项隐藏规范缺陷：路径参数错写为 query、缺失参数占位符漏声明、以及 operation 缺少唯一标识符。
 
-1. **路径模板参数一律写成 `in: query`。** `/users/{id}` 的 `id` 被当成 query 参数，
-   工具会认为 URL 里那个 `{id}` 无人认领，生成的客户端也就不会把它当路径参数
-   （`path-parameters-defined` 报 4 处）。
-2. **占位符没有对应参数行时完全不声明。** 用户删了参数行但 URL 里占位符还在——
-   缺声明的是文档，不是用户的配置。
-3. **operation 没有 `operationId`**（`operation-operationId` 报 17 处）。现在由
-   `动词 + 路径` 拼，**不取接口名**：改名是用户随手做的事，而 operationId 是代码
-   生成器拿来给方法取名的。
+1. **路径模板参数错写为 `in: query`。** `/users/{id}` 的路径占位符被标记为 query 参数，导致外部工具无法识别路径变量（`path-parameters-defined` 检出）。
+2. **URL 占位符缺失对应参数行时未显式声明。** 用户未在配置行显式声明但 URL 包含占位符时，文档未作补全声明。
+3. **operation 缺少 `operationId`。** 规范要求必须具备标识符，现通过「动词 + 双下划线路径」生成（`operation-operationId` 检出）。
 
-另外把「没有 auth 就不写 `security`」改成**显式写空数组**。语义等价（都不要求凭据），
-但缺席要读者自己推断一遍，且 `security-defined` 只认显式的那种。
+未配置认证的端点由省略 `security` 改为显式输出空数组 `[]`，以满足 `security-defined` 规范匹配要求。
 
 ## 已核实的陷阱
 
-带 `file:line` 的都是实测，不是推测。
+跨模块与外来格式交互存在存储隐蔽字段、模板字符集分歧、枚举取值不对称及网络策略约束等实测边界陷阱。
 
-- **`body_schema` 不是一列。** `crates/simple-post-core/src/db/schema.sql:123` 只有 `body_json`，整个 `RequestBody`
-  （含 `schema`）塞在里面。全仓库三个写入点：`domain/auth.rs:53`（定义）、
-  `src/types/domain/request.ts:99`（TS 镜像）、MCP 的 `body_schema` 入参
-  （`project_ops/endpoint/args.rs:49` → `write.rs:188`）。**界面的请求体编辑器也写它**
-  （右栏那块 Schema 区，见 `src/features/http-tester/BodyEditor.tsx`）—— 按列名去找会找不到。
-- **模板语法两边同形。** `crates/simple-post-core/src/template.rs:96` 的 `is_word` 只认
-  `[A-Za-z0-9_]`，Postman 的 `{{var}}` 同形，所以转换基本白送。但 Postman 实际会写
-  `{{my-var}}`（连字符）与 `{{$timestamp}}`（动态变量）——两者都会被现有解析器**原样
-  放过**，故导入器对它们出诊断，否则这份定义就是静默失效。
-  这条判据住在 core（`crates/simple-post-core/src/template.rs::is_word`），导入器
-  `crates/simple-post-interchange/src/import/postman/template.rs` 调它，故诊断说的话与
-  发送时的实际行为不会分家。
-- **`ApiKeyLocation` 只有 `Header | Query`**（`domain/auth.rs:197`），OpenAPI 的
-  apiKey 还允许 `cookie`。导入遇到 `in: cookie` 出诊断。
-- **`HttpMethod::Custom` 导不出 OpenAPI。** `domain/http.rs:22-27` 能装 `PROPFIND`，
-  但 OpenAPI 3.0 的 `paths` 是固定键集（get/put/post/delete/options/head/patch/trace）。
-  导出遇到集合外的动词出诊断。反向没问题：OpenAPI 的 `trace` 落成
-  `HttpMethod::Custom("TRACE")`。
-- **URL 拉取文档要显式抬高体积上限。** `http_executor::HttpRequestInput`
-  的 `max_response_size_kb`（`http_executor.rs:116`）由调用方给，一份 3 MB 的
-  OpenAPI yaml 会撞上 UI 的默认值。走 `execute_with_policy` 以保留 SSRF 防护
-  （`check_url`，`http_executor.rs:456`）——不要另开一条裸 `reqwest` 通道。
+- **`body_schema` 不是一列。** `crates/simple-post-core/src/db/schema.sql:124` 仅包含 `body_json`，`RequestBody`（含 `schema`）完整内嵌于该 JSON 字段中。全仓写入涉及 `domain/auth.rs:53`（类型定义）、`src/types/domain/request.ts:114`（前端接口定义）、MCP 入参（`project_ops/endpoint/args.rs:50` → `write.rs:206`）及界面请求体编辑器（`src/features/http-tester/BodyEditor.tsx`）。
+- **模板语法看似同形但字符集存在分歧。** `crates/simple-post-core/src/template.rs:96` 的 `is_word` 仅识别 `[A-Za-z0-9_]`。Postman 支持的 `{{my-var}}`（连字符）与 `{{$timestamp}}`（动态变量）会被原样保留，导入器须针对此类标识符输出诊断说明。判定逻辑复用 core 的 `is_word`，确保诊断信息与运行时行为统一。
+- **`ApiKeyLocation` 仅支持 `Header | Query`。** `crates/simple-post-core/src/domain/auth.rs:197` 仅声明 Header 与 Query，OpenAPI 的 `in: cookie` 无法映射，导入时输出诊断（详见 [§导入的「不猜」](#导入的不猜)）。
+- **`HttpMethod::Custom` 无法导出为 OpenAPI 动词。** `crates/simple-post-core/src/domain/http.rs:25` 支持任意自定义动词（如 `PROPFIND`），而 OpenAPI 3.0 `paths` 仅支持标准动词集合，遇到自定义动词在导出时输出诊断；反向导入时标准外的 `trace` 映射为 `HttpMethod::Custom("TRACE")`。
+- **URL 拉取文档需显式配置体积上限并遵循安全策略。** `http_executor::HttpRequestInput` 的 `max_response_size_kb`（`crates/simple-post-core/src/http_executor.rs:118`）默认配置可能拦截大体积 OpenAPI 文件。网络请求必须调用 `execute_with_policy` 触发 `check_url`（`crates/simple-post-core/src/http_executor.rs:458`）进行 SSRF 防御，禁止直连裸 `reqwest` 通道。
 
 ## YAML 依赖（已核实，勿重新推导）
 
-工作区的 MSRV 是 `rust-version = "1.87"`（根 `Cargo.toml`，本 crate 用
-`rust-version.workspace = true` 继承它）。四个候选的 MSRV 都低于它，**不存在 MSRV
-降级问题**：
+工作区统一选用活跃维护的 `serde_norway` 处理 YAML 编解码，满足 MSRV 约束且免于解释已弃用依赖。
+
+工作区 MSRV 为 `rust-version = "1.87"`（根 `Cargo.toml`），候选依赖均满足要求：
 
 | crate | 最新版 | MSRV | 备注 |
 |---|---|---|---|
@@ -439,10 +296,4 @@ Redocly 要的是磁盘上的文档，所以 `npm run lint:openapi` 先跑
 | `serde_yaml_ng` | 0.10.0 | 1.64 | 另一个 fork |
 | `serde_yml` | 0.0.13 | 1.56.1 | 另一个 fork |
 
-选 `serde_norway`：依赖一个已弃用的 crate 需要在 `Cargo.toml` 里解释为什么还留着它，
-而这个理由不成立。
-
-YAML→`serde_json::Value` 可行：OpenAPI 的键本来就得是字符串，非字符串键不在范围内。
-`$ref` 展开因此就是 JSON Pointer 走查，不需要额外的解析结构。
-
-一个依赖同时覆盖两个方向：#4 读 YAML，#5 写 YAML。
+选用 `serde_norway` 可避免在 `Cargo.toml` 中引入弃用解释。YAML 解析映射为 `serde_json::Value`，OpenAPI 规范严格限定键为字符串类型，`$ref` 寻址直接按 JSON Pointer 处理，无需维护冗余抽象结构。单个依赖同时满足读取（#4）与导出（#5）双向诉求。

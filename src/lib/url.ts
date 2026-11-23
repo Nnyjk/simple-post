@@ -80,7 +80,8 @@ export function resolveEndpointBaseUrl(
  * 对应 Rust 侧 `simple_post_core::url::apply_rewrite`（MCP 侧与导入导出侧都转发到它）；
  * 两者必须一致，否则预览与真正发出去的请求描述的是两个 URL。共享样本是
  * `fixtures/base-url-parity.json`。
- */ export function applyRewrite(url: string, rule: RewriteRule | null | undefined): string {
+ */
+export function applyRewrite(url: string, rule: RewriteRule | null | undefined): string {
   if (!rule) return url;
   const fromRaw = rule.from.trim();
   if (fromRaw === '') return url;
@@ -139,10 +140,11 @@ function splitUrl(url: string): { head: string; path: string; tail: string } {
 /**
  * 安全地拼接 baseUrl 与请求 path。path 自带 scheme 时视作绝对地址，并折叠 join 边界上的重复斜杠。
  *
- *   joinBaseUrl('https://api.example.com', '/users/1')     → 'https://api.example.com/users/1'
- *   joinBaseUrl('https://api.example.com/', 'users/1')      → 'https://api.example.com/users/1'
- *   joinBaseUrl('', '/users/1')                            → '/users/1'
- *   joinBaseUrl('https://api.example.com', 'https://other/') → 'https://other/'（path 优先）
+ *   示例：
+ *   - joinBaseUrl('https://api.example.com', '/users/1') → 'https://api.example.com/users/1'
+ *   - joinBaseUrl('https://api.example.com/', 'users/1') → 'https://api.example.com/users/1'
+ *   - joinBaseUrl('', '/users/1') → '/users/1'
+ *   - joinBaseUrl('https://api.example.com', 'https://other/') → 'https://other/'（path 优先）
  */
 export function joinBaseUrl(baseUrl: string, path: string): string {
   const trimmedPath = path ?? '';

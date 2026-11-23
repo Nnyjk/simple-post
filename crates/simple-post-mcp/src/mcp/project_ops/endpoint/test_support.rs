@@ -12,9 +12,7 @@ use simple_post_core::domain::{
     EndpointDetail, HttpMethod, Project, RequestBody, ResourceNode, ResourceNodeType,
 };
 use simple_post_core::permissions::Permission;
-/// Per-call counter that disambiguates temp dirs when several tests
-/// construct their state() in the same millisecond (cargo's default
-/// runs tests in parallel).
+/// 递增计数器：防止多个并发测试在同一毫秒内初始化 `state()` 时临时目录名冲突。
 static STATE_COUNTER: AtomicU32 = AtomicU32::new(0);
 
 pub(super) fn state() -> std::sync::Arc<AppState> {
@@ -120,8 +118,7 @@ pub(super) fn fixture() -> (std::sync::Arc<AppState>, String) {
             Some(&bare_detail("e_ep_fix")),
         )?;
         // Gate B 默认是 ReadCall，低于更新所需的 Full —— 只能在项目行存在之后设置。
-        // requires. `agent_permissions.project_id` is an FK to projects,
-        // so this can only be set once the project row exists.
+        // `agent_permissions.project_id` 是项目外键，因此必须在项目行创建后配置。
         permissions::set(c, "p_ep_fix", Permission::Full)?;
         Ok(())
     })

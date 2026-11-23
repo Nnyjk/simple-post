@@ -33,8 +33,8 @@ pub enum BodyMode {
     /// `multipart/form-data`。线上是 `multipart`。
     ///
     /// Content-Type 必须带 boundary，而 boundary 每次请求现生成，故 Content-Type 不是静态返回值。
-    /// 分片结构存在 [`RequestBody::content`] 里（JSON 数组），装配在 `src/lib/multipart.ts` 与
-    /// `mcp/http_ops/multipart.rs`。
+    /// 分片结构存在 [`RequestBody::content`] 里（JSON 数组），装配逻辑见前端 `src/lib/multipart.ts`
+    /// 与 MCP 服务端 `mcp/http_ops/multipart.rs`。
     Multipart,
     /// `application/xml`。内容是 XML 原文。
     Xml,

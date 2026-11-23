@@ -1,146 +1,108 @@
 # simple-post-server
 
-The headless host of Simple Post. This crate owns everything the desktop
-shell and the container image share, minus the GUI:
+Simple Post 的无头服务端宿主，负责提供 REST API、托管 SPA 静态资源，并管控 MCP 守护进程的完整生命周期。
 
-- `web_api` — the axum router behind `serve-web`: the REST surface and the
-  static SPA host. MCP's endpoint is served on the daemon's own port.
-- `daemon_supervisor` — the host-independent spawn and teardown of the MCP
-  daemon subprocess.
-- `auth` — the bearer middleware and the list of paths that stay public.
-- `port_registry` — the `mcp.port` file that the stdio bridge reads to
-  discover the daemon's port.
-- `dto` / `http_config` — the wire shapes both transports share, plus the
-  helpers for the daemon's listener configuration.
+## 负责什么、不负责什么
 
-## Why this crate exists
+### 负责什么
+- **REST API 与 SPA 静态资源托管（`web_api`）**：基于 axum 提供完整的业务 REST 接口与前端单页应用静态资产交付，为 `serve-web` 命令的主入口。
+- **双传输通道编排层（`project_api`、`interchange_api` 等）**：为桌面端 Tauri 命令与无头 REST 接口提供统一的业务编排（项目增删、动态变量、环境配置、数据导入导出、日志等），外部传输壳仅做协议解析，业务逻辑绝不分叉。
+- **MCP 守护进程监管（`daemon_supervisor`）**：跨平台启动子进程（Windows 静默启动 `CREATE_NO_WINDOW`）、存活探针探测（`/mcp/healthz`）、输出缓冲环与异常退出自动重启。
+- **端口注册与多实例协商（`port_registry`）**：维护 `mcp.port` 文件，写入包含监听配置指纹（`fingerprint`）的记录，实现多实例互斥与无缝接管（详见下文）。
+- **身份认证中间件（`auth`）**：处理 Bearer Token 鉴权并维护公开路径白名单。
 
-`src-tauri` links `tauri` unconditionally, and Tauri pulls the whole
-GTK/WebKit stack on Linux. That made "run the server only" impossible to
-containerize: the image carried X11 libraries for a GUI it can never show,
-and the `--lib` test binary dragged the Windows GUI runtime in through
-`AppHandle` (see the long note on `daemon_supervisor`). Splitting the
-server out turns the image into `debian-slim` plus one binary, and keeps
-the test binary free of what it does not need.
+### 不负责什么
+- 不包含任何 Tauri 桌面窗口或 Linux GTK/WebKit GUI 渲染逻辑（默认不依赖 Tauri，`gui` feature 仅用于桌面模式转发崩溃事件）。
+- 不实现 MCP JSON-RPC 协议与具体 48 个工具的内部逻辑（由 `simple-post-mcp` 负责）。
+- 不直接维护 SQLite 表结构定义与底层数据库迁移（由 `simple-post-core::db` 负责）。
 
-The optional `gui` feature (`features = ["gui"]`) is disabled by default.
-It re-attaches the three `AppHandle`-taking daemon methods (`ensure_started`,
-`start`, `restart`) so desktop crash events reach the webview. The default build
-has no Tauri dependency.
-
-The dependency direction is one-way:
-
-```text
-simple-post (Tauri)  ──▶  simple-post-server  ──▶  simple-post-core
-                                  │
-                                  └──▶  simple-post-interchange
-                                  └──▶  simple-post-mcp
-```
-
-`src-tauri` re-exports the modules below, so the Tauri commands still
-resolve `crate::daemon_supervisor::…` and `crate::web_api::…`.
-
-## Layout
+## 目录与关键类型
 
 ```
 crates/simple-post-server/
 ├── Cargo.toml
 ├── README.md
 └── src/
-    ├── lib.rs                # the public surface + the shared re-exports
-    ├── main.rs               # the headless binary: the `serve-web` command
-    ├── cli.rs                # the CLI fragments both binaries share (serve-web / mcp)
-    ├── auth.rs               # the bearer middleware + the public-path list
-    ├── dto.rs                # the wire shapes both transports share
-    ├── http_config.rs        # the MCP listener config + its fingerprint
-    ├── dynamic_api.rs        # the dynamic-variable orchestration
-    ├── environment_api.rs    # the environment creation orchestration
-    ├── interchange_api.rs    # the import / export orchestration
-    ├── log_api.rs            # the log export orchestration
-    ├── log_layer.rs          # the tracing layer that feeds the log ring buffer
-    ├── mcp_router.rs         # the router on the MCP daemon's own port
-    ├── project_api.rs        # the project and tree-node creation orchestration
-    ├── spec_api.rs           # the interface-specification orchestration
-    ├── update_api.rs         # the update check/apply orchestration
-    ├── daemon_supervisor.rs  # the facade over the MCP daemon supervision
-    ├── daemon_supervisor/    # the supervision, one file per concern
-    │   ├── listen_config.rs  #   the persisted listener row → the child's argv
-    │   ├── log_buffer.rs     #   the bounded ring buffer for the log tail
-    │   ├── probe.rs          #   the healthz probe + the "start was a no-op" rule
-    │   ├── reap.rs           #   the termination side: which PIDs, which channel
-    │   ├── state.rs          #   the per-spawn bookkeeping
-    │   ├── status.rs         #   the lifecycle enum + the snapshot projection
-    │   ├── stderr.rs         #   the daemon's stderr forwarding
-    │   └── watcher.rs        #   the exit watchers
-    ├── port_registry.rs      # the `mcp.port` file facade
-    ├── port_registry/        # the registry, one file per concern (path + record shape live in core)
-    │   ├── claim.rs          #   the multi-instance claim (create_new + fallback)
-    │   ├── health.rs         #   the `/mcp/healthz` liveness probe
-    │   └── proc.rs           #   the process-table probe + the forced kill
-    ├── web_api/              # the REST + static-file layer
-    │   ├── dto.rs            #   the web-side wire shapes
-    │   ├── error.rs          #   the AppError → HTTP mapping
-    │   ├── router.rs         #   the route tree + `WebState`
-    │   ├── serve.rs          #   the startup entry
-    │   ├── static_files.rs   #   the SPA shell + the hashed assets
-    │   ├── routes/           #   the handlers, one file per resource
-    │   └── spec/             #   the OpenAPI contract table
-    ├── win_spawn.rs          # the `CREATE_NO_WINDOW` flag for child processes
+    ├── lib.rs                # 公共导出接口与跨 crate 共享转发
+    ├── main.rs               # 无头服务端二进制：`serve-web` 命令入口
+    ├── cli.rs                # 两个二进制共用的 CLI 片段（serve-web / mcp）
+    ├── auth.rs               # Bearer Token 认证中间件与公开白名单路径
+    ├── dto.rs                # 双传输通道共享的传输对象数据结构
+    ├── http_config.rs        # MCP 监听器配置与其指纹计算
+    ├── dynamic_api.rs        # 动态变量业务编排
+    ├── environment_api.rs    # 环境增删改查业务编排
+    ├── interchange_api.rs    # 数据导入导出业务编排
+    ├── log_api.rs            # 日志导出业务编排
+    ├── log_layer.rs          # 汇入日志环形缓冲区的 tracing layer
+    ├── mcp_router.rs         # 挂载在 MCP 守护进程独立端口上的路由
+    ├── project_api.rs        # 项目与资源树节点业务编排
+    ├── spec_api.rs           # 接口规范解析与写入业务编排
+    ├── update_api.rs         # 软件更新检查与应用业务编排
+    ├── daemon_supervisor.rs  # MCP 守护进程监管层门面
+    ├── daemon_supervisor/    # 守护进程监管实现，按关注点拆分
+    │   ├── listen_config.rs  #   持久化监听配置到子进程启动参数的映射
+    │   ├── log_buffer.rs     #   尾部日志有界环形缓冲区
+    │   ├── probe.rs          #   healthz 探针与「重复启动为空操作」判定规则
+    │   ├── reap.rs           #   子进程终止控制：PID 跟踪与信号通道
+    │   ├── state.rs          #   单次启动生命周期记账
+    │   ├── status.rs         #   运行状态枚举与状态快照投影
+    │   ├── stderr.rs         #   守护进程标准错误输出转发
+    │   └── watcher.rs        #   子进程退出监听器
+    ├── port_registry.rs      # `mcp.port` 端口文件门面
+    ├── port_registry/        # 端口注册中心实现（路径与记录数据结构位于 core）
+    │   ├── claim.rs          #   多实例抢占式注册（create_new 与回退机制）
+    │   ├── health.rs         #   `/mcp/healthz` 存活探针
+    │   └── proc.rs           #   进程表存活探测与强制终止
+    ├── web_api/              # REST 接口与静态文件服务层
+    │   ├── dto.rs            #   Web 端专用传输数据结构
+    │   ├── error.rs          #   AppError 到 HTTP 状态码的映射
+    │   ├── router.rs         #   路由树装配与 WebState 共享状态
+    │   ├── serve.rs          #   Web 服务启动入口
+    │   ├── static_files.rs   #   前端 SPA 单页入口与带哈希静态资产交付
+    │   ├── routes/           #   各资源路由处理器，一文件对应一资源
+    │   └── spec/             #   OpenAPI 契约映射表
+    ├── win_spawn.rs          # Windows 平台子进程 `CREATE_NO_WINDOW` 静默启动标志
     └── (the tests sit beside their source as `*_test.rs` / `mod_test.rs`)
 ```
 
-## The two transports share one orchestration layer
+### 双传输通道共用一套编排层
+桌面端命令（`src-tauri/src/commands/`）与 REST 路由处理器（`web_api/routes/`）共同暴露的功能统一在此编排：`interchange_api`（导入导出）、`project_api`（项目与树节点增删改）、`spec_api`（单接口规范）、`dynamic_api`（动态变量）、`environment_api`（环境管理）、`log_api`（日志导出）以及 `update_api`（检查与应用更新）。两端的命令/路由处理器仅为最外层薄壳（Shell）。
 
-Every feature that both the desktop commands and the REST routes expose
-keeps its orchestration in this crate: `interchange_api` (import and
-export), `project_api` (project and tree-node creation), `spec_api`
-(interface specifications), `dynamic_api` (dynamic variables),
-`environment_api` (environments), `log_api` (log export) and `update_api`
-(updates). The Tauri commands in `src-tauri/src/commands/` and the REST
-handlers in `web_api/routes/` are thin shells over them.
+薄壳只做线格式解析：REST 端认 `POST /api/projects` 的两种历史载荷并补齐缺失 id，Tauri 端把 `kind` 字符串解析成枚举。id 归谁铸、时间戳、`root_id` 推导与事务边界都在编排层。薄壳一旦越界写业务逻辑，另一条通道就静默少一半功能、编译却不报错；`project_api_shells_test.rs` 读四处薄壳的源码，要求它们都调编排层。
 
-The shells parse the **wire format** and nothing else: the REST side
-accepts the two body shapes that `POST /api/projects` has always taken
-and fills in the missing id, while the Tauri side parses the `kind`
-string into its enum. The orchestration itself decides who mints the id,
-what the timestamps are, how the parent relationship is derived and where
-the transaction boundary sits.
+### MCP 守护进程生命周期与指纹重用机制（此处详述）
+监管者通过 `port_registry` 将守护进程的运行信息写入 `mcp.port` 文件，并附带守护进程实际监听配置的哈希指纹（`fingerprint`）。指纹作为顶级键存放在 JSON 中，保持与历史读取端（stdio 代理、外部脚本）的兼容性。
 
-A shell that grows past that boundary silently removes the feature from
-the other transport, and nothing reports the divergence. The regression net
-is `project_api_shells_test.rs`: it reads the four shells' source and
-requires each of them to call the shared layer.
+监管者启动时的处理规则：
+1. **进程复用（Adopt）**：若 `mcp.port` 中记录的 PID 进程存活、`/mcp/healthz` 响应正常，且记录中的配置指纹与当前监管者期望的配置完全一致，监管者直接接管该守护进程。保留其 PID 且不重启进程，确保正在执行的外部 MCP 会话不中断。
+2. **强制重启（Restart）**：若配置指纹不一致，或文件中缺失指纹字段（旧版本写入），或健康探测失败，监管者判定为配置已漂移，终止旧进程并启动新守护进程，重新写入 `mcp.port`。
 
-## The MCP daemon is reused only when its configuration matches
+`serve-web` 与桌面主程序均遵循相同的指纹协商规则，避免互相无条件终止对方已拉起的守护进程。
 
-The supervisor writes the daemon's identity into the `mcp.port` file
-together with a **fingerprint** of the listener configuration the daemon
-actually serves. The fingerprint is a separate top-level key in the same
-JSON object, so `port` / `pid` / `bind` keep their shape and the
-third-party readers of that file (the proxy binary, `scripts/mcp-repl.mjs`)
-still parse it.
+### 下游消费者与单向依赖
+```text
+simple-post (Tauri)  ──▶  simple-post-server  ──▶  simple-post-core
+                                  │
+                                  └──▶  simple-post-interchange
+                                  └──▶  simple-post-mcp
+```
+- `src-tauri`（Tauri 桌面外壳与桌面二进制下的 `serve-web` 子命令）：通过 `pub use simple_post_server::{…}` 转发服务端模块，使桌面端仍能按 `crate::daemon_supervisor::…` 和 `crate::web_api::…` 路径调用。
+- 可选的 `gui` 特性（`features = ["gui"]`）默认关闭；开启时会重新接入三个接收 `AppHandle` 的守护进程方法（`ensure_started`、`start`、`restart`），以便将守护进程崩溃事件转发给桌面端 webview。默认构建完全不依赖 Tauri。
+- 容器镜像构建：Docker 镜像直接编译 `simple-post-server` 二进制。该构建不依赖 Tauri，因而无需打包 X11、GTK 或 WebKit 库。
 
-The rule when a supervisor starts:
+## 怎么跑
 
-- The recorded PID is alive and `/mcp/healthz` answers, **and** the
-  recorded fingerprint equals the fingerprint of the configuration this
-  supervisor wants → **adopt** the daemon. The supervisor records its PID
-  and leaves the process alone, so an MCP session in flight keeps working.
-- The fingerprint differs, or the record has no fingerprint at all (a file
-  written by an older build) → **restart** the daemon. "Cannot be judged"
-  resolves toward restarting, for the same reason `requires_restart`
-  answers `true` when it cannot judge.
+### 运行无头 Web 服务
+```bash
+cargo run -p simple-post-server -- serve-web --bind 127.0.0.1 --port 4173
+```
 
-`serve-web` follows the same rule as the desktop application. It used to
-tear the daemon down unconditionally before starting one, which killed the
-daemon the desktop application had started and dropped every MCP client
-attached to it.
+### 运行 MCP 守护进程
+```bash
+cargo run -p simple-post-server -- mcp --port 4333
+```
 
-## Consumers
-
-- `src-tauri` (the Tauri shell + its `serve-web` subcommand):
-  `pub use simple_post_server::{…}` forwards the host half, which is why
-  the desktop crate keeps the `crate::daemon_supervisor` and
-  `crate::web_api` paths.
-- The Docker image builds `simple-post-server` directly. That binary has
-  no Tauri dependency, so the image carries no GTK or WebKit.
+### 运行单元测试
+```bash
+cargo test -p simple-post-server
+```

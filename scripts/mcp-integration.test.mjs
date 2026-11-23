@@ -59,11 +59,9 @@ async function waitForHealthz(timeoutMs = 5_000) {
       const response = await fetch(`http://127.0.0.1:${port}/mcp/healthz`);
       if (response.ok) return response.json();
     } catch {
-      // Server not listening yet; fall through to the sleep below.
+      // 服务尚未就绪，落入下方休眠重试。
     }
-    // Sleep unconditionally, not only on throw. If the port is bound by
-    // something else that answers 4xx/5xx, sleeping only in the `catch`
-    // turns the poll into a tight fetch loop for the whole deadline.
+    // 无条件休眠重试（防范端口被其他返回 4xx/5xx 的服务占用时退化为高频死循环）。
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   throw new Error(`daemon did not become healthy; stderr:\n${stderr}`);
@@ -132,18 +130,8 @@ try {
     assert(!names.has(name), `read_only policy hides ${name}`);
   }
 
-  // Simple Post ships no seed data, so a fresh daemon has an empty
-  // database. `env_list` against an unknown project must resolve to `[]`
-  // — not a 404, not a transport error, and not a permission failure
-  // (the per-project gate defaults to ReadCall, which covers Read).
-  //
-  // This transport cannot create data to assert against: `simple-post
-  // mcp` mounts only /mcp, /mcp/healthz and /mcp/tools. There is no
-  // /api/mcp/capability to lift the default read_only policy, and
-  // `dispatch` refuses env_create under it, so no fixture can be built
-  // from here. Covering the populated path needs a `serve-web` host;
-  // db-level coverage of that lives in simple-post-core's environment
-  // tests.
+  // 空库下对未知项目调用 env_list 必须正常返回 []，不能报 404、传输错误或权限拒绝。
+  // mcp 命令仅挂载 /mcp 路由且受 read_only 策略约束，无法在此创建测试数据；有数据场景由 core 覆盖。
   const envList = await rpc(3, 'tools/call', {
     name: 'env_list',
     arguments: { project_id: 'p_demo' },
@@ -192,16 +180,6 @@ try {
   }
 }
 
-// Set the code and let Node exit on its own — do NOT call
-// `process.exit()` here.
-//
-// This test `fetch`es the daemon, so undici holds a keep-alive socket.
-// `process.exit()` tears the loop down while that handle is still
-// registered, and on Windows libuv then aborts with
-//   `Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)
-//    (src\win\async.c:76)` — exit code 0xC0000409 — *after* every
-// assertion already printed "all assertions passed". A green run then
-// reports as a crash and CI cannot tell pass from fail. Confirmed by an
-// isolated repro: identical script, only difference is `process.exit()`
-// vs. falling off the end (exit 0 both times, the former aborts).
+// 仅设置 exitCode 允许事件循环自然排空，切勿调用 process.exit()。
+// Windows 下 undici 的 keep-alive 连接尚未释放时调用 process.exit() 会触发 libuv 断言崩溃（0xC0000409）。
 process.exitCode = failures === 0 ? 0 : 1;

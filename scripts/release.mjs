@@ -152,7 +152,7 @@ const formatCommand = (cmd, args) => [cmd, ...args].join(' ');
  * stderr 一律透出来（`capture` 时手工转到我们的 stderr），否则 `gh` 的权限报错
  * 会被吞掉，只剩一句「命令失败」。
  *
- * @returns {{ ok: boolean, status: number, stdout: string, stderr: string }}
+ * @returns {{ ok: boolean, status: number, stdout: string, stderr: string }} 执行结果
  */
 function exec(cmd, args, { capture = false, timeoutMs = 0, quiet = false } = {}) {
   const res = spawnSync(cmd, args, {

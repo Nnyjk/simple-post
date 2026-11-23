@@ -139,10 +139,9 @@ fn scalar_to_string(v: &Value) -> String {
     }
 }
 
-/// 鉴权载荷 → [`AuthConfig`]。形状与端点存的那份一致
-/// （`{"kind": "bearer", "bearer": "…"}` / `{"kind": "basic", "basic": {…}}` /
-/// `{"kind": "apikey", "apikey": {…}}` / `{"kind": "oauth2", "oauth2": {…}}`）。
-///
+/// 鉴权载荷 → [`AuthConfig`]。形状与端点存的那份一致：
+/// 包含 Bearer 令牌 `{"kind": "bearer", "bearer": "…"}`、Basic 认证 `{"kind": "basic", "basic": {…}}`、
+/// API 密钥 `{"kind": "apikey", "apikey": {…}}` 或 OAuth2 模式 `{"kind": "oauth2", "oauth2": {…}}`。
 /// 载荷缺席 = 不用鉴权。形状不对就报错：静默当成「不用鉴权」会发出一个缺了凭据的
 /// 请求，而调用方以为它带上了。
 pub(super) fn parse_auth(v: Option<&Value>) -> Result<AuthConfig, AppError> {

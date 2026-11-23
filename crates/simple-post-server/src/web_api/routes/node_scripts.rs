@@ -18,7 +18,7 @@ use crate::domain::NodeScriptsPatch;
 
 use super::super::{map_app_error, HttpErrorResponse, WebState};
 
-/// `GET /api/nodes/:id/scripts`
+/// 读取节点脚本：`GET /api/nodes/:id/scripts`
 pub(crate) async fn node_scripts_get(
     State(s): State<Arc<WebState>>,
     Path(id): Path<String>,
@@ -28,7 +28,7 @@ pub(crate) async fn node_scripts_get(
     Ok(Json(serde_json::to_value(&scripts).unwrap_or(Value::Null)))
 }
 
-/// `PATCH /api/nodes/:id/scripts`
+/// 更新节点脚本：`PATCH /api/nodes/:id/scripts`
 pub(crate) async fn node_scripts_patch(
     State(s): State<Arc<WebState>>,
     Path(id): Path<String>,

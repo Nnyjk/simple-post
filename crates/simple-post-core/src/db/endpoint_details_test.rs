@@ -86,14 +86,13 @@ fn detail(node_id: &str) -> EndpointDetail {
 }
 
 // -------------------------------------------------------------------------
-// Round-tripping the JSON columns.
+// JSON 列往返往复序列化。
 // -------------------------------------------------------------------------
 
 #[test]
 fn json_columns_round_trip() {
     let (pool, _dir) = fresh_pool();
-    // `r##` because the payload contains `"#`, which would close an
-    // `r#` literal at the markdown heading below.
+    // 载荷含 `"#` 会提前闭合 `r#` 字符串，故使用 `r##`。
     let patch = r##"{
         "method": "POST",
         "url": "/orders",
@@ -236,7 +235,7 @@ fn an_older_store_gains_the_https_settings_column_without_a_version_bump() {
 }
 
 // -------------------------------------------------------------------------
-// Partial update, including the absent / explicit-null distinction.
+// 局部更新（区分字段缺席与显式为 null）。
 // -------------------------------------------------------------------------
 
 #[test]
@@ -268,7 +267,7 @@ fn absent_and_explicit_null_differ() {
         )
     })
     .unwrap();
-    // An empty patch must be a no-op, not a clear.
+    // 空 patch 必须是无操作，不可清空字段。
     db::with_tx(&pool, |c| {
         update(c, "e1", serde_json::from_str("{}").unwrap())
     })
@@ -363,7 +362,7 @@ fn update_missing_reports_not_found() {
 }
 
 // -------------------------------------------------------------------------
-// Batched reads.
+// 批量读取。
 // -------------------------------------------------------------------------
 
 #[test]
@@ -379,8 +378,7 @@ fn list_by_root_returns_only_that_projects_endpoints() {
 
 #[test]
 fn list_by_node_ids_handles_an_empty_request() {
-    // Called with nothing to look up, which a tree read will hit on any
-    // project that has no endpoints. Must not build `IN ()`.
+    // 无端点项目查空树时传入空列表，不可拼出 `IN ()`。
     let (pool, _dir) = fresh_pool();
     let got = db::with_conn(&pool, |c| list_by_node_ids(c, &[])).unwrap();
     assert!(got.is_empty());

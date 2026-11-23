@@ -64,7 +64,7 @@ export function useEditMenu({
   const duplicateEndpoint = useAppStore((s) => s.duplicateEndpoint);
   const moveNodes = useAppStore((s) => s.moveNodes);
 
-  // ---------- raw state (all raw references — safe for selectors) ----------
+  // ---------- 原始状态（均为原始引用，选择器可安全使用） ----------
   const projects = useAppStore((s) => s.projects);
   const nodes = useAppStore((s) => s.nodes);
 
@@ -102,7 +102,7 @@ export function useEditMenu({
     return out;
   };
 
-  // ---------- edit / context menu / delete ----------
+  // ---------- 编辑 / 右键菜单 / 删除 ----------
   const startEdit = (kind: TargetKind, id: string) => setEditing({ kind, id });
   const cancelEdit = () => setEditing(null);
   const saveEdit = (kind: TargetKind, id: string, next: string) => {

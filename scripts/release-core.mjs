@@ -51,8 +51,8 @@ const SECTION_HEADINGS = new Set(Object.values(GROUP_TITLES));
  * 解析 `x.y.z`。解析不了返回 `null`（不是抛错）：调用方对「当前版本读不出来」
  * 与「用户手输的版本号非法」要给出不同的提示。
  *
- * @param {string} text
- * @returns {{ major: number, minor: number, patch: number } | null}
+ * @param {string} text 版本号字符串
+ * @returns {{ major: number, minor: number, patch: number } | null} 版本对象或解析失败返回 null
  */
 export function parseVersion(text) {
   const m = SEMVER.exec(String(text).trim());
@@ -103,8 +103,8 @@ export function isReleaseCommit(title) {
  * 解析不出 Conventional Commits 形状（包括 merge 提交）时返回 `null` ——
  * 调用方把它原样放进「其它」，而不是猜一个 type。
  *
- * @param {string} title
- * @returns {{ type: string, scope: string, subject: string, breaking: boolean } | null}
+ * @param {string} title 提交标题
+ * @returns {{ type: string, scope: string, subject: string, breaking: boolean } | null} 解析结果对象
  */
 export function parseCommitTitle(title) {
   const text = String(title).trim();
@@ -122,8 +122,8 @@ export function parseCommitTitle(title) {
 /**
  * 一个条目在说明里的正文：`**scope**: subject`，不兼容变更带一句标注。
  *
- * @param {{ scope: string, subject: string, breaking: boolean }} parsed
- * @returns {string}
+ * @param {{ scope: string, subject: string, breaking: boolean }} parsed 解析后的提交信息
+ * @returns {string} 渲染后的正文
  */
 function entryText(parsed) {
   const body = parsed.scope ? `**${parsed.scope}**: ${parsed.subject}` : parsed.subject;
@@ -136,11 +136,11 @@ function entryText(parsed) {
  * `titles` 的顺序即说明里条目的顺序（调用方给 `git log` 的时间倒序，与 changelog
  * 习惯一致：最新的在上）。
  *
- * @param {string[]} titles
- * @returns {{ key: string, title: string, entries: { text: string, scope: string, subject: string, breaking: boolean }[] }[]}
+ * @param {string[]} titles 提交标题列表
+ * @returns {{ key: string, title: string, entries: { text: string, scope: string, subject: string, breaking: boolean }[] }[]} 分组结果列表
  */
 export function groupCommits(titles) {
-  /** @type {Map<string, { text: string, scope: string, subject: string, breaking: boolean }[]>} */
+  /** @type {Map<string, { text: string, scope: string, subject: string, breaking: boolean }[]>} 分组桶映射 */
   const buckets = new Map(GROUP_ORDER.map((key) => [key, []]));
 
   for (const raw of titles) {
@@ -254,8 +254,8 @@ export function mergeReleaseBody(body, section) {
  * 跨过三位数的那一步就会坏。
  *
  * @param {string} current 当前版本号，例如 `0.1.39`
- * @param {string} bump `patch` / `x.y.z`
- * @returns {string}
+ * @param {string} bump 升版类型（`patch` 或显式 `x.y.z`）
+ * @returns {string} 下一个版本号
  */
 export function resolveNextVersion(current, bump) {
   const now = parseVersion(current);

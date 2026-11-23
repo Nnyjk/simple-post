@@ -4,7 +4,8 @@
  * 断言 `(method, url, 解析后的 body)`，让路由的静默漂移响亮地失败：路径参数的百分号
  * 编码、列表过滤的查询串投影，以及路径参数必须从线上载荷里剥离时的 body 投影。
  * 其余资源分组见同目录的其它分片。
- */ import { describe, it, beforeEach, after } from 'node:test';
+ */
+import { describe, it, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { COMMANDS, invokeCmd } from '../tauri-commands';

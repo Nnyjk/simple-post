@@ -95,7 +95,7 @@ function App() {
     } else if (theme === 'light') {
       apply(false);
     } else {
-      // 'system' — follow OS preference, then keep in sync with changes.
+      // 'system'：跟随系统偏好，监听系统主题变化。
       const mq = window.matchMedia('(prefers-color-scheme: dark)');
       apply(mq.matches);
       const onChange = (e: MediaQueryListEvent) => apply(e.matches);

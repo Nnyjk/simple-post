@@ -1,4 +1,4 @@
-// crates/simple-post-mcp/src/capability.rs
+// 客户端能力校验：crates/simple-post-mcp/src/capability.rs
 //
 // `--capability`（及 `SIMPLE_POST_MCP_CAPABILITY`）在本地上再过滤一次
 // `tools/list`，后端已按 `mcp.policy` 过滤过一层。
