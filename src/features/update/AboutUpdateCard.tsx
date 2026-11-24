@@ -1,5 +1,5 @@
 /**
- * 设置里的「关于」卡片：当前版本、上次检查、GitHub 镜像、更新方式，以及发现新版本时的入口。
+ * 设置里的「关于」卡片：当前版本、更新检查、GitHub 镜像、更新方式，以及发现新版本时的入口。
  *
  * 检查结果分四类（已是最新 / 有新版本 / 检查失败 / 还没查过），文案统一由
  * `describeCheckOutcome` 给，故卡片与顶栏不会对同一次检查说两种话。
@@ -55,8 +55,19 @@ export function AboutUpdateCard() {
   const currentVersion = pinned || APP_VERSION || info?.current || '';
 
   const lastChecked = info ? relativeTime(info.checkedAt, Date.now()) : null;
-  const outcome = error ?? (info ? describeCheckOutcome(info) : '还没有检查过更新');
   const failed = Boolean(error) || Boolean(info?.error);
+  // 结果文案统一出自 `describeCheckOutcome`，卡片与顶栏不会对同一次检查说两种话。
+  const outcome = error ?? (info ? describeCheckOutcome(info) : null);
+  const hasUpdate = Boolean(info?.available && info.latest);
+
+  // 有新版时这行只说时间：版本号归下方「可更新」那一行，一张卡片里不该出现两次。
+  // 「已是最新版本」接在时间后面；失败原因另起一行（见下）。
+  const timeText = lastChecked ? `上次检查 ${lastChecked}` : '尚未检查过更新';
+  const statusLine = busy
+    ? '检查中…'
+    : failed || hasUpdate || !info
+      ? timeText
+      : `${timeText} · ${outcome ?? '已是最新版本'}`;
 
   const channel = desktop
     ? '桌面端 · 应用内下载并安装，安装完自动重启'
@@ -71,20 +82,37 @@ export function AboutUpdateCard() {
         description="版本、更新方式、GitHub 镜像与日志导出"
         icon={<Sparkles className="h-3.5 w-3.5" />}
         actions={
-          <Button
-            variant="ghost"
-            size="xs"
-            onClick={() => void checkForUpdate(true)}
-            disabled={busy}
-            className="gap-1 text-muted-foreground"
-          >
-            {busy ? (
-              <Loader2 className="h-3 w-3 animate-spin" />
-            ) : (
-              <RefreshCw className="h-3 w-3" />
-            )}
-            检查更新
-          </Button>
+          // 右对齐的纵向小块：按钮在上，结果小字紧贴其下。
+          <div className="flex flex-col items-end gap-1">
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={() => void checkForUpdate(true)}
+              disabled={busy}
+              className="gap-1 text-muted-foreground"
+            >
+              {busy ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <RefreshCw className="h-3 w-3" />
+              )}
+              检查更新
+            </Button>
+            <span className="flex max-w-[min(22rem,40vw)] flex-col items-end gap-0.5 text-right">
+              <span
+                className={cn(
+                  'whitespace-nowrap text-micro',
+                  failed && !busy ? 'text-destructive' : 'text-muted-foreground',
+                )}
+              >
+                {statusLine}
+              </span>
+              {/* 失败原因另起一行：那句话本身较长，接在时间后面会把标题挤扁。 */}
+              {failed && !busy && (
+                <span className="text-micro text-destructive">{outcome ?? '检查失败'}</span>
+              )}
+            </span>
+          </div>
         }
       >
         <SettingRow
@@ -108,24 +136,6 @@ export function AboutUpdateCard() {
               onCheckedChange={setAutoCheckUpdates}
               aria-label="自动检查更新"
             />
-          }
-        />
-        <SettingRow
-          label="上次检查"
-          description={busy ? '检查中…' : outcome}
-          badge={
-            failed ? (
-              <Badge variant="destructive">检查失败</Badge>
-            ) : info?.available ? (
-              <Badge variant="success">有新版本</Badge>
-            ) : undefined
-          }
-          control={
-            <span
-              className={cn('text-micro', failed ? 'text-destructive' : 'text-muted-foreground')}
-            >
-              {lastChecked ?? '尚未检查'}
-            </span>
           }
         />
         {info?.available && info.latest && (

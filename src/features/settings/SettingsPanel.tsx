@@ -196,11 +196,6 @@ export function SettingsPanel() {
             );
           })}
         </nav>
-
-        {/* 钉在底部的小提示卡 —— 说明改动会立刻保存、哪些项要重启才生效。 */}
-        <div className="mt-auto rounded-md border border-dashed border-border/70 bg-background/30 px-2.5 py-2 text-micro leading-relaxed text-muted-foreground">
-          设置改动会立即保存。重启 MCP 进程后部分项生效。
-        </div>
       </aside>
 
       {/* 主内容区。一段细窄的面包屑 + 分区标题给滚动区开头，分区正文滚下去之后用户

@@ -1,12 +1,5 @@
 import { Suspense, lazy, useEffect, useRef, useState } from 'react';
-import {
-  FilePlus,
-  Settings as SettingsIcon,
-  BookOpen,
-  Package,
-  ArrowRight,
-  Braces,
-} from 'lucide-react';
+import { FilePlus, Settings as SettingsIcon, BookOpen, Package, ArrowRight } from 'lucide-react';
 import { useAppStore, type Theme } from '@/stores/app-store';
 import { cn, focusRing } from '@/lib/utils';
 import { AppIcon } from '@/components/ui/app-icon';
@@ -126,13 +119,6 @@ export function WelcomeScreen() {
             <h1 data-welcome-stagger className="text-2xl font-semibold tracking-tight">
               {hasProjects ? '选择一个项目' : '简单、强大的 API 调试工作台'}
             </h1>
-            <p data-welcome-stagger className="mx-auto max-w-md text-sm text-muted-foreground">
-              {hasProjects ? (
-                <>进入项目后，左侧只展示该项目的模块、集合与接口。</>
-              ) : (
-                <>组织项目 · 整理接口 · 发送请求 · 内置 MCP 让 AI 直接驱动你的工作区。</>
-              )}
-            </p>
           </div>
 
           {/* 项目选择器 */}
@@ -212,12 +198,6 @@ export function WelcomeScreen() {
               {/* 红点跟着「有没有新版」走，而不是跟着顶栏那枚 pill 走：「稍后再说」只收起 pill。 */}
               {updateAvailable && <UpdateDot />}
             </button>
-            {/* 动态变量挂在项目里（变量名项目内唯一），故没有项目时它开不了 ——
-                这里只说明它在哪，不给一个点了没反应的按钮。 */}
-            <span className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-card/20 px-3 py-1.5 text-xs text-faint">
-              <Braces className="h-3.5 w-3.5" />
-              动态变量在项目内维护，打开项目后从顶栏进入
-            </span>
             <button
               type="button"
               onClick={handleDocs}
