@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { cn, focusRing } from '@/lib/utils';
 import { TreeContextMenu, type ContextMenuItem } from './TreeContextMenu';
-import type { DragContextValue, EditTarget, TargetKind } from './tree-types';
+import type { DragContextValue, TargetKind } from './tree-types';
 import { buildTree, filterTree } from './tree-utils';
 import { useTreeDnd } from './hooks/useTreeDnd';
 import { useEditMenu } from './hooks/useEditMenu';
@@ -80,7 +80,6 @@ export function ProjectTree() {
   const activeProject = useAppStore((s) => s.projects.find((p) => p.id === s.activeProjectId));
 
   // ---------- store actions ----------
-  const setActiveEndpoint = useAppStore((s) => s.setActiveEndpoint);
   const moveNodes = useAppStore((s) => s.moveNodes);
   const openTab = useAppStore((s) => s.openTab);
   // 刷新树用 `reloadWorkspace` 而不是 `loadWorkspace`：后者在 `nodesLoaded` 上早退，
@@ -99,7 +98,6 @@ export function ProjectTree() {
 
   // ---------- local UI state ----------
   const [query, setQuery] = useState('');
-  const [editing, setEditing] = useState<EditTarget | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
   // 批量运行的目标：一个集合或模块。`null` = 对话框没开。
   const [batchTarget, setBatchTarget] = useState<{
@@ -147,7 +145,7 @@ export function ProjectTree() {
   } = useTreeSelection();
 
   // ---------- new-item flow ----------
-  const { openNewItemWithIntent, createEndpoint } = useNewItemFlow(setEditing);
+  const { openNewItemWithIntent, createEndpoint } = useNewItemFlow();
 
   // 两个对话框的挂载按草稿类型加门，使每个 chunk 绑定到真正需要它的入口：从顶栏打开
   // *项目* 对话框不应顺带拉取模块对话框。
@@ -206,20 +204,16 @@ export function ProjectTree() {
     setMenu,
   });
 
-  // ---------- 编辑 / 右键菜单 / 删除 ----------
+  // ---------- 右键菜单 / 删除 ----------
   const {
     toDelete,
     cancelDelete,
-    startEdit,
-    cancelEdit,
-    saveEdit,
     openMenu,
     openEndpointMenu,
     handleDeleteConfirm,
     scriptCollection,
     closeCollectionScripts,
   } = useEditMenu({
-    setEditing,
     openNewItemWithIntent,
     createEndpointAt: createEndpoint,
     openEndpointTab,
@@ -426,12 +420,8 @@ export function ProjectTree() {
               <div key={modBranch.module.id} className="mb-0.5">
                 <ModuleRow
                   module={modBranch.module}
-                  isEditing={editing?.kind === 'module' && editing.id === modBranch.module.id}
                   onSelect={() => openModuleTab(modBranch.module.id)}
                   onToggle={() => toggleExpanded(modBranch.module.id)}
-                  onStartEdit={() => startEdit('module', modBranch.module.id)}
-                  onSaveEdit={(name) => saveEdit('module', modBranch.module.id, name)}
-                  onCancelEdit={cancelEdit}
                   onContextMenu={(e) => openMenu(e, 'module', modBranch.module.id)}
                   onPlusClick={openModulePlusMenu(modBranch.module.id)}
                   dragContext={dragContext}
@@ -442,40 +432,24 @@ export function ProjectTree() {
                     <EndpointList
                       endpoints={modBranch.endpoints}
                       details={modBranch.endpointDetails}
-                      editing={editing}
                       selectedEndpointIds={selectedEndpointIds}
                       activeEndpointId={activeEndpointId}
                       onEndpointClick={handleEndpointClick}
-                      onEndpointStartEdit={(id) => {
-                        setActiveEndpoint(id);
-                        startEdit('endpoint', id);
-                      }}
                       onEndpointContextMenu={openEndpointMenu}
-                      onEndpointSaveEdit={(id, name) => saveEdit('endpoint', id, name)}
-                      onCancelEdit={cancelEdit}
                       dragContext={dragContext}
                     />
                   )}
                   <CollectionBranch
                     branches={modBranch.collections}
                     depth={1}
-                    editing={editing}
                     onSelectCollection={openCollectionTab}
                     onToggleCollection={toggleExpanded}
-                    onStartEditCollection={(id) => startEdit('collection', id)}
-                    onSaveEditCollection={(id, name) => saveEdit('collection', id, name)}
-                    onCancelEdit={cancelEdit}
                     onContextMenu={openMenu}
                     onPlusClick={openCollectionPlusMenu}
                     selectedEndpointIds={selectedEndpointIds}
                     activeEndpointId={activeEndpointId}
                     onEndpointClick={handleEndpointClick}
-                    onEndpointStartEdit={(id) => {
-                      setActiveEndpoint(id);
-                      startEdit('endpoint', id);
-                    }}
                     onEndpointContextMenu={openEndpointMenu}
-                    onEndpointSaveEdit={(id, name) => saveEdit('endpoint', id, name)}
                     dragContext={dragContext}
                   />
                 </TreeChildren>

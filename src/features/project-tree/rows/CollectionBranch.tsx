@@ -11,21 +11,15 @@ import { TreeChildren } from './TreeChildren';
 export interface CollectionBranchProps {
   branches: CollectionBranchNode[];
   depth: number;
-  editing: { kind: TargetKind; id: string } | null;
   onSelectCollection: (id: string) => void;
-  /** 点展开箭头时调用 —— 只切展开状态，不打开工作区。 */
+  /** 点展开箭头、或双击行时调用 —— 只切展开状态，不打开工作区。 */
   onToggleCollection: (id: string) => void;
-  onStartEditCollection: (id: string) => void;
-  onSaveEditCollection: (id: string, name: string) => void;
-  onCancelEdit: () => void;
   onContextMenu: (e: ReactMouseEvent, kind: TargetKind, id: string) => void;
   onPlusClick: (collectionId: string) => (e: ReactMouseEvent) => void;
   selectedEndpointIds: Set<string>;
   activeEndpointId: string | null;
   onEndpointClick: (id: string, e: ReactMouseEvent) => void;
-  onEndpointStartEdit: (id: string) => void;
   onEndpointContextMenu: (e: ReactMouseEvent, id: string) => void;
-  onEndpointSaveEdit: (id: string, name: string) => void;
   dragContext: DragContextValue;
 }
 
@@ -37,20 +31,14 @@ export function CollectionBranch(props: CollectionBranchProps) {
   const {
     branches,
     depth,
-    editing,
     onSelectCollection,
     onToggleCollection,
-    onStartEditCollection,
-    onSaveEditCollection,
-    onCancelEdit,
     onContextMenu,
     onPlusClick,
     selectedEndpointIds,
     activeEndpointId,
     onEndpointClick,
-    onEndpointStartEdit,
     onEndpointContextMenu,
-    onEndpointSaveEdit,
     dragContext,
   } = props;
   return (
@@ -65,12 +53,8 @@ export function CollectionBranch(props: CollectionBranchProps) {
           <div key={collection.id} className="mb-0.5">
             <CollectionRow
               collection={collection}
-              isEditing={editing?.kind === 'collection' && editing.id === collection.id}
               onSelect={() => onSelectCollection(collection.id)}
               onToggle={() => onToggleCollection(collection.id)}
-              onStartEdit={() => onStartEditCollection(collection.id)}
-              onSaveEdit={(name) => onSaveEditCollection(collection.id, name)}
-              onCancelEdit={onCancelEdit}
               onContextMenu={(e) => onContextMenu(e, 'collection', collection.id)}
               onPlusClick={onPlusClick(collection.id)}
               dragContext={dragContext}
@@ -82,14 +66,10 @@ export function CollectionBranch(props: CollectionBranchProps) {
                   <EndpointList
                     endpoints={colEndpoints}
                     details={endpointDetails}
-                    editing={editing}
                     selectedEndpointIds={selectedEndpointIds}
                     activeEndpointId={activeEndpointId}
                     onEndpointClick={onEndpointClick}
-                    onEndpointStartEdit={onEndpointStartEdit}
                     onEndpointContextMenu={onEndpointContextMenu}
-                    onEndpointSaveEdit={onEndpointSaveEdit}
-                    onCancelEdit={onCancelEdit}
                     dragContext={dragContext}
                   />
                 )}

@@ -1,25 +1,21 @@
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import type { EndpointDetail, ResourceNode } from '@/types/domain';
-import type { DragContextValue, TargetKind } from '../tree-types';
+import type { DragContextValue } from '../tree-types';
 import { EndpointRow } from './EndpointRow';
 
 export interface EndpointListProps {
   endpoints: ResourceNode[];
   /** `endpoints` 对应的详情行，已收窄到同一集合。 */
   details: Record<string, EndpointDetail>;
-  editing: { kind: TargetKind; id: string } | null;
   selectedEndpointIds: Set<string>;
   activeEndpointId: string | null;
   onEndpointClick: (id: string, e: ReactMouseEvent) => void;
-  onEndpointStartEdit: (id: string) => void;
   onEndpointContextMenu: (e: ReactMouseEvent, id: string) => void;
-  onEndpointSaveEdit: (id: string, name: string) => void;
-  onCancelEdit: () => void;
   dragContext: DragContextValue;
 }
 
 /**
- * 单个容器自己的接口行，接好选中、重命名、右键菜单与拖放。
+ * 单个容器自己的接口行，接好选中、右键菜单与拖放。
  *
  * 集合与模块均需挂载接口行。将绑定逻辑收拢于此，确保多选拖拽手势与详情缺失守卫
  * 在层级间保持一致。
@@ -27,14 +23,10 @@ export interface EndpointListProps {
 export function EndpointList({
   endpoints,
   details,
-  editing,
   selectedEndpointIds,
   activeEndpointId,
   onEndpointClick,
-  onEndpointStartEdit,
   onEndpointContextMenu,
-  onEndpointSaveEdit,
-  onCancelEdit,
   dragContext,
 }: EndpointListProps) {
   return (
@@ -55,11 +47,7 @@ export function EndpointList({
             active={ep.id === activeEndpointId}
             selected={selectedEndpointIds.has(ep.id)}
             multiSelect={selectedEndpointIds.size > 1}
-            isEditing={editing?.kind === 'endpoint' && editing.id === ep.id}
             onClick={(e) => onEndpointClick(ep.id, e)}
-            onStartEdit={() => onEndpointStartEdit(ep.id)}
-            onSaveEdit={(name) => onEndpointSaveEdit(ep.id, name)}
-            onCancelEdit={onCancelEdit}
             onContextMenu={(e) => onEndpointContextMenu(e, ep.id)}
             dragContext={dragContext}
             // 拖拽一个属于多选集合的接口时，拖的是整个选区；否则只拖这一行。

@@ -11,9 +11,6 @@
  * 从不读草稿，而且什么都不写：它代表的那一行是由 `slices/ui-draft-endpoints.ts` 拥有的前端草稿，
  * 只有用户按 Save 才触及 SQLite。两条路径仍共享同一条首要不变量——展开所有祖先，让新行在它被
  * 创建的那个位置可见——但只有对话框路径还以 `setActiveEndpoint` 收尾，因为只有它有已落盘的行可激活。
- *
- * 三种对话框种类共用一个 `submitNewItem` 而不是三个独立动作：`lastCreatedId` 必须在创建 resolve
- * **之后**才能写入，因为树盯着这个 id 进入重命名。
  */
 
 import type { StateCreator } from 'zustand';
@@ -40,11 +37,6 @@ const emptyDraft = (): NewItemDraft => ({
 
 export interface UiNewItemState {
   newItem: NewItemDraft;
-  /**
-   * `submitNewItem` 在成功创建后写入。消费方（如 ProjectTree）通过 useEffect 盯着它驱动自己的
-   * 副作用（例如对刚建好的行进入行内重命名模式），然后调 `clearLastCreated()` 确认收到。
-   */
-  lastCreatedId: string | null;
 }
 
 export interface UiNewItemActions {
@@ -80,18 +72,13 @@ export interface UiNewItemActions {
    *
    * **契约：草稿不在 `nodes` 里。** 它构建一个前端草稿（`createEndpointDraft` →
    * `slices/ui-draft-endpoints.ts`）并返回带 `draft:` 前缀的 id；在 `saveDraftEndpoint` 之前
-   * 什么都不会触及 SQLite。树侧必须承担的后果：
-   *   - 返回的 id **不是** `nodes` 行，所以没有行可进入行内重命名、也没有可选中项。重命名
-   *     发生在草稿上（`updateDraftEndpoint`）或标签标题里。
-   *   - `lastCreatedId` 写的是草稿 id，故树的 `useNewItemFlow` 监听器必须认得 `draft:` id，
-   *     而不是去找一行。
-   *   - 草稿在 Save 之前根本不出现在树里。
+   * 什么都不会触及 SQLite。树侧必须承担的后果：返回的 id **不是** `nodes` 行，草稿在 Save 之前
+   * 根本不出现在树里，改名发生在草稿上（`updateDraftEndpoint`）或标签标题里。
    *
    * 父节点的存在性仍在这里校验——来自删除之前所建菜单的陈旧 id 应该解析成「什么都没发生」，
    * 而不是一个永远存不下去的草稿。
    */
   createEndpointAt: (parentId: string) => Promise<string | null>;
-  clearLastCreated: () => void;
 }
 
 export type UiNewItem = UiNewItemState & UiNewItemActions;
@@ -105,7 +92,6 @@ const DEFAULT_NAME: Record<NewDraftKind, string> = {
 
 export const createUiNewItem: StateCreator<AppState, [], [], UiNewItem> = (set, get) => ({
   newItem: emptyDraft(),
-  lastCreatedId: null,
 
   openNewItem: (opts) => {
     set({
@@ -151,7 +137,6 @@ export const createUiNewItem: StateCreator<AppState, [], [], UiNewItem> = (set, 
       // 生效了的动作。
       if (id) state.openProject(id);
       state.setActiveEndpoint(null);
-      set({ lastCreatedId: id });
       return id;
     }
 
@@ -163,7 +148,6 @@ export const createUiNewItem: StateCreator<AppState, [], [], UiNewItem> = (set, 
         name,
         description: draft.description,
       });
-      set({ lastCreatedId: id });
       return id;
     }
 
@@ -182,7 +166,6 @@ export const createUiNewItem: StateCreator<AppState, [], [], UiNewItem> = (set, 
       name,
       description: draft.description,
     });
-    set({ lastCreatedId: id });
     return id;
   },
 
@@ -208,13 +191,8 @@ export const createUiNewItem: StateCreator<AppState, [], [], UiNewItem> = (set, 
     // `createEndpointDraft` 也会打开并激活草稿的标签，故这里不再有 `setActiveEndpoint`：该动作
     // 走的是 `openTab('endpoint', id)`，那会递给工作区一个并不存在的行的标签。
     const draftId = state.createEndpointDraft(parentId);
-    // 与各对话框种类的行一样发布给树。见上面的契约说明：消费方必须把 `draft:` id 当作「出现了
-    // 一个草稿」，而不是「找到这一行并重命名它」。
-    set({ lastCreatedId: draftId });
     return draftId;
   },
-
-  clearLastCreated: () => set({ lastCreatedId: null }),
 });
 
 /**

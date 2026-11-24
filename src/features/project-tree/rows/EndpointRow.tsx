@@ -12,11 +12,7 @@ export interface EndpointRowProps {
   active: boolean;
   selected: boolean;
   multiSelect: boolean;
-  isEditing: boolean;
   onClick: (e: ReactMouseEvent) => void;
-  onStartEdit: () => void;
-  onSaveEdit: (name: string) => void;
-  onCancelEdit: () => void;
   onContextMenu: (e: ReactMouseEvent) => void;
   dragContext: DragContextValue;
   /**
@@ -26,8 +22,10 @@ export interface EndpointRowProps {
 }
 
 /**
- * 接口行。行容器、按钮、拖放回调与行内改名都在 `TreeRow` 里；这一层只留下接口特有的
+ * 接口行。行容器、按钮、拖放回调都在 `TreeRow` 里；这一层只留下接口特有的
  * 那几样东西：method 药丸、「已选」徽标，以及「打开着的那个请求」的强调样式。
+ *
+ * 接口是叶子，没有 `toggle`，故双击这一行不做任何事。
  */
 export function EndpointRow({
   endpoint,
@@ -35,11 +33,7 @@ export function EndpointRow({
   active,
   selected,
   multiSelect,
-  isEditing,
   onClick,
-  onStartEdit,
-  onSaveEdit,
-  onCancelEdit,
   onContextMenu,
   dragContext,
   dragIds,
@@ -49,7 +43,6 @@ export function EndpointRow({
       kind="endpoint"
       id={endpoint.id}
       name={endpoint.name}
-      isEditing={isEditing}
       leading={
         // HTTP method 是这棵树保留的唯一图标：它是此处唯一携带该行尚未展示之数据的标记。
         // 原本在它前面的通用接口图标块重复了行类型本身，还把真正用来扫视的 method 又往右
@@ -70,9 +63,6 @@ export function EndpointRow({
         )
       }
       onSelect={onClick}
-      onStartEdit={onStartEdit}
-      onSaveEdit={onSaveEdit}
-      onCancelEdit={onCancelEdit}
       onContextMenu={onContextMenu}
       dragContext={dragContext}
       dragIds={dragIds}

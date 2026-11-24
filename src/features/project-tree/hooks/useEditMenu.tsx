@@ -1,27 +1,12 @@
-import {
-  useState,
-  type Dispatch,
-  type MouseEvent as ReactMouseEvent,
-  type SetStateAction,
-} from 'react';
-import {
-  Copy,
-  CornerDownRight,
-  FilePlus,
-  FolderPlus,
-  Pencil,
-  Terminal,
-  Trash2,
-  Zap,
-} from 'lucide-react';
+import { useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { Copy, CornerDownRight, FilePlus, FolderPlus, Terminal, Trash2, Zap } from 'lucide-react';
 import { useAppStore } from '@/stores/app-store';
 import type { NewDraftKind } from '@/stores/store-types';
 import type { ResourceNode } from '@/types/domain';
-import type { DeleteTarget, EditTarget, TargetKind } from '../tree-types';
+import type { DeleteTarget, TargetKind } from '../tree-types';
 import type { ContextMenuItem } from '../TreeContextMenu';
 
 export interface EditMenuBindings {
-  setEditing: Dispatch<SetStateAction<EditTarget | null>>;
   /**
    * 为仍有对话框的各类打开创建*对话框*。接口刻意缺席 —— 它由 `createEndpointAt`
    * 直接写入，故右键菜单既不需要对话框也不需要草稿。
@@ -31,7 +16,7 @@ export interface EditMenuBindings {
     parentModuleId?: string;
     parentCollectionId?: string;
   }) => void;
-  /** 在 `parentId` 下创建接口并就地重命名。 */
+  /** 在 `parentId` 下创建接口草稿并在工作区打开它。 */
   createEndpointAt: (parentId: string) => Promise<void>;
   openEndpointTab: (id: string) => void;
   /**
@@ -43,12 +28,9 @@ export interface EditMenuBindings {
 }
 
 /**
- * 就地重命名 + 右键菜单构造 + 删除确认流程。`editing` 值及其 setter 由 `ProjectTree`
- * 持有（与 `useNewItemFlow` 共用，后者需要该 setter 把新建的行直接丢进重命名）；下面读
- * 到的 store 值都是原始引用或 `.find()` 的结果。
+ * 右键菜单构造 + 删除确认流程。下面读到的 store 值都是原始引用或 `.find()` 的结果。
  */
 export function useEditMenu({
-  setEditing,
   openNewItemWithIntent,
   createEndpointAt,
   openEndpointTab,
@@ -57,8 +39,6 @@ export function useEditMenu({
 }: EditMenuBindings) {
   // ---------- store actions ----------
   const setActiveEndpoint = useAppStore((s) => s.setActiveEndpoint);
-  const updateProject = useAppStore((s) => s.updateProject);
-  const updateNode = useAppStore((s) => s.updateNode);
   const deleteProject = useAppStore((s) => s.deleteProject);
   const deleteNode = useAppStore((s) => s.deleteNode);
   const duplicateEndpoint = useAppStore((s) => s.duplicateEndpoint);
@@ -102,15 +82,7 @@ export function useEditMenu({
     return out;
   };
 
-  // ---------- 编辑 / 右键菜单 / 删除 ----------
-  const startEdit = (kind: TargetKind, id: string) => setEditing({ kind, id });
-  const cancelEdit = () => setEditing(null);
-  const saveEdit = (kind: TargetKind, id: string, next: string) => {
-    if (kind === 'project') updateProject(id, { name: next });
-    else updateNode(id, { name: next });
-    setEditing(null);
-  };
-
+  // ---------- 右键菜单 / 删除 ----------
   const openMenu = (e: ReactMouseEvent, kind: TargetKind, id: string) => {
     e.preventDefault();
     e.stopPropagation();
@@ -160,8 +132,8 @@ export function useEditMenu({
           icon: <FolderPlus className="h-3.5 w-3.5" />,
           onClick: () => openNewItemWithIntent({ type: 'collection', parentModuleId: id }),
         },
-        // 模块直接接受接口，故无需先存在某个集合，也无需对话框：行写入后直接进入
-        // 重命名。
+        // 模块直接接受接口，故无需先存在某个集合，也无需对话框：点击即建一个草稿接口，
+        // 它在工作区里打开。
         {
           kind: 'item',
           label: '新建接口',
@@ -178,12 +150,6 @@ export function useEditMenu({
           onClick: () => openBatchRun({ id, name: getName('module', id), kind: 'module' }),
         },
         { kind: 'divider' },
-        {
-          kind: 'item',
-          label: '重命名',
-          icon: <Pencil className="h-3.5 w-3.5" />,
-          onClick: () => startEdit('module', id),
-        },
         {
           kind: 'item',
           label: '删除',
@@ -242,12 +208,6 @@ export function useEditMenu({
         { kind: 'divider' },
         {
           kind: 'item',
-          label: '重命名',
-          icon: <Pencil className="h-3.5 w-3.5" />,
-          onClick: () => startEdit('collection', id),
-        },
-        {
-          kind: 'item',
           label: '脚本',
           icon: <Terminal className="h-3.5 w-3.5" />,
           onClick: () => setScriptCollection({ id, name: col.name }),
@@ -288,20 +248,11 @@ export function useEditMenu({
     return [
       {
         kind: 'item',
-        label: '重命名',
-        icon: <Pencil className="h-3.5 w-3.5" />,
-        onClick: () => startEdit('endpoint', id),
-      },
-      {
-        kind: 'item',
         label: '复制',
         icon: <Copy className="h-3.5 w-3.5" />,
         onClick: () => {
           const newId = duplicateEndpoint(id);
-          if (newId) {
-            setActiveEndpoint(newId);
-            setEditing({ kind: 'endpoint', id: newId });
-          }
+          if (newId) setActiveEndpoint(newId);
         },
       },
       {
@@ -345,9 +296,6 @@ export function useEditMenu({
   return {
     toDelete,
     cancelDelete: () => setToDelete(null),
-    startEdit,
-    cancelEdit,
-    saveEdit,
     openMenu,
     openEndpointMenu,
     handleDeleteConfirm,

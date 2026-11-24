@@ -98,7 +98,6 @@ beforeEach(() => {
     endpointDrafts: {},
     draftEndpoints: {},
     draftSaveError: null,
-    lastCreatedId: null,
     lastResponses: {},
   });
 });
@@ -153,9 +152,6 @@ describe('draft endpoints: creating one touches neither the database nor the tre
     const state = useAppStore.getState();
     assert.equal(state.nodes.length, 2, 'the tree is unchanged');
     assert.equal(ipcCalls.length, 0);
-    // 树盯着它以便对新一行做出反应；而草稿没有行，所以契约是
-    // "这个 id 之下出现了一个草稿"。
-    assert.equal(state.lastCreatedId, draftId);
     assert.equal(tabFor(draftId!)?.kind, 'endpoint-draft');
     // 不是激活 endpoint：`setActiveEndpoint` 会递给工作区一个并不存在的行的标签。
     assert.equal(state.activeEndpointId, null);

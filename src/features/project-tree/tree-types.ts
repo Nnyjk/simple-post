@@ -16,9 +16,6 @@ export interface DeleteTarget {
   cascade?: string;
 }
 
-/** 正在就地重命名的行，没有则为 undefined。 */
-export type EditTarget = { kind: TargetKind; id: string };
-
 export interface DragPayload {
   kind: TreeNodeKind;
   /** 被拖的全部 id（单选就是一个元素的数组）。 */

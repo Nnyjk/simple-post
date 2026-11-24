@@ -183,7 +183,7 @@ export function buildCommands(): Command[] {
       keywords: ['new', 'create', 'add', 'endpoint', '接口', 'request', '新建'],
       run: () => {
         if (!parent) return;
-        // 面板里没有树行，故无重命名目标；但接口标题在工作区可改，且会直接开好标签。
+        // 命令不负责命名：`createEndpointAt` 会打开草稿标签，名字在标题里改。
         void useAppStore.getState().createEndpointAt(parent.id);
       },
     });

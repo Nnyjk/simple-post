@@ -1,38 +1,28 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback } from 'react';
 import { useAppStore, type NewDraftKind } from '@/stores/app-store';
-import type { EditTarget } from '../tree-types';
 
 /**
- * 在创建对话框与树之间架桥：记下每次 `openNewItem()` 调用背后的意图，并在模态框报告新建行
- * 之后，把该行直接丢进就地重命名。
+ * 树的「新建」入口：把右键菜单 / 行尾「+」的意图交给创建对话框，以及那条完全不用
+ * 对话框的接口路径。
  *
- * 这里没有项目行可供落入，故新建的*项目*跳过重命名那一步。接口根本不走本 hook：
- * `createEndpointAt` 返回它刚创建的 id，调用方直接重命名那一行。
+ * 这里没有就地重命名要做 —— 名字属于打开着的工作区（接口标题与项目卡片各自可编辑），
+ * 树行只是一行只读的名字。
  */
-export function useNewItemFlow(setEditing: (t: EditTarget) => void) {
+export function useNewItemFlow() {
   const openNewItem = useAppStore((s) => s.openNewItem);
   const createEndpointAt = useAppStore((s) => s.createEndpointAt);
-  const lastCreatedId = useAppStore((s) => s.lastCreatedId);
-  const clearLastCreated = useAppStore((s) => s.clearLastCreated);
-
-  const [lastIntent, setLastIntent] = useState<NewDraftKind | null>(null);
 
   const openNewItemWithIntent = useCallback(
     (opts: { type: NewDraftKind; parentModuleId?: string; parentCollectionId?: string }) => {
-      setLastIntent(opts.type);
       openNewItem(opts);
     },
     [openNewItem],
   );
 
   /**
-   * 在 `parentId` 下创建接口并在工作区打开它。
+   * 在 `parentId` 下创建一个接口草稿并在工作区打开它。
    *
-   * 这里刻意不再有就地重命名：创建接口不写行，`createEndpointAt` 返回一个 `draft:` 前缀的
-   * id，该接口在 Save 之前只活在渲染层里。没有树行可供落入重命名，而 `setEditing({ kind:
-   * 'endpoint', id })` 会把编辑器指向一个没有行存在的 id。
-   *
-   * 命名这一步跟着行一起搬走了：未命名的草稿改为把工作区标题直接打开在编辑态。
+   * 草稿在 Save 之前只活在渲染层里，故没有树行可操作：命名跟着工作区标题走。
    */
   const createEndpoint = useCallback(
     async (parentId: string) => {
@@ -40,16 +30,6 @@ export function useNewItemFlow(setEditing: (t: EditTarget) => void) {
     },
     [createEndpointAt],
   );
-
-  useEffect(() => {
-    if (!lastCreatedId) return;
-    if (!lastIntent) return;
-    // 项目在这里没有行，故无可落入的就地重命名 —— 树只列模块 / 集合 / 接口，而
-    // `submitNewItem` 已经进入了新项目。进入重命名只会留下一个失效的 `editing` 目标。
-    if (lastIntent !== 'project') setEditing({ kind: lastIntent, id: lastCreatedId });
-    setLastIntent(null);
-    clearLastCreated();
-  }, [lastCreatedId, lastIntent, clearLastCreated, setEditing]);
 
   return { openNewItemWithIntent, createEndpoint };
 }

@@ -1,11 +1,11 @@
 /**
  * `duplicateEndpoint` —— 乐观复制的 id 必须就是持久化的 id。
  *
- * 契约：调用方在前端 `uid()` 生成 id 写进 store 并**同步**返回之后，就立刻用它
- * 开 tab、进入重命名；所以后端必须采纳这个 id。若后端自己再发一个，回调里把
- * 乐观行替换成后端那份，`openTabs` / `activeEndpointId` / `setEditing` 就全都
- * 指向了一个谁也不拥有的行，`useTabDescriptors` 查不到便走 `missingDescriptor`
- * ——树里多出一行正常副本，标签标题却是「（接口已删除）」。
+ * 契约：调用方在前端 `uid()` 生成 id 写进 store 并**同步**返回之后，就立刻用它开 tab、
+ * 设为当前接口；所以后端必须采纳这个 id。若后端自己再发一个，回调里把乐观行替换成
+ * 后端那份，`openTabs` / `activeEndpointId` 就全都指向了一个谁也不拥有的行，
+ * `useTabDescriptors` 查不到便走 `missingDescriptor` ——树里多出一行正常副本，标签标题
+ * 却是「（接口已删除）」。
  *
  * 这里跑的是**真实组合 store**（`useAppStore`）而不是手搓 harness：坏的
  * 恰恰是切片之间的协作（crud 写 id，ui-tabs 用它开 tab），单独测一个切片
@@ -150,7 +150,7 @@ describe('duplicateEndpoint：id 与 name 两端一致', () => {
     });
 
     const newId = useAppStore.getState().duplicateEndpoint('e1')!;
-    // 复制后立刻重命名 —— `useEditMenu` 打开的就是行内编辑框。
+    // 复制后用户改名 —— 乐观行必须接住这次改名，不能被成功回调覆盖。
     await useAppStore.getState().updateNode(newId, { name: 'Fetch one（改）' });
     await flush();
 
