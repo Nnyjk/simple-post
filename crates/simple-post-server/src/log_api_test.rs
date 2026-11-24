@@ -242,3 +242,34 @@ fn log_dir_nests_under_the_app_segment() {
         Path::new("base").join("simple-post").join("logs")
     );
 }
+
+/// 同一秒里导出两次不能互相覆盖：建议文件名只精确到秒，第二次落成 `…-2.txt`。
+#[test]
+fn a_second_export_in_the_same_second_lands_beside_the_first() {
+    let dir = std::env::temp_dir().join(format!(
+        "simple-post-log-disk-dup-{}-{}",
+        std::process::id(),
+        simple_post_core::domain::uid()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    logbuf::record(LogLevel::Error, "test::disk-dup", "dup-marker");
+    let first = export_to_disk_in(&dir, "errors")
+        .expect("写盘不该失败")
+        .expect("刚写入一条 Error，导出不空");
+    let second = export_to_disk_in(&dir, "errors")
+        .expect("写盘不该失败")
+        .expect("刚写入一条 Error，导出不空");
+
+    assert_ne!(first.file_name, second.file_name, "第二次导出盖掉了第一份");
+    assert_eq!(
+        second.file_name,
+        format!("{}-2.txt", first.file_name.trim_end_matches(".txt"))
+    );
+    for file in [&first, &second] {
+        let written = std::fs::read_to_string(&file.path).expect("文件已落盘");
+        assert!(written.contains("dup-marker"), "{}", file.path);
+    }
+
+    std::fs::remove_dir_all(&dir).ok();
+}

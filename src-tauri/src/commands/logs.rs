@@ -16,8 +16,8 @@ use crate::log_api::{LogExport, LogExportFile};
 /// 导出本次运行期间的日志。
 ///
 /// `scope` 只接受 `"all"` / `"errors"`，缺省按 `"all"`。返回的是**内容**而不是路径：
-/// 桌面侧由前端弹保存对话框（`saveGeneratedDocument`），浏览器侧同理——写盘位置由用户
-/// 定，进程不去猜。
+/// 浏览器形态与 REST 调用方自己决定往哪落，进程不去猜。桌面端的导出走
+/// [`log_export_file`]，那条会把文本写进本机日志目录。
 #[tauri::command]
 pub fn log_export(scope: Option<String>) -> Result<LogExport, AppError> {
     crate::log_api::export(scope.as_deref().unwrap_or("all"))
@@ -26,7 +26,8 @@ pub fn log_export(scope: Option<String>) -> Result<LogExport, AppError> {
 /// 导出到本机日志目录，并在文件管理器里选中那个文件。
 ///
 /// 返回 `None` 表示没有可导出的日志，此时不创建文件、也不打开文件管理器。定位失败
-/// 不算导出失败：文件已经写好了，打开文件夹只省用户一次手点。
+/// 不算导出失败：文件已经写好了，打开文件夹只省用户一次手点 —— 故返回值里没有「有没有
+/// 打开成功」，前端因此只回显路径，不说那句已经发生了。
 #[tauri::command]
 pub fn log_export_file(scope: Option<String>) -> Result<Option<LogExportFile>, AppError> {
     let file = crate::log_api::export_to_disk(scope.as_deref().unwrap_or("all"))?;
@@ -40,35 +41,43 @@ pub fn log_export_file(scope: Option<String>) -> Result<Option<LogExportFile>, A
     Ok(file)
 }
 
+/// 启动文件管理器，并在后台线程里 `wait()` 回收它。
+///
+/// 不回收会在 unix 上留僵尸进程；等待放在独立线程里，文件管理器的生命周期不该拖住
+/// 这条命令（`explorer /select` 会一直挂到那个窗口关掉）。
+fn spawn_and_reap(mut command: std::process::Command) -> std::io::Result<()> {
+    let mut child = command.spawn()?;
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
+}
+
 /// Windows：`explorer /select,"<path>"`。`raw_arg` 原样传参，路径含空格也认；
 /// `explorer` 即便成功也常返回非零退出码，故只看能否启动。
 #[cfg(target_os = "windows")]
 fn reveal(path: &Path) -> std::io::Result<()> {
     use std::os::windows::process::CommandExt;
 
-    std::process::Command::new("explorer")
-        .raw_arg(format!("/select,\"{}\"", path.display()))
-        .spawn()
-        .map(|_| ())
+    let mut command = std::process::Command::new("explorer");
+    command.raw_arg(format!("/select,\"{}\"", path.display()));
+    spawn_and_reap(command)
 }
 
 /// macOS：`open -R <path>` 就是在访达里选中该文件。
 #[cfg(target_os = "macos")]
 fn reveal(path: &Path) -> std::io::Result<()> {
-    std::process::Command::new("open")
-        .arg("-R")
-        .arg(path)
-        .spawn()
-        .map(|_| ())
+    let mut command = std::process::Command::new("open");
+    command.arg("-R").arg(path);
+    spawn_and_reap(command)
 }
 
 /// 其余 unix：`xdg-open` 没有「选中文件」的通用做法，打开所在目录即可。
 #[cfg(all(unix, not(target_os = "macos")))]
 fn reveal(path: &Path) -> std::io::Result<()> {
-    std::process::Command::new("xdg-open")
-        .arg(path.parent().unwrap_or(path))
-        .spawn()
-        .map(|_| ())
+    let mut command = std::process::Command::new("xdg-open");
+    command.arg(path.parent().unwrap_or(path));
+    spawn_and_reap(command)
 }
 
 /// 渲染进程上报一条事件（`console.error` / 未捕获异常 / 未处理的 reject）。

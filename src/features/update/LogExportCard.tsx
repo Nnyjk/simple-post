@@ -36,7 +36,8 @@ export function LogExportCard() {
           );
           return;
         }
-        setResult(`已导出到 ${file.path}，并打开了所在文件夹`);
+        // 只回显路径：`reveal` 失败时命令照常成功，说「已打开文件夹」就成了没发生过的事。
+        setResult(`已导出到 ${file.path}`);
         return;
       }
       const doc = await invokeCmd<LogExport>(COMMANDS.logExport, { scope });
