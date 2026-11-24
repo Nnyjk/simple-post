@@ -10,7 +10,6 @@ import { ChevronRight, Plus } from 'lucide-react';
 import { cn, focusRing } from '@/lib/utils';
 import { gsap, motionSafe, useGSAP } from '@/lib/gsap';
 import { Tooltip } from '@/components/ui/tooltip';
-import { InlineEdit } from '@/components/ui/InlineEdit';
 import type { DragContextValue, TreeNodeKind } from '../tree-types';
 import { DropHintOverlay } from './DropHintOverlay';
 
@@ -111,12 +110,11 @@ export interface TreeRowProps {
   id: string;
   /** 行上显示的名字。 */
   name: string;
-  /** 这一行是否正在被重命名。 */
-  isEditing: boolean;
   /**
    * 展开 / 收起的箭头。给了这一项，行左侧就多一个**独立的小按钮**。
    *
-   * 两件事刻意分开：行按钮只打开工作区，箭头只切换展开状态。
+   * 接口行没有箭头（它是叶子）；带箭头的模块与集合行，双击行本身也切换展开 ——
+   * 改名在打开的工作区里做，树里的双击只用来展开。
    */
   toggle?: {
     /** 这一行当前是否展开。 */
@@ -136,9 +134,6 @@ export interface TreeRowProps {
   /** 行尾的「新建」按钮组。模块与集合有，接口没有。 */
   onPlusClick?: (e: ReactMouseEvent) => void;
   onSelect: (e: ReactMouseEvent) => void;
-  onStartEdit: () => void;
-  onSaveEdit: (name: string) => void;
-  onCancelEdit: () => void;
   onContextMenu: (e: ReactMouseEvent) => void;
   /** 拖放上下文。行组件根据 `kind` 与 `id` 绑定回调，并读取放置落点提示。 */
   dragContext: DragContextValue;
@@ -153,10 +148,9 @@ export interface TreeRowProps {
 }
 
 /**
- * 树里三种行的共同外壳：行容器、行按钮、拖放回调、落点提示与行内改名。
+ * 树里三种行的共同外壳：行容器、行按钮、拖放回调与落点提示。
  *
- * 树组件三种行的公用外壳：行容器、行按钮、拖放回调、落点提示与行内重命名。
- * 抽离通用交互逻辑，避免模块/集合/接口三种行重复实现导致的逻辑漂移与漏改。
+ * 抽离通用交互逻辑，避免模块 / 集合 / 接口三种行重复实现导致的逻辑漂移与漏改。
  * 三种行仅保留差异部分：前置图标、尾部徽标、行尾新建按钮与样式类。
  *
  * 一行由三块组成：前导槽（箭头方块或 method 药丸）、名称方块、行尾的「新建」按钮。
@@ -166,15 +160,11 @@ export function TreeRow({
   kind,
   id,
   name,
-  isEditing,
   toggle,
   leading,
   badge,
   onPlusClick,
   onSelect,
-  onStartEdit,
-  onSaveEdit,
-  onCancelEdit,
   onContextMenu,
   dragContext,
   dragIds,
@@ -253,22 +243,18 @@ export function TreeRow({
         )}
         <button
           type="button"
-          // 正在改名的那一行不参与拖拽。理由见 `EndpointRow.tsx` 的同一处：重命名输入框就在
-          // 这个 button 里面，而 `draggable` 的祖先会把「在输入框里框选文字」的手势读成
-          // 「拖这一行」。
-          draggable={!isEditing}
+          // 行按钮是这一行的拖拽起点。里面装的是名字，框选不了文字，故不需要为输入框让路。
+          draggable
           onDragStart={startDrag}
           onDragEnd={dragContext.handleDragEnd}
           onDragOver={dragContext.makeDragOverHandler({ kind, id })}
           onDragLeave={dragContext.makeDragLeaveHandler({ kind, id })}
           onDrop={dragContext.makeDropHandler({ kind, id })}
           onClick={onSelect}
+          // 双击只展开：接口行没有 `toggle`，双击在它身上什么都不做。
           onDoubleClick={(e) => {
-            if (!isEditing) {
-              e.preventDefault();
-              e.stopPropagation();
-              onStartEdit();
-            }
+            e.preventDefault();
+            toggle?.onToggle();
           }}
           className={cn(
             'relative flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5',
@@ -285,19 +271,7 @@ export function TreeRow({
             className="pointer-events-none absolute inset-0 rounded-md border border-border shadow-sm opacity-0"
           />
           {leading}
-          <InlineEdit
-            value={name}
-            onSave={onSaveEdit}
-            // 由树的 `editing` 目标受控，而非本地的双击：从「+」菜单创建的行必须能把新行
-            // 直接丢进重命名，而那个信号是树状态传来的。本行只响应 `false`（用户完成或取消）
-            // 这一个跃迁 —— 打开是树的事，行自己的双击通过上面的 `onStartEdit` 抵达它。
-            editing={isEditing}
-            onEditingChange={(open) => {
-              if (!open) onCancelEdit();
-            }}
-            className="flex-1"
-            display={() => <span className="flex-1 truncate text-left">{name}</span>}
-          />
+          <span className="flex-1 truncate text-left">{name}</span>
           {badge}
         </button>
         {onPlusClick && (

@@ -3,11 +3,11 @@
  *
  * **为什么只能读源码。** 本 runner（`tsx --test` + `node:assert`）没有 DOM、没有
  * jsdom、没有 React 渲染器，故测不了真实的鼠标点击。读源码是钝办法，但这是本仓库对
- * 「功能测试看不见的那类缺陷」的既定取舍，见 `tree-rename-selection.test.ts` 的开头，
- * 理由相同。
+ * 「功能测试看不见的那类缺陷」的既定取舍。
  *
- * **它钉住的是什么。** 「打开工作区」与「展开 / 收起」必须各自独立：行按钮调
- * `openTab`，展开箭头调 `toggleNodeExpanded`，两个按钮是两个元素。
+ * **它钉住的是什么。** 单击与双击是两件事：单击行按钮打开工作区，双击行按钮（只有带
+ * `toggle` 的模块与集合行）切换展开，箭头按钮也只切换展开。三者各自独立，行按钮的
+ * 单击处理器里不得出现展开动作。
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -144,14 +144,29 @@ describe('展开箭头：它自己是另一个按钮', () => {
     );
   });
 
-  it('行按钮不碰展开状态', () => {
+  it('行按钮的单击只打开工作区，不碰展开状态', () => {
     const label = elementAround(code(readSource(SHELL)), 'onClick={onSelect}');
-    // 断言的是「没有调展开那一个动作」，故只查动作本身 —— 行按钮的 class 里出现
-    // `toggle` 这个词（`toggle ? … : …` 决定左边距）是另一回事。
+    // 双击允许调展开（见下一条），故这里只查单击：行按钮上唯一的 `onClick` 处理器
+    // 就是 `onSelect`。
+    const clickHandlers = label.match(/onClick=\{[^}]*\}/g) ?? [];
+    assert.deepEqual(
+      clickHandlers,
+      ['onClick={onSelect}'],
+      '行按钮的单击不只有打开工作区那一个动作 —— 点行名会顺手收起刚展开的分支',
+    );
+  });
+
+  it('双击只调展开，用可选链 —— 接口行没有 toggle，双击什么都不做', () => {
+    const label = elementAround(code(readSource(SHELL)), 'onClick={onSelect}');
+    assert.match(
+      label,
+      /onDoubleClick=\{\(e\) => \{\s*e\.preventDefault\(\);\s*toggle\?\.onToggle\(\);\s*\}\}/,
+      '行按钮的双击没有只调展开那一个动作',
+    );
     assert.doesNotMatch(
       label,
-      /onToggle|toggleNodeExpanded/,
-      '行按钮里出现了展开那一个动作 —— 点行名会顺手收起刚展开的分支',
+      /toggle\.onToggle\(\)/,
+      '双击直接调 toggle.onToggle() —— 接口行没有 toggle，双击会抛错而不是不做任何事',
     );
   });
 });

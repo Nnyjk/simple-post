@@ -2,8 +2,7 @@
  * ui-slice 的公开接口。实现按关注点拆到 `./slices/`，在这里组合，不在 `app-store.ts` 里
  * 注册为独立 slice。
  *
- * 多个 action 刻意在同一次 `set()` 里写别的 slice 的键——`submitNewItem` 写 `lastCreatedId`
- * 并调 `addProject` / `addNode` / `setActiveEndpoint`；`deleteNode` 一起剪掉 `responseHistory` /
+ * 多个 action 刻意在同一次 `set()` 里写别的 slice 的键——`deleteNode` 一起剪掉 `responseHistory` /
  * `responseExamples` / `openTabs` / `endpointDrafts`；`saveDraftEndpoint` 按顺序改 draft map、
  * endpoint-draft map 和两份标签列表。拆成多次 `get().closeTab()` 式的调用会把一次 `set()`
  * 变成多次，IPC 失败时能回滚的状态也就不一样了。

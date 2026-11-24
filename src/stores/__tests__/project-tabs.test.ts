@@ -68,7 +68,6 @@ beforeEach(() => {
     endpointDrafts: {},
     draftEndpoints: {},
     draftSaveError: null,
-    lastCreatedId: null,
     lastResponses: {},
   });
 });

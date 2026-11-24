@@ -25,16 +25,16 @@ export interface InlineEditProps {
   placeholder?: string;
   className?: string;
   /**
-   * 提交/取消前对草稿做 trim。默认 `true` 以对齐树行重命名的交互；
-   * 确实允许首尾空白的字段（少见）设为 `false`。
+   * 提交/取消前对草稿做 trim。默认 `true` 以对齐行内改名的交互（接口标题与描述、
+   * 环境变量名）；确实允许首尾空白的字段（少见）设为 `false`。
    */
   trim?: boolean;
   ariaLabel?: string;
   testId?: string;
   /**
-   * 受控的编辑状态。不传时编辑器自持状态——除树行外的所有调用方都是如此。树需要另一种
-   * 模式：它把「正在重命名的行」存为树状态，这样*新建*的行可以直接进入重命名而无需合成
-   * 一次双击。与 onEditingChange 配对，由它告知用户已结束。
+   * 受控的编辑状态。不传时编辑器自持状态——接口标题与描述都是如此。新建接口的草稿需要
+   * 另一种模式：草稿没有可双击的既有名字，故父组件（`EndpointHeader` 的 `namingDraft`）
+   * 直接把编辑器打开在编辑态。与 onEditingChange 配对，由它告知父组件已结束。
    */
   editing?: boolean;
   /**
@@ -92,7 +92,7 @@ export function InlineEdit({
     [editing, onEditingChange],
   );
 
-  // 底层 value 在一次编辑会话之外变化时（如树从另一个面板更新），重新同步本地草稿。
+  // 底层 value 在一次编辑会话之外变化时（如另一个面板改了同一个字段），重新同步本地草稿。
   useEffect(() => {
     if (!isEditing) setDraft(value);
   }, [value, isEditing]);

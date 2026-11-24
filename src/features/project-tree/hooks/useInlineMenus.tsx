@@ -23,10 +23,7 @@ export interface InlineMenuBindings {
     parentModuleId?: string;
     parentCollectionId?: string;
   }) => void;
-  /**
-   * 在 `parentId` 下创建接口并丢进就地重命名。行存在后 resolve；重命名目标归调用方所有，
-   * 故它可以是刚加的那一行树节点。
-   */
+  /** 在 `parentId` 下创建接口草稿并在工作区打开它；没有树行要改，命名在工作区标题里。 */
   createEndpointAt: (parentId: string) => Promise<void>;
   /**
    * 打开导入 / 导出弹窗，目标层级是 `module`。集合没有这个入口：外来文档的顶层分组一律建成

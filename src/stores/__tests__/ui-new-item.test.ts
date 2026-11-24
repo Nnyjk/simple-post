@@ -97,7 +97,6 @@ function makeHarness(nodeList: ResourceNode[]) {
     nodes: nodeList,
     newItem: draft(),
     activeProjectId: 'p1',
-    lastCreatedId: null as string | null,
     draftEndpoints: {} as Record<string, unknown>,
     endpointDrafts: {} as Record<string, unknown>,
     dirtyTabIds: new Set<string>(),
@@ -226,16 +225,6 @@ describe('ui-new-item: createEndpointAt takes the parent from its argument', () 
     assert.deepEqual(h.calls.activeEndpoint, [null]);
     assert.equal(h.bag.activeTabId, draftId);
   });
-
-  it('publishes the draft id for the tree to consume', async () => {
-    const h = makeHarness([makeNode('m1', null, 'module')]);
-
-    const draftId = await h.slice.createEndpointAt('m1');
-
-    // 与各对话框种类共享同一个信号。区别在于这个 id 解析成什么：`draft:` id 指的是
-    // 一个草稿，而不是一行待重命名的东西——所以树必须认得这个前缀，而不是去找节点。
-    assert.equal(h.bag.lastCreatedId, draftId);
-  });
 });
 
 describe('ui-new-item: a collection draft prefers its collection parent', () => {
@@ -273,7 +262,6 @@ describe('ui-new-item: a collection draft prefers its collection parent', () => 
 
     assert.equal(id, null, 'a node with no parent is not a tree');
     assert.equal(h.calls.addNode.length, 0, 'nothing may be written');
-    assert.equal(h.bag.lastCreatedId, null);
   });
 });
 
