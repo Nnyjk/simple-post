@@ -408,9 +408,15 @@
 
   /* Keyboard hint. Reads as a physical key: a filled well (`--muted`) with
      a hairline that is one step darker than the surface it sits on
-     (`--input`), rather than the old flat muted badge at 10px. */
+     (`--input`), rather than the old flat muted badge at 10px.
+     键帽里的字只有升部字形（`Ctrl`、`K`），没有降部，而字体盒按 ascent +
+     descent 居中 —— 那条用不上的降部空间把字顶得偏高，实测上留白 4.8px、
+     下留白 7.2px。`items-center` 居中内容盒，故上内边距让内容中心下移；实测
+     加上它之后是 6.4 / 5.6，字形按设备像素吸附，再加大内边距绘制不再变化。
+     `leading-none` 只是不让行盒额外加高，真正把字挪下来的是这条上内边距。 */
   .kbd {
-    @apply inline-flex items-center justify-center px-1.5 h-[22px] text-[11px] font-mono rounded border border-input bg-muted text-foreground;
+    @apply inline-flex items-center justify-center px-1.5 h-[22px] text-[11px] font-mono rounded border border-input bg-muted text-foreground leading-none;
+    padding-top: 2px;
   }
 
   /* Selection affordance for list rows: a filled surface plus a 3px accent

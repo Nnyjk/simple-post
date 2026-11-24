@@ -111,7 +111,7 @@ export function ModuleBaseUrlTable({
                     to: rewrite?.to ?? '',
                   })
                 }
-                placeholder="起点 /api/air"
+                placeholder="起点 /api/example"
                 aria-label={`${module.name} · 路径改写起点`}
                 className="h-8 font-mono text-xs"
                 spellCheck={false}
@@ -124,7 +124,7 @@ export function ModuleBaseUrlTable({
                     to: e.target.value,
                   })
                 }
-                placeholder="目标 /api/project-a/air"
+                placeholder="目标 /api/project-example-example"
                 aria-label={`${module.name} · 路径改写目标`}
                 className="h-8 font-mono text-xs"
                 spellCheck={false}
