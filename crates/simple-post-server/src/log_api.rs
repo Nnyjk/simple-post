@@ -86,13 +86,6 @@ pub fn log_dir_at(base: &Path) -> PathBuf {
     base.join("simple-post").join("logs")
 }
 
-/// 本机的日志目录，必要时创建。路径规则与 `mcp.port` 同源（`port_file::data_dir`）。
-pub fn log_dir() -> Result<PathBuf, AppError> {
-    let dir = log_dir_at(&port_file::data_dir()?);
-    std::fs::create_dir_all(&dir).map_err(AppError::Io)?;
-    Ok(dir)
-}
-
 /// 把一份导出写进 `dir`，返回落盘结果；没有可导出的内容时返回 `None`，此时**不创建**
 /// 目录也不写文件——落一个 0 字节的文件对反馈问题毫无用处。
 pub fn export_to_disk_in(dir: &Path, scope: &str) -> Result<Option<LogExportFile>, AppError> {
@@ -101,17 +94,54 @@ pub fn export_to_disk_in(dir: &Path, scope: &str) -> Result<Option<LogExportFile
         return Ok(None);
     }
     std::fs::create_dir_all(dir).map_err(AppError::Io)?;
-    let path = dir.join(&doc.file_name);
-    std::fs::write(&path, &doc.content).map_err(AppError::Io)?;
+    let (file_name, path) = write_unique(dir, &doc.file_name, &doc.content)?;
     Ok(Some(LogExportFile {
-        file_name: doc.file_name,
+        file_name,
         path: path.to_string_lossy().into_owned(),
     }))
 }
 
-/// 把一份导出写进 [`log_dir`]。
+/// 独占创建一个文件再把内容写进去，返回真正落地的文件名与路径。
+///
+/// 建议文件名只精确到秒（`logbuf::now_stamp`），同一秒里导出两次会撞名；`create_new`
+/// 让第二次不会把第一次那份盖掉，撞名时在扩展名前追加 `-2`、`-3`。
+fn write_unique(dir: &Path, file_name: &str, content: &str) -> Result<(String, PathBuf), AppError> {
+    let stem = file_name.strip_suffix(".txt").unwrap_or(file_name);
+    for n in 1..=100 {
+        let name = if n == 1 {
+            file_name.to_string()
+        } else {
+            format!("{stem}-{n}.txt")
+        };
+        let path = dir.join(&name);
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(mut file) => {
+                use std::io::Write;
+                if let Err(e) = file.write_all(content.as_bytes()) {
+                    let _ = std::fs::remove_file(&path);
+                    return Err(AppError::Io(e));
+                }
+                return Ok((name, path));
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(AppError::Io(e)),
+        }
+    }
+    Err(AppError::Io(std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        format!("{file_name} 及其 -2..-100 变体都已被占用"),
+    )))
+}
+
+/// 把一份导出写进数据目录下的 `simple-post/logs/`；目录本身不在这里创建 —— 没有可导出
+/// 的内容时连目录都不该出现（见 [`export_to_disk_in`]）。
 pub fn export_to_disk(scope: &str) -> Result<Option<LogExportFile>, AppError> {
-    export_to_disk_in(&log_dir()?, scope)
+    let dir = log_dir_at(&port_file::data_dir()?);
+    export_to_disk_in(&dir, scope)
 }
 
 /// 记一条渲染进程上报的事件。
