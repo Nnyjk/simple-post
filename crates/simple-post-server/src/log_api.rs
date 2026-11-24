@@ -5,11 +5,18 @@
 //!
 //! 日志可能含凭据与内部地址，故两条路由都**不在** `auth::is_public_path` 名单里：口令
 //! 模式下导出必须带 bearer。
+//!
+//! 桌面端还有一条 [`export_to_disk`]：日志直接落在 `<data_dir>/simple-post/logs/`，
+//! 由桌面壳打开所在文件夹。它写的是同一份文本，故同一条鉴权纪律——内容可能含凭据，
+//! 这个入口只给本机 IPC 用，不挂到 REST 上。
+
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
 use simple_post_core::error::AppError;
 use simple_post_core::logbuf::{self, LogLevel};
+use simple_post_core::port_file;
 
 /// 单条前端消息（正文与 detail 各自）的字符上限。渲染进程的报告走同一条 IPC，不设上限
 /// 时一次 `JSON.stringify` 的整份状态能把缓冲区挤掉。
@@ -64,6 +71,47 @@ pub fn export(scope: &str) -> Result<LogExport, AppError> {
         file_name: format!("{}-{}.txt", scope.file_prefix(), logbuf::now_stamp()),
         content: logbuf::render(scope.errors_only()),
     })
+}
+
+/// 桌面端落盘的结果：文件名与完整路径。字段名与前端 `LogExportFile` 逐字一致。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogExportFile {
+    pub file_name: String,
+    pub path: String,
+}
+
+/// 日志目录在任意基准目录下的位置。`base` 是平台数据目录，不带应用段。
+pub fn log_dir_at(base: &Path) -> PathBuf {
+    base.join("simple-post").join("logs")
+}
+
+/// 本机的日志目录，必要时创建。路径规则与 `mcp.port` 同源（`port_file::data_dir`）。
+pub fn log_dir() -> Result<PathBuf, AppError> {
+    let dir = log_dir_at(&port_file::data_dir()?);
+    std::fs::create_dir_all(&dir).map_err(AppError::Io)?;
+    Ok(dir)
+}
+
+/// 把一份导出写进 `dir`，返回落盘结果；没有可导出的内容时返回 `None`，此时**不创建**
+/// 目录也不写文件——落一个 0 字节的文件对反馈问题毫无用处。
+pub fn export_to_disk_in(dir: &Path, scope: &str) -> Result<Option<LogExportFile>, AppError> {
+    let doc = export(scope)?;
+    if doc.content.trim().is_empty() {
+        return Ok(None);
+    }
+    std::fs::create_dir_all(dir).map_err(AppError::Io)?;
+    let path = dir.join(&doc.file_name);
+    std::fs::write(&path, &doc.content).map_err(AppError::Io)?;
+    Ok(Some(LogExportFile {
+        file_name: doc.file_name,
+        path: path.to_string_lossy().into_owned(),
+    }))
+}
+
+/// 把一份导出写进 [`log_dir`]。
+pub fn export_to_disk(scope: &str) -> Result<Option<LogExportFile>, AppError> {
+    export_to_disk_in(&log_dir()?, scope)
 }
 
 /// 记一条渲染进程上报的事件。

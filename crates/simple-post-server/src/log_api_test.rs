@@ -3,9 +3,15 @@
 //! 缓冲区是进程级全局状态，故每条用例都用自己独有的 `target` 认自己的记录，不断言整份
 //! 文本的总长度。
 
+use std::path::Path;
+use std::sync::atomic::{AtomicU32, Ordering};
+
 use simple_post_core::logbuf::{self, LogLevel};
 
-use crate::log_api::{append_client_event, export, redact_credentials, CLIENT_FIELD_LIMIT_CHARS};
+use crate::log_api::{
+    append_client_event, export, export_to_disk_in, log_dir_at, redact_credentials,
+    CLIENT_FIELD_LIMIT_CHARS,
+};
 
 /// 文件名形如 `simple-post-logs-20261118-112909.txt`：前缀固定，中间 15 个字符的时间戳，
 /// 后缀 `.txt`。
@@ -201,4 +207,38 @@ fn a_client_event_redacts_message_and_detail() {
     assert!(!hit.message.contains("also-secret"), "{}", hit.message);
     assert!(hit.message.contains("Authorization: Bearer [redacted]"));
     assert!(hit.message.contains(r#"{"authToken": "[redacted]"}"#));
+}
+
+/// 桌面端落盘：文件名与 `export` 同一条规则，内容就是那份文本。
+///
+/// 「没有日志时返回 `None`」不在这里断言：`logbuf` 是进程级全局缓冲，同进程的其它用例
+/// 会往里写 Error 级记录，没有可靠的清空手段，构造空态只能靠时序运气。
+#[test]
+fn export_to_disk_writes_the_text_under_the_given_dir() {
+    static COUNTER: AtomicU32 = AtomicU32::new(0);
+    let id = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let dir =
+        std::env::temp_dir().join(format!("simple-post-log-disk-{}-{id}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    logbuf::record(LogLevel::Error, "test::disk", "disk-export-marker");
+    let file = export_to_disk_in(&dir, "errors")
+        .expect("写盘不该失败")
+        .expect("刚写入一条 Error，导出不空");
+
+    assert_file_name(&file.file_name, "simple-post-errors");
+    assert_eq!(Path::new(&file.path), dir.join(&file.file_name));
+    let written = std::fs::read_to_string(&file.path).expect("文件已落盘");
+    assert!(written.contains("disk-export-marker"), "{written}");
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// 目录规则：基准目录下 `simple-post/logs`，与 `mcp.port` 同源。
+#[test]
+fn log_dir_nests_under_the_app_segment() {
+    assert_eq!(
+        log_dir_at(Path::new("base")),
+        Path::new("base").join("simple-post").join("logs")
+    );
 }

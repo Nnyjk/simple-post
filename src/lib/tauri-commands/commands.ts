@@ -143,8 +143,11 @@ export const COMMANDS = {
   // ----- logs -----
   // 导出本次运行期间的日志，以及渲染进程的上报口。逻辑在 server crate 的 `log_api`，
   // REST 侧同名路由调的是同一批函数。
+  // `logExportFile` 只落在桌面壳：日志写进本机日志目录并打开文件管理器。浏览器形态
+  // 没有对应路由（`WEB_ROUTES` 里刻意没有条目），它走 `logExport` + 浏览器下载。
   logClientEvent: 'log_client_event',
   logExport: 'log_export',
+  logExportFile: 'log_export_file',
 
   // ----- updates -----
   // `updateCheck` 两条传输都有：桌面的 `update_check` 命令调 server crate 的同一个函数，
