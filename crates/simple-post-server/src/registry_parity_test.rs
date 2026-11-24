@@ -361,6 +361,11 @@ fn assert_same_set<T: Ord + std::fmt::Debug>(
 /// 故 `generate_handler!` 里没有它们的处理函数是**对的**，不是漏注册。
 const WEB_ONLY_COMMANDS: &[&str] = &["update_deployment", "update_apply"];
 
+/// 文档化的桌面例外：这一条只有桌面壳有 —— 浏览器形态把日志交给浏览器下载，镜像里的数据
+/// 目录属于服务端，没有「写进本机日志目录再打开文件管理器」这件事。故 `WEB_ROUTES` 里没有
+/// 对应条目是**对的**，不是漏登记。
+const DESKTOP_ONLY_COMMANDS: &[&str] = &["log_export_file"];
+
 /// `http_request` 的 `#[tauri::command]` 定义住在 `src-tauri/src/lib.rs` 自己身上（不在
 /// `commands/` 目录里）。它的**命令名仍然在** `COMMANDS` 表（前端键 `httpRequest`），
 /// 所以它不影响任何差集 —— 这里钉的是「只有它一个住在 lib.rs」这件事。
@@ -389,8 +394,20 @@ fn rest_only() -> BTreeSet<Route> {
 #[test]
 fn every_command_has_a_web_route_and_no_route_lacks_a_command() {
     let commands = commands();
+    for name in DESKTOP_ONLY_COMMANDS {
+        assert!(
+            commands.contains(*name),
+            "`{name}` 列在 DESKTOP_ONLY_COMMANDS 里，却不在 COMMANDS 表里 —— 例外表已过期"
+        );
+    }
+
+    let desktop_only: BTreeSet<String> = DESKTOP_ONLY_COMMANDS
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let expected: BTreeSet<String> = commands.difference(&desktop_only).cloned().collect();
     let routes: BTreeSet<String> = web_routes().into_keys().collect();
-    assert_same_set(&routes, &commands, "WEB_ROUTES ↔ COMMANDS");
+    assert_same_set(&routes, &expected, "WEB_ROUTES ↔ COMMANDS − DESKTOP_ONLY");
 }
 
 #[test]
