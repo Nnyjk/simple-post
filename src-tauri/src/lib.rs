@@ -230,9 +230,10 @@ pub fn run() {
             // 线上发布说明。桌面壳只有这一条 update 命令：安装由 updater 插件负责，
             // `update_deployment` / `update_apply` 的语义（运维声明的本机更新命令）桌面没有。
             crate::commands::update_check,
-            // 日志导出与渲染进程上报。两条都只调 `crate::log_api`，REST 侧同名路由调的是
-            // 同一批函数。
+            // 日志导出与渲染进程上报。三条都只调 `crate::log_api`，REST 侧同名路由调的是
+            // 同一批函数；落盘那条只在桌面壳——浏览器形态走下载。
             crate::commands::log_export,
+            crate::commands::log_export_file,
             crate::commands::log_client_event,
             // 流式传输：SSE 的 start/cancel 与 WebSocket 的 open/send/close。
             crate::commands::stream_request,

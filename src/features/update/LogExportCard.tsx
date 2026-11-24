@@ -4,8 +4,8 @@
  * 只导出组件，挂载点由设置页决定：本卡片不读 store、不依赖相邻小节，单独放在任何
  * `SettingsCategory` 列表里都能工作。
  *
- * 导出的是**文本内容**而非路径：桌面形态经 `saveGeneratedDocument` 弹保存对话框，
- * 浏览器形态触发下载。缓冲区是进程级的，故「本次运行」= 这个进程启动至今。
+ * 导出按宿主分流：桌面形态写进本机日志目录并在文件管理器里选中那个文件，浏览器
+ * 形态触发下载。缓冲区是进程级的，故「本次运行」= 这个进程启动至今。
  */
 import { useState } from 'react';
 import { AlertTriangle, Download, Loader2 } from 'lucide-react';
@@ -13,9 +13,9 @@ import { AlertTriangle, Download, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { SettingsCategory, SettingRow } from '@/features/settings/SettingsCategory';
 import { errorText } from '@/lib/error-text';
-import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
+import { COMMANDS, IS_TAURI_SHELL, invokeCmd } from '@/lib/tauri-commands';
 import { saveGeneratedDocument } from '@/lib/transfer-file-save';
-import type { LogExport } from '@/types/logs';
+import type { LogExport, LogExportFile } from '@/types/logs';
 
 type Scope = 'all' | 'errors';
 
@@ -27,6 +27,18 @@ export function LogExportCard() {
     setBusy(scope);
     setResult(null);
     try {
+      if (IS_TAURI_SHELL) {
+        // `null` = 没有可导出的内容，且进程没有创建文件（落 0 字节的文件没有意义）。
+        const file = await invokeCmd<LogExportFile | null>(COMMANDS.logExportFile, { scope });
+        if (file === null) {
+          setResult(
+            scope === 'errors' ? '本次运行没有错误级日志' : '暂无日志，先复现一次问题再导出',
+          );
+          return;
+        }
+        setResult(`已导出到 ${file.path}，并打开了所在文件夹`);
+        return;
+      }
       const doc = await invokeCmd<LogExport>(COMMANDS.logExport, { scope });
       // 空内容不弹保存框：落一个 0 字节的文件对反馈问题毫无用处，用户还会以为导出坏了。
       if (doc.content.trim() === '') {
@@ -59,7 +71,7 @@ export function LogExportCard() {
         icon={<Download className="h-3.5 w-3.5" />}
         label="导出日志"
         description="含全部级别的后端事件与前端错误，一次一条记录"
-        hint={result ?? '错误日志只保留 Warn 及以上级别'}
+        hint={result ?? (IS_TAURI_SHELL ? '导出到日志目录并打开所在文件夹' : '下载到本机')}
         flush
         control={
           <div className="flex items-center gap-2">
