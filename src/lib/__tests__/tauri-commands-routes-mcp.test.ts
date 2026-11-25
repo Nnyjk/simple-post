@@ -94,7 +94,7 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
       envId: 'env1',
       moduleId: 'mod1',
       url: 'https://api.example.com',
-      rewrite: null,
+      rewrites: null,
     });
     const c = last();
     assert.equal(c.contentType, 'application/json');

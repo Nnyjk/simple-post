@@ -6,13 +6,13 @@ import type { EffectiveRequest } from './effectiveRequest';
 /**
  * 组装这一次要发出的请求。发送前若动态变量解析出了新的值，调用方用新值再组装一次。
  *
- * `rewrite` 是环境里本模块那一格的路径前缀改写规则；它只改写端点自己的 URL 路径。
+ * `rewrites` 是环境里本模块那一格的有序路径前缀改写规则；它们只改写端点自己的 URL 路径。
  */
 export function buildRequestInput(
   method: HttpMethod,
   urlPath: string,
   baseUrl: string,
-  rewrite: RewriteRule | null,
+  rewrites: readonly RewriteRule[],
   effective: EffectiveRequest,
   env: Environment | undefined,
   dynamicVars: Record<string, string>,
@@ -23,7 +23,7 @@ export function buildRequestInput(
     graphql: effective.graphql,
     urlPath,
     baseUrl,
-    rewrite,
+    rewrites,
     params: effective.params,
     pathParams: effective.pathParams,
     headers: effective.headers,

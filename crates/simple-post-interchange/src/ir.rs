@@ -81,9 +81,9 @@ pub struct IrModule {
 pub struct IrBaseUrl {
     /// 模块地址。
     pub url: String,
-    /// 路径前缀改写规则。`None` = 没有改写。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rewrite: Option<RewriteRule>,
+    /// 有序的路径前缀改写规则，按顺序匹配、命中首条即停止。空 = 没有改写。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rewrites: Vec<RewriteRule>,
 }
 
 /// 分组。递归嵌套，深度无上限——`may_under` 允许 collection 挂 collection，

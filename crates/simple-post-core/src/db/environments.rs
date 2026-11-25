@@ -2,8 +2,9 @@
 //!
 //! - 每个环境持有一张按模块的地址 map（`moduleBaseUrls`）和一个自由变量池。那张 map 是**唯一**的
 //!   URL 层：单元格要么设要么没设，缺项解析为 `''`，不会回落到别的模块的值。
-//! - 一个单元格（`ModuleBaseUrl`）有两个字段：`url` 是模块地址，`rewrite` 是路径前缀
-//!   改写规则——只改写端点自己的 URL 路径，模块地址里的主机与路径段一概不动。
+//! - 一个单元格（`ModuleBaseUrl`）有两个字段：`url` 是模块地址，`rewrites` 是**有序的**
+//!   路径前缀改写规则——按顺序匹配端点自己的 URL 路径，命中首条即停止；模块地址里的主机与
+//!   路径段一概不动。
 //! - 这里**没有**「当前环境」这一列。当前环境是每个客户端自己的实时状态——桌面窗口、网页标签各
 //!   一份，各切各的；落库会让 web 端多个人互相踩。
 //! - 库里只有一个与「选哪个环境」有关的概念：**默认环境**，即一个项目里**最早创建**的那个环境
@@ -109,7 +110,8 @@ pub fn lookup_project_id(conn: &mut Connection, env_id: &str) -> Result<String, 
 /// 调用方必须回传这一份：把 0 回传出去，界面手里的创建时刻就与库里那一行对不上，于是「默认环境」
 /// 在两侧算出两个答案。
 pub fn create(conn: &mut Connection, e: &Environment) -> Result<Environment, AppError> {
-    let module_base_urls_json = serde_json::to_string(&e.module_base_urls)?;
+    let module_base_urls = sanitize_module_base_urls(&e.module_base_urls)?;
+    let module_base_urls_json = serde_json::to_string(&module_base_urls)?;
     let variables_json = serde_json::to_string(&e.variables)?;
     let disabled_variables_json = serde_json::to_string(&e.disabled_variables)?;
     // `created_at` 认定「默认环境」：一个项目里最早创建的那个。调用方通常不给它
@@ -152,8 +154,9 @@ pub fn update(
         binds.push(rusqlite::types::Value::Text(name.clone()));
     }
     if let Some(m) = &patch.module_base_urls {
+        let cleaned = sanitize_module_base_urls(m)?;
         sets.push(format!("module_base_urls_json = ?{}", binds.len() + 1));
-        binds.push(super::json_col(m)?);
+        binds.push(super::json_col(&cleaned)?);
     }
     if let Some(v) = &patch.variables {
         sets.push(format!("variables_json = ?{}", binds.len() + 1));
@@ -329,8 +332,9 @@ pub fn rename_var(
 /// 写一个（环境 × 模块）格子的两个字段。
 ///
 /// - `url` 传 `Some(u)` 写入模块地址，传 `None` 则**这一格不动**；传空串表示清空它。
-/// - `rewrite` 传 `Some(r)` 写入路径前缀改写规则，传 `None` 则**这一格不动**；起点与目标
-///   都空白的规则表示清空它。
+/// - `rewrites` 传 `Some(list)` 写入有序的路径前缀改写规则，传 `None` 则**这一格不动**；
+///   `Some(&[])` 或全空白占位行表示清空它们。重复起点与非法规则在写入前返回
+///   [`AppError::Validation`]。
 /// - 两个字段都空时整格删掉：一个既没有地址也没有改写规则的格子解析不出任何东西。
 ///
 /// 此处不核对模块是否属于该环境的项目：那一对只有在 endpoint 真的去解析它时才成为 URL，
@@ -340,7 +344,7 @@ pub fn set_module_base_url(
     env_id: &str,
     module_id: &str,
     url: Option<&str>,
-    rewrite: Option<&RewriteRule>,
+    rewrites: Option<&[RewriteRule]>,
 ) -> Result<Environment, AppError> {
     // 与 `set_var` 同样的「载入 → 改 → 写」形状，同一个理由：对 JSON 列的一次原子 UPDATE 使
     // 读者看不到写了一半的 map。
@@ -350,16 +354,14 @@ pub fn set_module_base_url(
     if let Some(u) = url {
         next.url = u.to_string();
     }
-    if let Some(r) = rewrite {
-        // 两个字段都空白的规则等于没有规则：清掉它。起点为空而目标有值的规则照样存下来——
-        // 用户写下的东西不替他丢，而它匹配不了任何东西（起点为空的规则不生效）。
-        next.rewrite = if r.from.trim().is_empty() && r.to.trim().is_empty() {
-            None
-        } else {
-            Some(r.clone())
-        };
+    if let Some(list) = rewrites {
+        // 全空白占位行等于没有规则：清掉它们。起点为空而目标有值的规则会被校验拒绝——
+        // 它匹配不了任何东西，留着只会让用户以为它生效了。
+        let cleaned = crate::url::clean_rewrites(list);
+        crate::url::validate_rewrites(&cleaned)?;
+        next.rewrites = cleaned;
     }
-    if next.url.is_empty() && next.rewrite.is_none() {
+    if next.url.is_empty() && next.rewrites.is_empty() {
         env.module_base_urls.remove(module_id);
     } else {
         env.module_base_urls.insert(module_id.to_string(), next);
@@ -373,6 +375,28 @@ pub fn set_module_base_url(
         return Err(AppError::NotFound(format!("environment {env_id}")));
     }
     Ok(env)
+}
+
+/// 写入口统一收口：剔除全空白占位行，并校验每一格的改写规则。
+///
+/// 整张 map 的写路径（`create` / `update`）与单格写路径（`set_module_base_url`）共用它，
+/// 否则同一个非法配置从一条路进去被拒、从另一条路进去落库。
+fn sanitize_module_base_urls(
+    map: &HashMap<String, ModuleBaseUrl>,
+) -> Result<HashMap<String, ModuleBaseUrl>, AppError> {
+    let mut out = HashMap::with_capacity(map.len());
+    for (module_id, cell) in map {
+        let rewrites = crate::url::clean_rewrites(&cell.rewrites);
+        crate::url::validate_rewrites(&rewrites)?;
+        out.insert(
+            module_id.clone(),
+            ModuleBaseUrl {
+                url: cell.url.clone(),
+                rewrites,
+            },
+        );
+    }
+    Ok(out)
 }
 
 // 行映射器。

@@ -169,8 +169,8 @@ pub struct EnvSetVarDisabledBody {
 }
 
 /// `POST /api/environments/:envId/module-baseurls` 的 body。一个格子是（环境 × 模块），
-/// 格子里 `url` 是模块地址、`rewrite` 是路径前缀改写规则。两个字段各自独立：
-/// `null` = 保持原值，`""` = 清空；都清空时整格删掉。
+/// 格子里 `url` 是模块地址、`rewrites` 是有序的路径前缀改写规则。两个字段各自独立：
+/// `null` = 保持原值，`""` / `[]` = 清空；都清空时整格删掉。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EnvSetModuleBaseUrlBody {
@@ -179,9 +179,9 @@ pub struct EnvSetModuleBaseUrlBody {
     /// 模块地址。`null` = 保持原值，`""` = 清空。
     #[serde(default)]
     pub url: Option<String>,
-    /// 路径前缀改写规则。`null` = 保持原值；起点与目标都空白的规则 = 清空。
+    /// 有序的路径前缀改写规则。`null` = 保持原值；`[]` 或全空白占位行 = 清空。
     #[serde(default)]
-    pub rewrite: Option<RewriteRule>,
+    pub rewrites: Option<Vec<RewriteRule>>,
 }
 
 /// `PUT /api/permissions/:projectId` 的 body。`permission` 字符串经

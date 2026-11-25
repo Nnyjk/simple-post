@@ -14,17 +14,23 @@ fn environment_module_base_urls_round_trip() {
                 "m_auth".to_string(),
                 ModuleBaseUrl {
                     url: "http://auth".into(),
-                    rewrite: None,
+                    rewrites: Vec::new(),
                 },
             ),
             (
                 "m_order".to_string(),
                 ModuleBaseUrl {
                     url: "http://order".into(),
-                    rewrite: Some(RewriteRule {
-                        from: "/api/order".into(),
-                        to: "/api/demo/order".into(),
-                    }),
+                    rewrites: vec![
+                        RewriteRule {
+                            from: "/api/order".into(),
+                            to: "/api/demo/order".into(),
+                        },
+                        RewriteRule {
+                            from: "/api".into(),
+                            to: "/v2".into(),
+                        },
+                    ],
                 },
             ),
         ]
@@ -47,21 +53,16 @@ fn environment_module_base_urls_round_trip() {
         .module_base_urls
         .get("m_auth")
         .unwrap()
-        .rewrite
-        .is_none());
+        .rewrites
+        .is_empty());
     assert_eq!(
         back.module_base_urls.get("m_order").unwrap().url,
         "http://order"
     );
-    assert_eq!(
-        back.module_base_urls
-            .get("m_order")
-            .unwrap()
-            .rewrite
-            .as_ref()
-            .map(|r| r.to.as_str()),
-        Some("/api/demo/order")
-    );
+    let order_rules = &back.module_base_urls.get("m_order").unwrap().rewrites;
+    assert_eq!(order_rules.len(), 2, "顺序与条数都要原样往返");
+    assert_eq!(order_rules[0].to, "/api/demo/order");
+    assert_eq!(order_rules[1].to, "/v2");
     assert_eq!(back.variables.get("token").unwrap(), "abc");
     assert_eq!(back.created_at, 1_700_000_000_000);
 }

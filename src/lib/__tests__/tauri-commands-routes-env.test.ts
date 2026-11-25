@@ -51,7 +51,7 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
       envId: 'env1',
       moduleId: 'mod1',
       url: 'https://api.example.com',
-      rewrite: { from: '/api/air', to: '/api/project-a/air' },
+      rewrites: [{ from: '/api/air', to: '/api/project-a/air' }],
     });
     const c = last();
     assert.equal(c.method, 'POST');
@@ -60,7 +60,7 @@ describe('invokeCmd (web shape) — path & body mapping', () => {
     assert.deepEqual(JSON.parse(c.body ?? 'null'), {
       moduleId: 'mod1',
       url: 'https://api.example.com',
-      rewrite: { from: '/api/air', to: '/api/project-a/air' },
+      rewrites: [{ from: '/api/air', to: '/api/project-a/air' }],
     });
   });
 

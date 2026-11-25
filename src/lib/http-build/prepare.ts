@@ -1,5 +1,5 @@
 import {
-  applyRewrite,
+  applyRewrites,
   collapseUrlSlashes,
   joinBaseUrl,
   listVars,
@@ -82,8 +82,8 @@ export function prepareRequest(rawInput: PrepareRequestInput): PreparedRequest {
   const auth = resolveAuth(input.auth, pool, missing);
 
   // 路径前缀改写作用在**端点自己的 URL** 上，且在拼接之前：模块地址自带的路径段不参与
-  // 匹配，主机也不动。改写后的路径随后与模块地址拼接。
-  const rewritten = applyRewrite(input.urlPath, input.rewrite);
+  // 匹配，主机也不动。规则按顺序匹配，命中首条即停止。改写后的路径随后与模块地址拼接。
+  const rewritten = applyRewrites(input.urlPath, input.rewrites);
   const joined = joinBaseUrl(input.baseUrl, rewritten);
 
   // 路径参数的值在下面那趟 `{{var}}` 替换**之前**解析：路径参数的值要先编码，编码过的

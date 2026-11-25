@@ -121,7 +121,7 @@ fn seed(
             "m_proto".to_string(),
             ModuleBaseUrl {
                 url: base_url.to_string(),
-                rewrite: None,
+                rewrites: Vec::new(),
             },
         )]
         .into_iter()

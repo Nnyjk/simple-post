@@ -49,7 +49,7 @@ pub(crate) fn missing_pieces(
     let resolved =
         crate::variable_fill::resolve_base_url(detail, env.as_ref(), module_id.as_deref());
     // 路径前缀改写规则与地址来源无关：端点自己钉了 host 时，路径照样按那一格的规则改写。
-    let rewrite = resolved.rewrite.clone();
+    let rewrites = resolved.rewrites.clone();
     let base_url = if detail.base_url_override.is_some() {
         String::new()
     } else {
@@ -62,7 +62,7 @@ pub(crate) fn missing_pieces(
     // ---- 变量 ----
     // 路径前缀改写作用在端点自己的 URL 上，故扫描的是**改写之后**的那一份：改写没
     // 命中时就是原路径（目标里的标记不会被扫到——那个目标这次不参与请求）。
-    let scanned_url = crate::variable_fill::apply_rewrite(&detail.url, rewrite.as_ref());
+    let scanned_url = crate::variable_fill::apply_rewrites(&detail.url, &rewrites);
     let parts = simple_post_core::dynamic::TemplateParts {
         base_url: &base_url,
         url: &scanned_url,

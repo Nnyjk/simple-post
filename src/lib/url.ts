@@ -13,8 +13,8 @@ export type BaseUrlSource = 'override' | 'module' | 'none';
 export interface ResolvedBaseUrl {
   /** 模块地址。 */
   baseUrl: string;
-  /** 路径前缀改写规则。`null` = 没有改写。 */
-  rewrite: RewriteRule | null;
+  /** 有序的路径前缀改写规则，按顺序匹配、命中首条即停止。空 = 没有改写。 */
+  rewrites: RewriteRule[];
   source: BaseUrlSource;
 }
 
@@ -44,51 +44,66 @@ export function resolveEndpointBaseUrl(
   const cell = moduleId ? env?.moduleBaseUrls?.[moduleId] : undefined;
   // 路径前缀改写规则只作用在端点自己的 URL 上，与地址来源无关：端点自带自定义主机时，
   // 路径照样按这一格的规则改写——主机是端点自己的事，路径前缀是这一格的事。
-  const rewrite = cell?.rewrite ?? null;
+  const rewrites = cell?.rewrites ?? [];
   if (endpoint.baseUrlOverride !== null && endpoint.baseUrlOverride !== undefined) {
     return {
       baseUrl: endpoint.baseUrlOverride,
-      rewrite,
+      rewrites,
       source: 'override',
     };
   }
-  if (!moduleId) return { baseUrl: '', rewrite: null, source: 'none' };
-  if (!cell || !cell.url) return { baseUrl: '', rewrite, source: 'none' };
+  if (!moduleId) return { baseUrl: '', rewrites: [], source: 'none' };
+  if (!cell || !cell.url) return { baseUrl: '', rewrites, source: 'none' };
   return {
     baseUrl: cell.url,
-    rewrite,
+    rewrites,
     source: 'module',
   };
 }
 
 /**
- * 把端点**自己 URL** 的路径前缀从 `from` 换成 `to`。
+ * 规范化一条改写规则的起点，用于判重。
+ *
+ * 去首尾空白，再去掉末尾所有 `/`；去掉后为空（如 `"/"`、`"///"`）时返回 `"/"`。
+ * 故 `"/api/air"` 与 `"/api/air/"` 是同一个起点，`"/"` 与 `"///"` 也是。与 Rust 侧
+ * `core::url::normalize_rewrite_from` 一致。
+ */
+export function normalizeRewriteFrom(from: string): string {
+  const trimmed = from.trim();
+  if (trimmed === '') return '';
+  const stripped = trimmed.replace(/\/+$/, '');
+  return stripped === '' ? '/' : stripped;
+}
+
+/** 目标是不是绝对地址。带 `scheme://` 或以 `//` 开头的都算。 */
+export function isAbsoluteRewriteTarget(to: string): boolean {
+  const trimmed = to.trim();
+  return SCHEME_RE.test(trimmed) || trimmed.startsWith('//');
+}
+
+/**
+ * 单条规则对 URL 的改写结果；不命中返回 `null`。
  *
  * 规则只作用在路径上：主机与查询串一概不动。模块地址自带的路径段不参与匹配。
  *
- * - 规则缺席，或 `from` 去掉首尾空白之后为空 → 原样返回（没有起点就没有规则）。
- * - `to` 是绝对地址（带 `scheme://` 或以 `//` 开头）→ 原样返回。改写只准改路径，
- *   不准把请求挪到另一个主机上去——那会把凭据发到别处。
+ * - `from` 去掉首尾空白之后为空 → `null`（没有起点就没有规则）。
+ * - `to` 是绝对地址 → `null`。改写只准改路径，不准把请求挪到另一个主机上去——那会把
+ *   请求里的凭据发到别处。
  * - `from` 去掉尾部所有 `/`；起点就是 `/` 时它指的是**路径根**，整条路径换到 `to` 底下。
  * - 路径以 `from` 开头，**且**其后紧跟的那一位是 `/`（或路径恰好等于 `from`）→ 换成
  *   `to` + 其余部分。边界这一条是必需的：没有它，`/api/air` 会命中 `/api/airplane`。
- * - 其余情况原样返回。
  *
  * `from` 按**原文**匹配：它不做 `{{var}}` 替换，故那里的标记永远不会被展开。`to` 会被随后的
  * `{{var}}` 替换扫到（它进了 URL）。
  *
- * 对应 Rust 侧 `simple_post_core::url::apply_rewrite`（MCP 侧与导入导出侧都转发到它）；
- * 两者必须一致，否则预览与真正发出去的请求描述的是两个 URL。共享样本是
- * `fixtures/base-url-parity.json`。
+ * 对应 Rust 侧 `simple_post_core::url::try_apply_rewrite`；两者必须一致，否则预览与真正
+ * 发出去的请求描述的是两个 URL。共享样本是 `fixtures/base-url-parity.json`。
  */
-export function applyRewrite(url: string, rule: RewriteRule | null | undefined): string {
-  if (!rule) return url;
+export function tryApplyRewrite(url: string, rule: RewriteRule): string | null {
   const fromRaw = rule.from.trim();
-  if (fromRaw === '') return url;
+  if (fromRaw === '') return null;
   const to = rule.to.trim();
-  // 目标带 scheme 时不改写：改写只准改路径，不准把请求挪到另一个主机上去——
-  // 那会把请求里的凭据发到别处。
-  if (SCHEME_RE.test(to) || to.startsWith('//')) return url;
+  if (isAbsoluteRewriteTarget(to)) return null;
 
   const { head, path, tail } = splitUrl(url);
   const from = fromRaw.replace(/\/+$/, '');
@@ -97,10 +112,94 @@ export function applyRewrite(url: string, rule: RewriteRule | null | undefined):
     // 故这里是直接相接（`/gateway` + `/api/air/list`）。
     return head + to + path + tail;
   }
-  if (!path.startsWith(from)) return url;
+  if (!path.startsWith(from)) return null;
   const rest = path.slice(from.length);
-  if (rest !== '' && !rest.startsWith('/')) return url;
+  if (rest !== '' && !rest.startsWith('/')) return null;
   return head + to + rest + tail;
+}
+
+/**
+ * 按列表顺序依次尝试改写，**命中第一条后立即返回**（不串联执行后续规则）；
+ * 全部未命中时原样返回。与 Rust 侧 `core::url::apply_rewrites` 一致。
+ */
+export function applyRewrites(
+  url: string,
+  rules: readonly RewriteRule[] | null | undefined,
+): string {
+  if (!rules) return url;
+  for (const rule of rules) {
+    const next = tryApplyRewrite(url, rule);
+    if (next !== null) return next;
+  }
+  return url;
+}
+
+export interface RewriteValidationResult {
+  /** 行下标 → 就地展示的错误文案。 */
+  errorsByIndex: Record<number, string>;
+  hasError: boolean;
+}
+
+/**
+ * 校验一组改写规则（本地草稿形态）。
+ *
+ * - 全空白草稿行（`from` 与 `to` 都空）被跳过：它是用户刚点「添加」还没填的那一行，
+ *   留着等输入，不算错。
+ * - 有 `to` 却没 `from` → 该行报错。凭空多出一段前缀是拼接不出请求的。
+ * - 目标是绝对地址 → 该行报错（改写只准改路径）。
+ * - 同一组内规范化起点重复 → **所有冲突行**都报错：按顺序匹配时后面那条永远不会生效。
+ */
+export function validateRewriteRules(rules: readonly RewriteRule[]): RewriteValidationResult {
+  const errorsByIndex: Record<number, string> = {};
+  const byKey = new Map<string, number[]>();
+  rules.forEach((rule, index) => {
+    if (rule.from.trim() === '' && rule.to.trim() === '') return;
+    if (rule.from.trim() === '') {
+      errorsByIndex[index] = '请填写要匹配的路径前缀（起点）';
+      return;
+    }
+    if (isAbsoluteRewriteTarget(rule.to)) {
+      errorsByIndex[index] = '目标不能包含协议或主机地址（仅改写路径）';
+      return;
+    }
+    const key = normalizeRewriteFrom(rule.from);
+    const seen = byKey.get(key);
+    if (seen) seen.push(index);
+    else byKey.set(key, [index]);
+  });
+  for (const [key, indices] of byKey) {
+    if (indices.length < 2) continue;
+    for (const index of indices) {
+      errorsByIndex[index] = `起点「${key}」重复，按顺序匹配时后续规则不会生效`;
+    }
+  }
+  return { errorsByIndex, hasError: Object.keys(errorsByIndex).length > 0 };
+}
+
+/**
+ * 找出一组规则里被前置规则遮挡的行下标（非阻断提示，不阻止保存）。
+ *
+ * 若更靠前的第 `j` 条规则的规范化起点是第 `i` 条的路径祖先前缀（`"/"` 排在
+ * `"/api/air"` 之前，或 `"/api"` 排在 `"/api/air"` 之前），返回 `i -> j`：按顺序匹配时
+ * 第 `i` 条可能永远走不到，界面提示用户拖拽调整顺序。
+ */
+export function findShadowedRuleIndices(rules: readonly RewriteRule[]): Record<number, number> {
+  const keys = rules.map((rule) => normalizeRewriteFrom(rule.from));
+  const shadowed: Record<number, number> = {};
+  for (let i = 0; i < keys.length; i += 1) {
+    const key = keys[i];
+    if (key === '' || key in shadowed) continue;
+    for (let j = 0; j < i; j += 1) {
+      const outer = keys[j];
+      if (outer === '') continue;
+      const covers = outer === '/' || key === outer || key.startsWith(`${outer}/`);
+      if (covers) {
+        shadowed[i] = j;
+        break;
+      }
+    }
+  }
+  return shadowed;
 }
 
 /** 前导 `scheme://`。与 Rust 侧 `core::url::scheme_prefix_len` 认同一件事。 */

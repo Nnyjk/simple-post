@@ -26,14 +26,14 @@ export interface EnvironmentSectionProps {
   setEnvironmentVarDisabled: (envId: string, key: string, disabled: boolean) => void;
   renameEnvironmentVar: (envId: string, fromKey: string, toKey: string) => void;
   /**
-   * 写一个 (环境 × 模块) 格子里的两个字段：`url` 是模块地址，`rewrite` 是路径前缀改写规则。
-   * `null` = 该字段保持原值；起点与目标都空白的规则 = 清空规则。
+   * 写一个 (环境 × 模块) 格子里的两个字段：`url` 是模块地址，`rewrites` 是有序的路径前缀
+   * 改写规则。`null` = 该字段保持原值；`[]` 或全空白占位行 = 清空规则。
    */
   setEnvironmentModuleBaseUrl: (
     envId: string,
     moduleId: string,
     url: string | null,
-    rewrite: RewriteRule | null,
+    rewrites: RewriteRule[] | null,
   ) => void;
   /** 解析出新环境的 id；创建失败时为 `null`。 */
   addEnvironment: (projectId: string, name: string) => Promise<string | null>;

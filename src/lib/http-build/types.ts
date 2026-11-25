@@ -77,10 +77,10 @@ export interface PrepareRequestInput {
   /** 已解析的 base URL；空串表示没有 base URL。 */
   baseUrl: string;
   /**
-   * 路径前缀改写规则。它只改写 `urlPath`（端点自己的 URL），模块地址里的主机与路径段一概
-   * 不动。缺席 = 没有改写。
+   * 有序的路径前缀改写规则。按顺序匹配 `urlPath`（端点自己的 URL），命中首条即停止；模块
+   * 地址里的主机与路径段一概不动。缺席或为空 = 没有改写。
    */
-  rewrite?: RewriteRule | null;
+  rewrites?: readonly RewriteRule[] | null;
   params: KeyValue[];
   headers: KeyValue[];
   body: RequestBody;
@@ -102,7 +102,7 @@ export interface PrepareRequestInput {
 export interface PreparedRequest {
   method: HttpMethod;
   /**
-   * 完整 URL：`applyRewrite(urlPath)` → `join(baseUrl, urlPath)` → 替换路径里的
+   * 完整 URL：`applyRewrites(urlPath)` → `join(baseUrl, urlPath)` → 替换路径里的
    * `{占位符}` → 解析 `{{var}}` → 折叠 path 斜杠 → 解析并追加参数值 → 追加 query 位置的
    * apikey，顺序如列。
    *

@@ -53,7 +53,7 @@ fn the_wire_keys_land_on_the_same_fields() {
         "environment": {
             "name": "dev",
             "baseUrl": "https://api.example.test",
-            "baseUrlRewrite": { "from": "/api/air", "to": "/api/project-a/air" }
+            "baseUrlRewrites": [{ "from": "/api/air", "to": "/api/project-a/air" }]
         },
         "endpoint": {
             "name": "查订单",
@@ -72,8 +72,9 @@ fn the_wire_keys_land_on_the_same_fields() {
     );
     assert_eq!(
         environment
-            .base_url_rewrite
+            .base_url_rewrites
             .as_ref()
+            .and_then(|rules| rules.first())
             .map(|rule| rule.to.as_str()),
         Some("/api/project-a/air")
     );

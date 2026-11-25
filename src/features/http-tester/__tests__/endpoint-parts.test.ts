@@ -77,7 +77,7 @@ describe('buildEndpointRequestParts', () => {
     });
     assert.equal(parts.baseUrl, 'https://example.test');
     assert.equal(parts.resolved.source, 'override');
-    assert.equal(parts.resolved.rewrite, null);
+    assert.deepEqual(parts.resolved.rewrites, []);
   });
 
   it('跟随模块：读环境里「环境 × 模块」那一格', () => {
@@ -101,7 +101,7 @@ describe('buildEndpointRequestParts', () => {
         moduleBaseUrls: {
           m1: {
             url: '127.0.0.1:8080',
-            rewrite: { from: '/api/air', to: '/api/project-a/air' },
+            rewrites: [{ from: '/api/air', to: '/api/project-a/air' }],
           },
         },
       }),
@@ -109,7 +109,7 @@ describe('buildEndpointRequestParts', () => {
       enabledDynamicNames: NO_DYNAMIC,
     });
     assert.equal(parts.baseUrl, '127.0.0.1:8080');
-    assert.deepEqual(parts.resolved.rewrite, { from: '/api/air', to: '/api/project-a/air' });
+    assert.deepEqual(parts.resolved.rewrites, [{ from: '/api/air', to: '/api/project-a/air' }]);
   });
 
   it('模块没有那一格时不借用别的模块的格子', () => {
@@ -203,7 +203,7 @@ describe('prepareEndpointRequest', () => {
         moduleBaseUrls: {
           m1: {
             url: '127.0.0.1:8080',
-            rewrite: { from: '/api/air', to: '/api/project-a/air' },
+            rewrites: [{ from: '/api/air', to: '/api/project-a/air' }],
           },
         },
       }),

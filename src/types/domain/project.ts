@@ -24,18 +24,18 @@ export interface RewriteRule {
 
 /**
  * 一个（环境 × 模块）格子里的地址配置。两个字段回答两个问题：`url` 是**模块地址**
- * （文档里写的、模块对外声明的那个地址），`rewrite` 是**路径前缀改写规则**（只改写端点
- * 自己的 URL 路径）。
+ * （文档里写的、模块对外声明的那个地址），`rewrites` 是**有序的路径前缀改写规则**
+ * （只改写端点自己的 URL 路径，按顺序匹配、命中首条即停止）。
  *
  * 两者互不干扰：模块地址里的主机与路径段一概不动。故
- * `url = "127.0.0.1:8080"`、`rewrite = { from: "/api/air", to: "/api/project-a/air" }` 与端点
- * 路径 `/api/air/xxxxx` 合成的实际请求是 `127.0.0.1:8080/api/project-a/air/xxxxx`。
+ * `url = "127.0.0.1:8080"`、`rewrites = [{ from: "/api/air", to: "/api/project-a/air" }]` 与
+ * 端点路径 `/api/air/xxxxx` 合成的实际请求是 `127.0.0.1:8080/api/project-a/air/xxxxx`。
  *
- * `rewrite` 缺席 = 没有改写，端点自己的 URL 原样使用。
+ * `rewrites` 缺席或为空 = 没有改写，端点自己的 URL 原样使用。
  */
 export interface ModuleBaseUrl {
   url: string;
-  rewrite?: RewriteRule | null;
+  rewrites?: RewriteRule[];
 }
 
 export interface Environment {

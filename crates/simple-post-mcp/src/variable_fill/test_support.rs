@@ -31,7 +31,7 @@ pub(super) fn set_cell(env: &mut Environment, module: &str, url: &str) {
         module.to_string(),
         ModuleBaseUrl {
             url: url.to_string(),
-            rewrite: None,
+            rewrites: Vec::new(),
         },
     );
 }
@@ -48,10 +48,10 @@ pub(super) fn set_cell_with_rewrite(
         module.to_string(),
         ModuleBaseUrl {
             url: url.to_string(),
-            rewrite: Some(RewriteRule {
+            rewrites: vec![RewriteRule {
                 from: from.to_string(),
                 to: to.to_string(),
-            }),
+            }],
         },
     );
 }

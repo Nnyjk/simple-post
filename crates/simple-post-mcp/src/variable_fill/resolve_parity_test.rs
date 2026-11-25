@@ -39,13 +39,13 @@ struct Input {
     method: String,
     url_path: String,
     base_url: String,
-    /// 那一格的路径前缀改写规则。
+    /// 那一格的有序路径前缀改写规则。
     ///
-    /// **在场时** base URL 与改写规则一起住在环境里（环境 × 模块）那一格：渲染进程那一侧
+    /// **非空时** base URL 与改写规则一起住在环境里（环境 × 模块）那一格：渲染进程那一侧
     /// 直接拿这两个值，MCP 那一侧的 `resolve_endpoint` 只从格子里读改写规则，故这类用例在
-    /// 两侧走的是不同的取数路径。**缺席时** base URL 走端点自己的 override。
+    /// 两侧走的是不同的取数路径。**为空时** base URL 走端点自己的 override。
     #[serde(default)]
-    rewrite: Option<RewriteRule>,
+    rewrites: Vec<RewriteRule>,
     #[serde(default)]
     params: Vec<KeyValue>,
     #[serde(default)]
@@ -90,7 +90,7 @@ fn detail(input: &Input) -> EndpointDetail {
         url: input.url_path.clone(),
         // 带改写规则的用例里 base URL 住在格子上，端点自己的 override 必须让开：那一格
         // 属于模块，不属于端点。
-        base_url_override: if input.rewrite.is_some() {
+        base_url_override: if !input.rewrites.is_empty() {
             None
         } else {
             Some(input.base_url.clone())
@@ -114,12 +114,12 @@ fn detail(input: &Input) -> EndpointDetail {
 
 fn env(variables: &std::collections::BTreeMap<String, String>, input: &Input) -> Environment {
     let mut module_base_urls = std::collections::HashMap::new();
-    if let Some(rewrite) = &input.rewrite {
+    if !input.rewrites.is_empty() {
         module_base_urls.insert(
             CELL_MODULE_ID.to_string(),
             ModuleBaseUrl {
                 url: input.base_url.clone(),
-                rewrite: Some(rewrite.clone()),
+                rewrites: input.rewrites.clone(),
             },
         );
     }
@@ -144,7 +144,7 @@ fn every_parity_case_resolves_the_same_way() {
     // 下面那几行 `assert_eq!` 一条都走不到，测试还是绿的。
     assert_eq!(
         fixture.cases.len(),
-        19,
+        20,
         "样本里的 case 条数变了。改样本就要改这个数字，并确认渲染进程那一侧的读取器一起改"
     );
 
@@ -153,11 +153,11 @@ fn every_parity_case_resolves_the_same_way() {
         let env = env(&case.env, &case.input);
         // 带改写规则的用例要指到模块，否则 `resolve_base_url` 读不到那一格，规则无从参与。
         let overrides = EndpointOverrides {
-            module_id: case
-                .input
-                .rewrite
-                .as_ref()
-                .map(|_| CELL_MODULE_ID.to_string()),
+            module_id: if case.input.rewrites.is_empty() {
+                None
+            } else {
+                Some(CELL_MODULE_ID.to_string())
+            },
             ..Default::default()
         };
         // 样本的 base URL 走端点自己的 override，故环境里没有格子也不影响。
@@ -238,7 +238,7 @@ fn graphql_detail(query: &str, variables: &str) -> EndpointDetail {
         method: "POST".into(),
         url_path: "/graphql".into(),
         base_url: "https://h.test".into(),
-        rewrite: None,
+        rewrites: Vec::new(),
         params: vec![],
         path_params: vec![],
         headers: vec![],

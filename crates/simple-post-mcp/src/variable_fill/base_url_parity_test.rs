@@ -12,7 +12,7 @@ use simple_post_core::domain::{
     AuthConfig, EndpointDetail, Environment, HttpMethod, ModuleBaseUrl, RequestBody, RewriteRule,
 };
 
-use super::base_url::{apply_rewrite, resolve_base_url, BaseUrlSource};
+use super::base_url::{apply_rewrites, resolve_base_url, BaseUrlSource};
 
 /// 共享样本。放在仓库根的 `fixtures/` 下，TS 侧读同一份文件。
 const FIXTURE: &str = include_str!("../../../../fixtures/base-url-parity.json");
@@ -55,7 +55,7 @@ struct EnvCase {
 struct CellCase {
     url: String,
     #[serde(default)]
-    rewrite: Option<RewriteRule>,
+    rewrites: Vec<RewriteRule>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -63,7 +63,7 @@ struct CellCase {
 struct Expected {
     base_url: String,
     #[serde(default)]
-    rewrite: Option<RewriteRule>,
+    rewrites: Vec<RewriteRule>,
     source: String,
 }
 
@@ -72,7 +72,8 @@ struct Expected {
 struct RewriteCase {
     name: String,
     url: String,
-    rewrite: Option<RewriteRule>,
+    #[serde(default)]
+    rewrites: Vec<RewriteRule>,
     expected: String,
 }
 
@@ -126,7 +127,7 @@ fn env(case: Option<&EnvCase>) -> Option<Environment> {
                     k.clone(),
                     ModuleBaseUrl {
                         url: v.url.clone(),
-                        rewrite: v.rewrite.clone(),
+                        rewrites: v.rewrites.clone(),
                     },
                 )
             })
@@ -163,10 +164,10 @@ fn every_case_matches_the_shared_sample() {
                 case.name, got.base_url, case.expected.base_url
             ));
         }
-        if got.rewrite != case.expected.rewrite {
+        if got.rewrites != case.expected.rewrites {
             mismatches.push(format!(
                 "{}: 改写规则是 {:?}，样本要求 {:?}",
-                case.name, got.rewrite, case.expected.rewrite
+                case.name, got.rewrites, case.expected.rewrites
             ));
         }
         if got.source != source_of(&case.expected.source) {
@@ -188,13 +189,13 @@ fn every_rewrite_case_matches_the_shared_sample() {
     let fixture = fixture();
     assert_eq!(
         fixture.rewrite_cases.len(),
-        13,
+        18,
         "样本里的 rewriteCase 条数变了。改样本就要改这个数字，并确认渲染进程那一侧的读取器一起改"
     );
 
     let mut mismatches: Vec<String> = Vec::new();
     for case in &fixture.rewrite_cases {
-        let got = apply_rewrite(&case.url, case.rewrite.as_ref());
+        let got = apply_rewrites(&case.url, &case.rewrites);
         if got != case.expected {
             mismatches.push(format!(
                 "{}: 得到 {got}，样本要求 {}",
@@ -212,7 +213,7 @@ fn every_rewrite_case_matches_the_shared_sample() {
 /// 样本本身得覆盖得住每一条规则。
 ///
 /// 这一条是防「读取器的键名与样本对不上」的那道防线：serde 遇到不认识的键会**静默
-/// 忽略**，于是 `expected.rewrite` 永远读到 `None`，上面两条断言一条用例都没走到，却
+/// 忽略**，于是 `expected.rewrites` 永远读到空列表，上面两条断言一条用例都没走到，却
 /// 一直是绿的。故这里数一遍样本里真正带改写规则的条目，为 0 就失败。
 #[test]
 fn the_sample_covers_the_resolution_rules() {
@@ -221,7 +222,7 @@ fn the_sample_covers_the_resolution_rules() {
     let with_rewrite = fixture
         .cases
         .iter()
-        .filter(|c| c.expected.rewrite.is_some())
+        .filter(|c| !c.expected.rewrites.is_empty())
         .count();
     assert!(
         with_rewrite > 0,
@@ -231,7 +232,7 @@ fn the_sample_covers_the_resolution_rules() {
     let rewrite_cases_with_rule = fixture
         .rewrite_cases
         .iter()
-        .filter(|c| c.rewrite.is_some())
+        .filter(|c| c.rewrites.len() > 1)
         .count();
     assert!(
         rewrite_cases_with_rule > 0,

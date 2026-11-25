@@ -75,7 +75,7 @@ describe('prepareRequest: path prefix rewrite', () => {
       prep({
         baseUrl: '127.0.0.1:8080',
         urlPath: '/api/air/xxxxx',
-        rewrite: { from: '/api/air', to: '/api/project-a/air' },
+        rewrites: [{ from: '/api/air', to: '/api/project-a/air' }],
       }),
     );
     assert.equal(r.url, '127.0.0.1:8080/api/project-a/air/xxxxx');
@@ -86,7 +86,7 @@ describe('prepareRequest: path prefix rewrite', () => {
       prep({
         baseUrl: '127.0.0.1:8080',
         urlPath: '/api/water/xxxxx',
-        rewrite: { from: '/api/air', to: '/api/project-a/air' },
+        rewrites: [{ from: '/api/air', to: '/api/project-a/air' }],
       }),
     );
     assert.equal(r.url, '127.0.0.1:8080/api/water/xxxxx');
@@ -108,7 +108,7 @@ describe('prepareRequest: path prefix rewrite', () => {
       prep({
         baseUrl: '127.0.0.1:8080',
         urlPath: '/api/air/xxxxx',
-        rewrite: { from: '/api/air', to: '/api/{{tenant}}/air' },
+        rewrites: [{ from: '/api/air', to: '/api/{{tenant}}/air' }],
         env,
       }),
     );
@@ -120,7 +120,7 @@ describe('prepareRequest: path prefix rewrite', () => {
       prep({
         baseUrl: '127.0.0.1:8080',
         urlPath: '/api/air/xxxxx',
-        rewrite: { from: '/api/air', to: '/api/{{gone}}/air' },
+        rewrites: [{ from: '/api/air', to: '/api/{{gone}}/air' }],
       }),
     );
     assert.deepEqual(r.missingVars, ['gone']);

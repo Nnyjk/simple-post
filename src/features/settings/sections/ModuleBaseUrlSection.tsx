@@ -89,7 +89,7 @@ export function ModuleBaseUrlSection({ moduleId }: { moduleId: string }) {
             <GroupHeader
               icon={<Globe className="h-3.5 w-3.5" />}
               title="模块地址"
-              description="本模块在各个环境下的地址与路径改写规则"
+              description="本模块在各个环境下的地址与有序路径改写规则，按顺序匹配、命中首条即停止"
             />
             <ModuleBaseUrlTable
               // 以 env id 为 key，切环境即重置这张表自己的临时状态 —— 上一个环境里

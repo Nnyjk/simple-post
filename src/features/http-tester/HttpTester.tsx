@@ -11,7 +11,7 @@ import { useRequestActions, type SaveRejection } from './useRequestActions';
 import { useEndpointContext } from './useEndpointContext';
 import { useVarHint, type VarEntry } from './var-hint';
 import { pathPlaceholders } from '@/lib/path-params';
-import { applyRewrite } from '@/lib/url';
+import { applyRewrites } from '@/lib/url';
 import { buildEndpointRequestParts, prepareEndpointRequest } from './model/endpointParts';
 import { buildVarEntries } from './model/varEntries';
 import { buildDynamicEntries, buildDynamicVars, enabledDynamicNameSet } from './model/dynamicVars';
@@ -129,7 +129,7 @@ export function HttpTester() {
   const moduleBaseUrl = parts.moduleBaseUrl;
   // 路径参数那一页的占位符名单来自**改写之后**的那份路径：改写目标里可能带
   // `{tenant}` 这样的占位符，它会进最终 URL，故它也得有地方填值。
-  const pathParamUrl = applyRewrite(liveUrl, resolved.rewrite);
+  const pathParamUrl = applyRewrites(liveUrl, resolved.rewrites);
 
   /** 把某个编辑器的产出写进草稿（从而置脏）。 */
   const patchDraft = useCallback(

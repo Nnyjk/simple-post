@@ -58,11 +58,11 @@ struct SetBaseUrlArgs {
     module_id: String,
     /// 模块地址。不能为空串。
     url: String,
-    /// 路径前缀改写规则：把端点**自己 URL** 的路径前缀从 `from` 换成 `to`。
+    /// 有序的路径前缀改写规则：按顺序匹配端点**自己 URL** 的路径前缀，命中首条即停止。
     ///
-    /// 缺席 = 这一格的规则保持不变；起点与目标都空白的规则 = 清空规则。
+    /// 缺席 = 这一格的规则保持不变；`[]` 或全空白占位行 = 清空规则。
     #[serde(default)]
-    rewrite: Option<RewriteRule>,
+    rewrites: Option<Vec<RewriteRule>>,
 }
 
 // =========================================================================
@@ -126,7 +126,7 @@ pub(crate) fn table() -> Vec<ToolEntry> {
                             "name": { "type": "string" },
                             "moduleBaseUrls": {
                                 "type": "object",
-                                "description": "Replaces the whole map, keyed by module id. Each leaf is that (environment x module) cell: {\"url\": \"<module address>\", \"rewrite\": {\"from\": \"<path prefix to replace>\", \"to\": \"<prefix that replaces it>\"}}. A cell that is absent here means no base URL for that module, because that cell never inherits."
+                                "description": "Replaces the whole map, keyed by module id. Each leaf is that (environment x module) cell: {\"url\": \"<module address>\", \"rewrites\": [{\"from\": \"<path prefix>\", \"to\": \"<replacement prefix>\"}]}. A cell that is absent here means no base URL for that module, because that cell never inherits."
                             },
                             "variables": {
                                 "type": "object",
@@ -174,22 +174,25 @@ pub(crate) fn table() -> Vec<ToolEntry> {
         },
         ToolEntry {
             name: "env_set_baseurl",
-            description: "Set the URL one module has in one environment — the (environment x module) cell. That cell never inherits, so an unwritten cell means the request goes out without a base URL. url must not be empty. rewrite replaces the path prefix \"from\" of the endpoint's own URL with \"to\": omit it to keep the cell's rule, or pass {\"from\": \"\", \"to\": \"\"} to clear it.",
+            description: "Set the URL one module has in one environment — the (environment x module) cell. That cell never inherits, so an unwritten cell means the request goes out without a base URL. url must not be empty. rewrites is the ordered list of path prefix rewrites for that cell; omit it to keep the cell's rules, or pass [] to clear them.",
             schema: json!({
                 "type": "object",
                 "properties": {
                     "env_id": { "type": "string" },
                     "module_id": { "type": "string" },
                     "url": { "type": "string" },
-                    "rewrite": {
-                        "type": "object",
-                        "description": "Replaces the endpoint's own path prefix \"from\" with \"to\". Omit it to keep the cell's rule; pass {\"from\": \"\", \"to\": \"\"} to clear it.",
-                        "properties": {
-                            "from": { "type": "string" },
-                            "to": { "type": "string" }
-                        },
-                        "required": ["from", "to"],
-                        "additionalProperties": false
+                    "rewrites": {
+                        "type": "array",
+                        "description": "Ordered path prefix rewrites; first match wins. Omit to keep; [] clears.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "from": { "type": "string" },
+                                "to": { "type": "string" }
+                            },
+                            "required": ["from", "to"],
+                            "additionalProperties": false
+                        }
                     }
                 },
                 "required": ["env_id", "module_id", "url"],
@@ -324,15 +327,15 @@ async fn tool_env_set_baseurl(state: &AppState, args: Value) -> Result<CallToolR
     crate::mcp::check_permission(&state.pool, &project_id, "env_update").await?;
 
     // 那一格（环境 × 模块）由 `set_module_base_url` 写：整张 map 是一个 JSON 列，
-    // 一次原子 UPDATE 才不会让读者看到半张 map。`rewrite` 缺席 = 那一格的规则不动，
-    // 起点与目标都空白的规则 = 清空规则。
+    // 一次原子 UPDATE 才不会让读者看到半张 map。`rewrites` 缺席 = 那一格的规则不动，
+    // `[]` 或全空白占位行 = 清空规则。
     let env = simple_post_core::db::with_tx(&state.pool, |c| {
         simple_post_core::db::environments::set_module_base_url(
             c,
             &a.env_id,
             &a.module_id,
             Some(&a.url),
-            a.rewrite.as_ref(),
+            a.rewrites.as_deref(),
         )
     })?;
 

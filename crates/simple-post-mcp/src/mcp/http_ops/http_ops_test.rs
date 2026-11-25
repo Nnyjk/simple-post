@@ -256,7 +256,7 @@ fn a_module_url_lives_in_the_env_cell() {
         "mod_a".into(),
         ModuleBaseUrl {
             url: "https://auth.example.com".into(),
-            rewrite: None,
+            rewrites: Vec::new(),
         },
     );
     let env = Environment {

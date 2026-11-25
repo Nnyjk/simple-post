@@ -76,8 +76,8 @@ export interface ProposedBaseUrl {
 export interface AppliedBaseUrl {
   /** 写进那一格的模块地址。 */
   url: string;
-  /** 该格实际保存的路径前缀改写规则。外来文档给不出规则，故导入时保留该格原有的规则。 */
-  rewrite?: { from: string; to: string };
+  /** 该格实际保存的有序路径前缀改写规则。外来文档给不出规则，故导入时保留该格原有的规则。 */
+  rewrites?: { from: string; to: string }[];
   /** 写进了哪个模块的格子。 */
   moduleId: string;
   /** 写进了哪个环境。缺席 = 项目没有默认环境。 */
@@ -117,7 +117,7 @@ export interface ModuleBaseUrlEntry {
   moduleKey: string;
   moduleName: string;
   /** 缺席是一个真实答案：该模块在此环境下没有配地址。 */
-  baseUrl?: { url: string; rewrite?: { from: string; to: string } };
+  baseUrl?: { url: string; rewrites?: { from: string; to: string }[] };
 }
 
 export interface ExportPreview {

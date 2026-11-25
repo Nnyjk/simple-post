@@ -14,12 +14,12 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { applyRewrite, resolveEndpointBaseUrl } from '../url';
+import { applyRewrites, resolveEndpointBaseUrl } from '../url';
 import type { RewriteRule } from '@/types/domain';
 
 interface CellCase {
   url: string;
-  rewrite?: RewriteRule | null;
+  rewrites?: RewriteRule[];
 }
 
 interface ParityCase {
@@ -29,7 +29,7 @@ interface ParityCase {
   moduleId: string | null;
   expected: {
     baseUrl: string;
-    rewrite?: RewriteRule | null;
+    rewrites?: RewriteRule[];
     source: 'override' | 'module' | 'none';
   };
 }
@@ -37,7 +37,7 @@ interface ParityCase {
 interface RewriteCase {
   name: string;
   url: string;
-  rewrite: RewriteRule | null;
+  rewrites: RewriteRule[];
   expected: string;
 }
 
@@ -51,9 +51,9 @@ const TOP_KEYS = ['$comment', 'cases', 'rewriteCases'];
 const CASE_KEYS = ['name', 'endpoint', 'env', 'moduleId', 'expected'];
 const ENDPOINT_KEYS = ['baseUrlOverride'];
 const ENV_KEYS = ['moduleBaseUrls'];
-const CELL_KEYS = ['url', 'rewrite'];
-const EXPECTED_KEYS = ['baseUrl', 'rewrite', 'source'];
-const REWRITE_CASE_KEYS = ['name', 'url', 'rewrite', 'expected'];
+const CELL_KEYS = ['url', 'rewrites'];
+const EXPECTED_KEYS = ['baseUrl', 'rewrites', 'source'];
+const REWRITE_CASE_KEYS = ['name', 'url', 'rewrites', 'expected'];
 const REWRITE_KEYS = ['from', 'to'];
 
 /**
@@ -64,7 +64,7 @@ const REWRITE_KEYS = ['from', 'to'];
  */
 const EXPECTED_CASE_COUNT = 11;
 /** 样本里 `rewriteCases` 的确切条数。 */
-const EXPECTED_REWRITE_CASE_COUNT = 13;
+const EXPECTED_REWRITE_CASE_COUNT = 18;
 
 /**
  * 断言一个对象只带列出的那些键。少一个键不算错（可选键可以缺席），多一个键算错 ——
@@ -94,6 +94,12 @@ function assertHasKeys(value: unknown, required: readonly string[], where: strin
       `${where} 少了必填的键「${key}」。样本的形状变了，两侧就会读到不同的东西。`,
     );
   }
+}
+
+/** 读一组有序改写规则：必须是数组，每条都带齐 `from` 与 `to` 两个字符串键。 */
+function readRewrites(value: unknown, where: string): RewriteRule[] {
+  assert.ok(Array.isArray(value), `${where} 必须是数组`);
+  return value.map((rule, index) => readRewrite(rule, `${where}[${index}]`));
 }
 
 /** 读一条改写规则：它必须带齐 `from` 与 `to` 两个键，且都是字符串。 */
@@ -147,8 +153,8 @@ function readFixture(): Fixture {
           'string',
           `${where}.env.moduleBaseUrls.${moduleId}.url 必须是字符串`,
         );
-        if (c2.rewrite !== undefined && c2.rewrite !== null) {
-          readRewrite(c2.rewrite, `${where}.env.moduleBaseUrls.${moduleId}.rewrite`);
+        if (c2.rewrites !== undefined) {
+          readRewrites(c2.rewrites, `${where}.env.moduleBaseUrls.${moduleId}.rewrites`);
         }
       }
     }
@@ -166,8 +172,8 @@ function readFixture(): Fixture {
     assert.equal(typeof c.name, 'string', `${where}.name 必须是字符串`);
     assert.equal(typeof c.url, 'string', `${where}.url 必须是字符串`);
     assert.equal(typeof c.expected, 'string', `${where}.expected 必须是字符串`);
-    const rewrite = c.rewrite === null ? null : readRewrite(c.rewrite, `${where}.rewrite`);
-    return { ...(c as unknown as RewriteCase), rewrite };
+    const rewrites = readRewrites(c.rewrites, `${where}.rewrites`);
+    return { ...(c as unknown as RewriteCase), rewrites };
   });
 
   return { cases, rewriteCases };
@@ -193,16 +199,16 @@ describe('base URL 的解析与 Rust 侧一致', () => {
       );
 
       assert.equal(resolved.baseUrl, c.expected.baseUrl, '解析出的模块地址');
-      // `?? null`：样本里缺这个键时，Rust 侧读成 `None`，而 `assert/strict` 区分
+      // `?? []`：样本里缺这个键时，Rust 侧读成空列表，而 `assert/strict` 区分
       // `null` 与 `undefined`——不归一的话，同一份样本在两侧的判定口径不一样。
-      assert.deepEqual(resolved.rewrite, c.expected.rewrite ?? null, '解析出的路径改写规则');
+      assert.deepEqual(resolved.rewrites, c.expected.rewrites ?? [], '解析出的路径改写规则');
       assert.equal(resolved.source, c.expected.source, '哪一层选中了地址');
     });
   }
 });
 
 describe('路径前缀改写与 Rust 侧一致', () => {
-  it('样本里恰好有 13 条改写用例', () => {
+  it('样本里恰好有 18 条改写用例', () => {
     assert.equal(
       FIXTURE.rewriteCases.length,
       EXPECTED_REWRITE_CASE_COUNT,
@@ -212,7 +218,7 @@ describe('路径前缀改写与 Rust 侧一致', () => {
 
   for (const c of FIXTURE.rewriteCases) {
     it(c.name, () => {
-      assert.equal(applyRewrite(c.url, c.rewrite), c.expected, '改写后的地址');
+      assert.equal(applyRewrites(c.url, c.rewrites), c.expected, '改写后的地址');
     });
   }
 });
@@ -255,11 +261,11 @@ describe('样本覆盖住了每一条规则', () => {
 
   it('样本里有带改写规则的 case 与 rewriteCase', () => {
     assert.ok(
-      FIXTURE.cases.some((c) => c.expected.rewrite),
+      FIXTURE.cases.some((c) => (c.expected.rewrites ?? []).length > 0),
       '样本里没有一条带改写规则的 case，改写规则这一条就没人钉住',
     );
     assert.ok(
-      FIXTURE.rewriteCases.some((c) => c.rewrite),
+      FIXTURE.rewriteCases.some((c) => c.rewrites.length > 1),
       '样本里没有一条带规则的 rewriteCase，改写就没人钉住',
     );
   });

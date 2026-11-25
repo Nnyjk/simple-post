@@ -62,10 +62,10 @@ pub struct EnvironmentSpec {
     /// 这个环境 × 模块 那一格的地址。地址住在那一格，故它随模块走。
     #[serde(default, alias = "baseUrl")]
     pub base_url: Option<String>,
-    /// 缺省 = 没有规则。
-    /// 缺省 = 没有规则。
-    #[serde(default, alias = "baseUrlRewrite")]
-    pub base_url_rewrite: Option<RewriteRule>,
+    /// 这一格的有序路径前缀改写规则，按顺序匹配、命中首条即停止。
+    /// 缺省 = 没有规则（不动那一格既有的规则）。
+    #[serde(default, alias = "baseUrlRewrites")]
+    pub base_url_rewrites: Option<Vec<RewriteRule>>,
 }
 
 /// 规格里的端点那一段。

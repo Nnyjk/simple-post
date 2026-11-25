@@ -92,10 +92,8 @@ impl Builder {
         // 路径前缀改写：那一格的规则作用在端点自己的路径上。导出的 `servers` 写的是
         // 那一格的地址，路径若不改写，产物描述的那个请求就发不出去——地址与路径说的
         // 必须是同一个请求。
-        let rewritten = match base_url.and_then(|c| c.rewrite.as_ref()) {
-            Some(rule) => simple_post_core::url::apply_rewrite(&ep.path, Some(rule)),
-            None => ep.path.clone(),
-        };
+        let rewrites = base_url.map(|c| c.rewrites.as_slice()).unwrap_or(&[]);
+        let rewritten = simple_post_core::url::apply_rewrites(&ep.path, rewrites);
         // `{{name}}` → `{name}`：两种方言的路径模板讲的是同一件事，换完才谈得上
         // 「这个键合不合规范」。指针仍指向原 path——那才是用户在预览里看到的那一行。
         let path = normalize_path_template(&rewritten);
