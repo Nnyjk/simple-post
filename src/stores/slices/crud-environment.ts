@@ -52,13 +52,16 @@ export interface EnvironmentCrudActions {
    * 消失。
    *
    * 每个格子都是独立取值——清一个不能碰到它的邻居。
+   *
+   * 返回值是「这一次写成功了吗」：界面据此决定要不要丢掉自己那份本地草稿。写失败时 store
+   * 已经回滚，草稿若也一起丢掉，用户的输入就没了。
    */
   setEnvironmentModuleBaseUrl: (
     envId: string,
     moduleId: string,
     url: string | null,
     rewrites: RewriteRule[] | null,
-  ) => Promise<void>;
+  ) => Promise<boolean>;
   deleteEnvironment: (envId: string) => Promise<void>;
   /**
    * 把脚本写下的变量并进**本地副本**。
@@ -183,7 +186,7 @@ export const createEnvironmentCrud: StateCreator<AppState, [], [], EnvironmentCr
   },
   setEnvironmentModuleBaseUrl: (envId, moduleId, url, rewrites) => {
     const prev = get().environments.find((e) => e.id === envId);
-    if (!prev) return Promise.resolve();
+    if (!prev) return Promise.resolve(false);
     // 格子里两个字段各自独立：`null` 保持原值。全空白的占位行落不进来，与后端
     // `db::environments::set_module_base_url` 里 `clean_rewrites` 同一套。
     const cell = prev.moduleBaseUrls[moduleId];
@@ -237,7 +240,7 @@ export const createEnvironmentCrud: StateCreator<AppState, [], [], EnvironmentCr
       ),
     );
     cellWriteQueue.set(key, write);
-    return write.then(() => undefined);
+    return write;
   },
   deleteEnvironment: async (envId) => {
     const snapshot = {

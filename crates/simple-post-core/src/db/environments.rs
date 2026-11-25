@@ -110,7 +110,7 @@ pub fn lookup_project_id(conn: &mut Connection, env_id: &str) -> Result<String, 
 /// 调用方必须回传这一份：把 0 回传出去，界面手里的创建时刻就与库里那一行对不上，于是「默认环境」
 /// 在两侧算出两个答案。
 pub fn create(conn: &mut Connection, e: &Environment) -> Result<Environment, AppError> {
-    let module_base_urls = sanitize_module_base_urls(&e.module_base_urls)?;
+    let module_base_urls = sanitize_module_base_urls(&e.module_base_urls, None)?;
     let module_base_urls_json = serde_json::to_string(&module_base_urls)?;
     let variables_json = serde_json::to_string(&e.variables)?;
     let disabled_variables_json = serde_json::to_string(&e.disabled_variables)?;
@@ -154,7 +154,10 @@ pub fn update(
         binds.push(rusqlite::types::Value::Text(name.clone()));
     }
     if let Some(m) = &patch.module_base_urls {
-        let cleaned = sanitize_module_base_urls(m)?;
+        // 整张 map 的写也要拿落库的那份当参照：客户端通常把读到的整份回传，其中没动过的格子
+        // 可能带着早先版本存下的非法规则，全部重验会让这一次无关的写入整体失败。
+        let previous = get(conn, id)?.module_base_urls;
+        let cleaned = sanitize_module_base_urls(m, Some(&previous))?;
         sets.push(format!("module_base_urls_json = ?{}", binds.len() + 1));
         binds.push(super::json_col(&cleaned)?);
     }
@@ -381,13 +384,23 @@ pub fn set_module_base_url(
 ///
 /// 整张 map 的写路径（`create` / `update`）与单格写路径（`set_module_base_url`）共用它，
 /// 否则同一个非法配置从一条路进去被拒、从另一条路进去落库。
+///
+/// `previous` 是这次写入之前落库的那份 map。改写规则与它逐字相同的格子不做校验：那一份不是
+/// 这次写进去的内容，早先版本存下的非法规则（起点为空 / 目标是绝对地址）不该让一次无关的
+/// 整张写整体失败。传 `None` 表示没有可比对的旧值（新建环境），此时每一格都要验。
 fn sanitize_module_base_urls(
     map: &HashMap<String, ModuleBaseUrl>,
+    previous: Option<&HashMap<String, ModuleBaseUrl>>,
 ) -> Result<HashMap<String, ModuleBaseUrl>, AppError> {
     let mut out = HashMap::with_capacity(map.len());
     for (module_id, cell) in map {
         let rewrites = crate::url::clean_rewrites(&cell.rewrites);
-        crate::url::validate_rewrites(&rewrites)?;
+        let untouched = previous
+            .and_then(|p| p.get(module_id))
+            .is_some_and(|prev| prev.rewrites == cell.rewrites);
+        if !untouched {
+            crate::url::validate_rewrites(&rewrites)?;
+        }
         out.insert(
             module_id.clone(),
             ModuleBaseUrl {

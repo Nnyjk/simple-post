@@ -52,7 +52,7 @@ function render(props: {
       env: props.env,
       modules: props.modules,
       mode: props.mode,
-      setEnvironmentModuleBaseUrl: () => {},
+      setEnvironmentModuleBaseUrl: async () => true,
     }),
   );
 }
