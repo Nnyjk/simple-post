@@ -689,3 +689,58 @@ fn deleting_the_default_env_promotes_the_next_earliest_one() {
     let default = db::with_conn(&pool, |c| get_default(c, "p_demo")).unwrap();
     assert_eq!(default.unwrap().id, "env_staging");
 }
+
+#[test]
+fn an_untouched_legacy_invalid_cell_does_not_block_a_whole_map_write() {
+    // 早先版本允许「起点为空、目标有值」的规则落库。客户端习惯把读到的整张 map 回传，
+    // 若整张写把每一格都重验一次，一次与那一格无关的改动就会被一条历史数据整份挡住。
+    let pool = fresh_pool();
+    db::with_conn(&pool, |c| {
+        c.execute(
+            "UPDATE environments SET module_base_urls_json = ?1 WHERE id = 'env_dev'",
+            [r#"{"m_auth":{"url":"http://qa","rewrite":{"from":"","to":"/x"}}}"#],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+
+    let mut map = db::with_conn(&pool, |c| get(c, "env_dev"))
+        .unwrap()
+        .module_base_urls;
+    assert_eq!(map["m_auth"].rewrites, vec![rule("", "/x")]);
+    map.insert("m_pay".to_string(), cell("http://pay"));
+    db::with_tx(&pool, |c| {
+        update(
+            c,
+            "env_dev",
+            EnvironmentPatch {
+                module_base_urls: Some(map.clone()),
+                ..Default::default()
+            },
+        )
+    })
+    .unwrap();
+
+    let got = db::with_conn(&pool, |c| get(c, "env_dev")).unwrap();
+    assert_eq!(
+        got.module_base_urls["m_auth"].rewrites,
+        vec![rule("", "/x")]
+    );
+    assert_eq!(got.module_base_urls["m_pay"].url, "http://pay");
+
+    // 那一格真的被改到时仍然要验：改过的规则才是这次写进去的内容。
+    let mut touched = got.module_base_urls;
+    touched.get_mut("m_auth").unwrap().rewrites = vec![rule("", "/y")];
+    let err = db::with_tx(&pool, |c| {
+        update(
+            c,
+            "env_dev",
+            EnvironmentPatch {
+                module_base_urls: Some(touched.clone()),
+                ..Default::default()
+            },
+        )
+    })
+    .unwrap_err();
+    assert_eq!(err.code(), "validation");
+}

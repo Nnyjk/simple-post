@@ -420,4 +420,25 @@ describe('crud-slice: 同一格子的写按提交的先后顺序发出', () => {
       '两次写按提交的先后顺序发出，后提交的那条不会落在前面',
     );
   });
+
+  it('格子写失败时返回 false 并回滚，界面据此保住本地草稿', async () => {
+    const original = makeEnvironment({
+      moduleBaseUrls: { 'mod-1': { url: 'https://api.example.test' } },
+    });
+    const harness = makeCrudHarness({}, [original]);
+    installIpcMock(async () => {
+      throw new Error('cell write failed');
+    });
+
+    const saved = await harness.slice.setEnvironmentModuleBaseUrl('env-1', 'mod-1', null, [
+      { from: '/api/air', to: '/v1' },
+    ]);
+
+    assert.strictEqual(saved, false, '写失败要报给调用方，它才知道草稿不能丢');
+    assert.deepEqual(
+      harness.bag.environments[0].moduleBaseUrls['mod-1'],
+      { url: 'https://api.example.test' },
+      '失败时回滚到写之前的那一份',
+    );
+  });
 });

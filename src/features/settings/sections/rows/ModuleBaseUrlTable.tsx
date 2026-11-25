@@ -97,19 +97,9 @@ export function ModuleBaseUrlTable({
   );
   const rulesOf = (moduleId: string): RewriteRule[] => drafts[moduleId] ?? persisted(moduleId);
 
-  // 落库的那一份追上了草稿（保存成功），或与草稿完全一致时，交出草稿：此后以环境里的那份为准。
-  // 保存失败时 store 回滚到旧值，草稿不等于它，于是用户的输入留在屏幕上，不会被悄悄丢掉。
-  useEffect(() => {
-    const settled = Object.entries(drafts).filter(([moduleId, draft]) =>
-      areRewriteListsEqual(draft, persisted(moduleId)),
-    );
-    if (settled.length === 0) return;
-    setDrafts((prev) => {
-      const next = { ...prev };
-      for (const [moduleId] of settled) delete next[moduleId];
-      return next;
-    });
-  }, [drafts, persisted]);
+  // 落库的那一份追上了草稿（保存成功）时由 `commit` 自己交还草稿——不能用「相等」推断，
+  // 因为 store 的乐观写入在 IPC 返回之前就把新规则放进去了：相等只能说「已经发出去了」，
+  // 说不了「已经存下去了」。那一次写失败时 store 回滚，草稿若也一起丢，用户的输入就没了。
 
   // 新加的规则行挂载后聚焦它的起点输入框：`+ 添加规则` 之后可以直接输入。
   useEffect(() => {
@@ -126,12 +116,23 @@ export function ModuleBaseUrlTable({
   /**
    * 把一份草稿提交到那一格。有错误时**不提交**：草稿与就地报错一起留在屏幕上，用户改到合法
    * 为止。合法的内容与落库的那份相同时也不发 IPC。
+   *
+   * 草稿只在写**成功**之后交还，且只在它仍是刚才提交的那一份时（用户可能已经接着改了下一处）。
+   * 写失败时 store 已回滚，草稿留着，屏幕上仍是用户的输入。
    */
-  const commit = (moduleId: string, next: readonly RewriteRule[]) => {
+  const commit = async (moduleId: string, next: readonly RewriteRule[]) => {
     const persistable = cleanPersistableRewrites(next);
     if (validateRewriteRules(persistable).hasError) return;
     if (areRewriteListsEqual(persistable, persisted(moduleId))) return;
-    void setEnvironmentModuleBaseUrl(env.id, moduleId, null, persistable);
+    const saved = await setEnvironmentModuleBaseUrl(env.id, moduleId, null, persistable);
+    if (!saved) return;
+    setDrafts((prev) => {
+      const draft = prev[moduleId];
+      if (!draft || !areRewriteListsEqual(draft, next)) return prev;
+      const rest = { ...prev };
+      delete rest[moduleId];
+      return rest;
+    });
   };
 
   const addRule = (moduleId: string) => {
@@ -157,13 +158,13 @@ export function ModuleBaseUrlTable({
     );
     if (next === rules) return;
     writeDraft(moduleId, next);
-    commit(moduleId, next);
+    void commit(moduleId, next);
   };
 
   const deleteRule = (moduleId: string, index: number) => {
     const next = rulesOf(moduleId).filter((_, i) => i !== index);
     writeDraft(moduleId, next);
-    commit(moduleId, next);
+    void commit(moduleId, next);
   };
 
   const dropRule = (moduleId: string, targetIndex: number, zone: RewriteDropZone) => {
@@ -175,7 +176,7 @@ export function ModuleBaseUrlTable({
     const next = reorderRewriteRules(rules, source.index, targetIndex, zone);
     if (next === rules) return;
     writeDraft(moduleId, next);
-    commit(moduleId, next);
+    void commit(moduleId, next);
   };
 
   if (modules.length === 0) {
@@ -360,10 +361,10 @@ export function ModuleBaseUrlTable({
                                 onChange={(e) =>
                                   editRule(module.id, index, { from: e.target.value })
                                 }
-                                onBlur={() => commit(module.id, rulesOf(module.id))}
+                                onBlur={() => void commit(module.id, rulesOf(module.id))}
                                 onKeyDown={(e) => {
                                   if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
-                                  commit(module.id, rulesOf(module.id));
+                                  void commit(module.id, rulesOf(module.id));
                                 }}
                                 placeholder="起点 /api/example"
                                 aria-label={`${module.name} · 第 ${index + 1} 条改写起点`}
@@ -378,10 +379,10 @@ export function ModuleBaseUrlTable({
                               <Input
                                 value={rule.to}
                                 onChange={(e) => editRule(module.id, index, { to: e.target.value })}
-                                onBlur={() => commit(module.id, rulesOf(module.id))}
+                                onBlur={() => void commit(module.id, rulesOf(module.id))}
                                 onKeyDown={(e) => {
                                   if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
-                                  commit(module.id, rulesOf(module.id));
+                                  void commit(module.id, rulesOf(module.id));
                                 }}
                                 placeholder="目标 /api/project-example-example"
                                 aria-label={`${module.name} · 第 ${index + 1} 条改写目标`}

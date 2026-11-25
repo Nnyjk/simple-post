@@ -34,7 +34,7 @@ export interface EnvironmentSectionProps {
     moduleId: string,
     url: string | null,
     rewrites: RewriteRule[] | null,
-  ) => void;
+  ) => Promise<boolean>;
   /** 解析出新环境的 id；创建失败时为 `null`。 */
   addEnvironment: (projectId: string, name: string) => Promise<string | null>;
   deleteEnvironment: (envId: string) => void;
