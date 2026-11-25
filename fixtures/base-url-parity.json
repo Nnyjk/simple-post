@@ -1,5 +1,5 @@
 {
-  "$comment": "base URL 的解析与路径前缀改写。Rust 侧 `crates/simple-post-mcp/src/variable_fill/base_url.rs` 的 `resolve_base_url` 与核心库 `crates/simple-post-core/src/url.rs` 的 `apply_rewrite`、渲染进程侧 `src/lib/url.ts` 的 `resolveEndpointBaseUrl` 与 `applyRewrite` 读同一份文件。两份实现各写一遍规则，只有共享样本能让两份实现保持一致。`cases` 覆盖解析：端点自己的 `baseUrlOverride` 优先，否则读环境里「环境 × 模块」那一格，没有回退层；路径前缀改写规则与地址来源无关，端点自带主机时路径照样改写。`rewriteCases` 覆盖改写规则：端点自己 URL 的路径前缀从 `from` 换成 `to`，命中要求落在路径边界上（`/`），模块地址自带的路径段不参与匹配；目标是绝对地址时拒绝改写；起点是 `/` 时指的是路径根；端点自带完整地址时改写作用在它的路径上。两侧的读取器都必须用 `deny_unknown_fields` 并断言条目数（`cases` 11 条、`rewriteCases` 13 条），免得键名漂了导致整条测试空转。",
+  "$comment": "base URL 的解析与路径前缀改写。Rust 侧 `crates/simple-post-mcp/src/variable_fill/base_url.rs` 的 `resolve_base_url` 与核心库 `crates/simple-post-core/src/url.rs` 的 `apply_rewrites`、渲染进程侧 `src/lib/url.ts` 的 `resolveEndpointBaseUrl` 与 `applyRewrites` 读同一份文件。两份实现各写一遍规则，只有共享样本能让两份实现保持一致。`cases` 覆盖解析：端点自己的 `baseUrlOverride` 优先，否则读环境里「环境 × 模块」那一格，没有回退层；那一格的改写规则与地址来源无关，端点自带主机时路径照样改写。`rewriteCases` 覆盖有序改写：规则按列表顺序匹配，命中首条即停止、不串联后续规则；命中要求落在路径边界上（`/`），模块地址自带的路径段不参与匹配；目标是绝对地址或起点为空的规则被跳过；起点是 `/` 时指的是路径根。两侧的读取器都必须用 `deny_unknown_fields` 并断言条目数（`cases` 11 条、`rewriteCases` 18 条），免得键名漂了导致整条测试空转。",
   "cases": [
     {
       "name": "端点带自定义主机时用自己的地址",
@@ -9,15 +9,16 @@
       "env": {
         "moduleBaseUrls": {
           "mod_a": {
-            "url": "https://mod-a.example.com"
+            "url": "https://mod-a.example.com",
+            "rewrites": []
           }
         }
       },
       "moduleId": "mod_a",
       "expected": {
         "baseUrl": "https://custom.example.com",
-        "rewrite": null,
-        "source": "override"
+        "source": "override",
+        "rewrites": []
       }
     },
     {
@@ -28,15 +29,16 @@
       "env": {
         "moduleBaseUrls": {
           "mod_a": {
-            "url": "https://mod-a.example.com"
+            "url": "https://mod-a.example.com",
+            "rewrites": []
           }
         }
       },
       "moduleId": "mod_a",
       "expected": {
         "baseUrl": "",
-        "rewrite": null,
-        "source": "override"
+        "source": "override",
+        "rewrites": []
       }
     },
     {
@@ -48,21 +50,25 @@
         "moduleBaseUrls": {
           "mod_a": {
             "url": "http://svc.internal:8080/api/a",
-            "rewrite": {
-              "from": "/api/air",
-              "to": "/api/project-a/air"
-            }
+            "rewrites": [
+              {
+                "from": "/api/air",
+                "to": "/api/project-a/air"
+              }
+            ]
           }
         }
       },
       "moduleId": "mod_a",
       "expected": {
         "baseUrl": "https://custom.example.com",
-        "rewrite": {
-          "from": "/api/air",
-          "to": "/api/project-a/air"
-        },
-        "source": "override"
+        "source": "override",
+        "rewrites": [
+          {
+            "from": "/api/air",
+            "to": "/api/project-a/air"
+          }
+        ]
       }
     },
     {
@@ -73,15 +79,16 @@
       "env": {
         "moduleBaseUrls": {
           "mod_a": {
-            "url": "https://mod-a.example.com"
+            "url": "https://mod-a.example.com",
+            "rewrites": []
           }
         }
       },
       "moduleId": "mod_a",
       "expected": {
         "baseUrl": "https://mod-a.example.com",
-        "rewrite": null,
-        "source": "module"
+        "source": "module",
+        "rewrites": []
       }
     },
     {
@@ -93,21 +100,25 @@
         "moduleBaseUrls": {
           "mod_a": {
             "url": "127.0.0.1:8080",
-            "rewrite": {
-              "from": "/api/air",
-              "to": "/api/project-a/air"
-            }
+            "rewrites": [
+              {
+                "from": "/api/air",
+                "to": "/api/project-a/air"
+              }
+            ]
           }
         }
       },
       "moduleId": "mod_a",
       "expected": {
         "baseUrl": "127.0.0.1:8080",
-        "rewrite": {
-          "from": "/api/air",
-          "to": "/api/project-a/air"
-        },
-        "source": "module"
+        "source": "module",
+        "rewrites": [
+          {
+            "from": "/api/air",
+            "to": "/api/project-a/air"
+          }
+        ]
       }
     },
     {
@@ -118,18 +129,20 @@
       "env": {
         "moduleBaseUrls": {
           "mod_a": {
-            "url": "https://mod-a.example.com"
+            "url": "https://mod-a.example.com",
+            "rewrites": []
           },
           "mod_b": {
-            "url": "https://mod-b.example.com"
+            "url": "https://mod-b.example.com",
+            "rewrites": []
           }
         }
       },
       "moduleId": "mod_b",
       "expected": {
         "baseUrl": "https://mod-b.example.com",
-        "rewrite": null,
-        "source": "module"
+        "source": "module",
+        "rewrites": []
       }
     },
     {
@@ -140,15 +153,16 @@
       "env": {
         "moduleBaseUrls": {
           "mod_b": {
-            "url": "https://mod-b.example.com"
+            "url": "https://mod-b.example.com",
+            "rewrites": []
           }
         }
       },
       "moduleId": "mod_a",
       "expected": {
         "baseUrl": "",
-        "rewrite": null,
-        "source": "none"
+        "source": "none",
+        "rewrites": []
       }
     },
     {
@@ -159,15 +173,16 @@
       "env": {
         "moduleBaseUrls": {
           "mod_a": {
-            "url": ""
+            "url": "",
+            "rewrites": []
           }
         }
       },
       "moduleId": "mod_a",
       "expected": {
         "baseUrl": "",
-        "rewrite": null,
-        "source": "none"
+        "source": "none",
+        "rewrites": []
       }
     },
     {
@@ -179,21 +194,25 @@
         "moduleBaseUrls": {
           "mod_a": {
             "url": "",
-            "rewrite": {
-              "from": "/api/air",
-              "to": "/api/project-a/air"
-            }
+            "rewrites": [
+              {
+                "from": "/api/air",
+                "to": "/api/project-a/air"
+              }
+            ]
           }
         }
       },
       "moduleId": "mod_a",
       "expected": {
         "baseUrl": "",
-        "rewrite": {
-          "from": "/api/air",
-          "to": "/api/project-a/air"
-        },
-        "source": "none"
+        "source": "none",
+        "rewrites": [
+          {
+            "from": "/api/air",
+            "to": "/api/project-a/air"
+          }
+        ]
       }
     },
     {
@@ -204,15 +223,16 @@
       "env": {
         "moduleBaseUrls": {
           "mod_a": {
-            "url": "https://mod-a.example.com"
+            "url": "https://mod-a.example.com",
+            "rewrites": []
           }
         }
       },
       "moduleId": null,
       "expected": {
         "baseUrl": "",
-        "rewrite": null,
-        "source": "none"
+        "source": "none",
+        "rewrites": []
       }
     },
     {
@@ -224,8 +244,8 @@
       "moduleId": "mod_a",
       "expected": {
         "baseUrl": "",
-        "rewrite": null,
-        "source": "none"
+        "source": "none",
+        "rewrites": []
       }
     }
   ],
@@ -233,116 +253,223 @@
     {
       "name": "起点命中时换成目标",
       "url": "/api/air/xxxxx",
-      "rewrite": {
-        "from": "/api/air",
-        "to": "/api/project-a/air"
-      },
-      "expected": "/api/project-a/air/xxxxx"
+      "expected": "/api/project-a/air/xxxxx",
+      "rewrites": [
+        {
+          "from": "/api/air",
+          "to": "/api/project-a/air"
+        }
+      ]
     },
     {
       "name": "没有规则时地址原样保留",
       "url": "/api/air/xxxxx",
-      "rewrite": null,
-      "expected": "/api/air/xxxxx"
+      "expected": "/api/air/xxxxx",
+      "rewrites": []
     },
     {
       "name": "起点为空时地址原样保留",
       "url": "/api/air/xxxxx",
-      "rewrite": {
-        "from": "",
-        "to": "/api/project-a/air"
-      },
-      "expected": "/api/air/xxxxx"
+      "expected": "/api/air/xxxxx",
+      "rewrites": [
+        {
+          "from": "",
+          "to": "/api/project-a/air"
+        }
+      ]
     },
     {
       "name": "地址与起点完全相同时不改动其余部分",
       "url": "/api/air",
-      "rewrite": {
-        "from": "/api/air",
-        "to": "/api/project-a/air"
-      },
-      "expected": "/api/project-a/air"
+      "expected": "/api/project-a/air",
+      "rewrites": [
+        {
+          "from": "/api/air",
+          "to": "/api/project-a/air"
+        }
+      ]
     },
     {
       "name": "起点只在路径边界上命中",
       "url": "/api/airplane/xxxxx",
-      "rewrite": {
-        "from": "/api/air",
-        "to": "/api/project-a/air"
-      },
-      "expected": "/api/airplane/xxxxx"
+      "expected": "/api/airplane/xxxxx",
+      "rewrites": [
+        {
+          "from": "/api/air",
+          "to": "/api/project-a/air"
+        }
+      ]
     },
     {
       "name": "起点带尾部斜杠时按去掉斜杠后的起点命中",
       "url": "/api/air/xxxxx",
-      "rewrite": {
-        "from": "/api/air/",
-        "to": "/api/project-a/air"
-      },
-      "expected": "/api/project-a/air/xxxxx"
+      "expected": "/api/project-a/air/xxxxx",
+      "rewrites": [
+        {
+          "from": "/api/air/",
+          "to": "/api/project-a/air"
+        }
+      ]
     },
     {
       "name": "查询串紧跟起点时也算命中",
       "url": "/api/air?x=1",
-      "rewrite": {
-        "from": "/api/air",
-        "to": "/api/project-a/air"
-      },
-      "expected": "/api/project-a/air?x=1"
+      "expected": "/api/project-a/air?x=1",
+      "rewrites": [
+        {
+          "from": "/api/air",
+          "to": "/api/project-a/air"
+        }
+      ]
     },
     {
       "name": "目标为空时把这段前缀去掉",
       "url": "/api/air/xxxxx",
-      "rewrite": {
-        "from": "/api/air",
-        "to": ""
-      },
-      "expected": "/xxxxx"
+      "expected": "/xxxxx",
+      "rewrites": [
+        {
+          "from": "/api/air",
+          "to": ""
+        }
+      ]
     },
     {
       "name": "起点与地址开头不一致时不改写",
       "url": "/api/air/xxxxx",
-      "rewrite": {
-        "from": "/api/other",
-        "to": "/api/project-a/other"
-      },
-      "expected": "/api/air/xxxxx"
+      "expected": "/api/air/xxxxx",
+      "rewrites": [
+        {
+          "from": "/api/other",
+          "to": "/api/project-a/other"
+        }
+      ]
     },
     {
       "name": "起点是路径根时整条路径换到目标底下",
       "url": "/api/air/list",
-      "rewrite": {
-        "from": "/",
-        "to": "/gateway"
-      },
-      "expected": "/gateway/api/air/list"
+      "expected": "/gateway/api/air/list",
+      "rewrites": [
+        {
+          "from": "/",
+          "to": "/gateway"
+        }
+      ]
     },
     {
       "name": "起点是路径根且地址就是根时换到目标底下",
       "url": "/",
-      "rewrite": {
-        "from": "/",
-        "to": "/gateway"
-      },
-      "expected": "/gateway/"
+      "expected": "/gateway/",
+      "rewrites": [
+        {
+          "from": "/",
+          "to": "/gateway"
+        }
+      ]
     },
     {
       "name": "目标带 scheme 时不改写",
       "url": "/api/air/xxxxx",
-      "rewrite": {
-        "from": "/api/air",
-        "to": "https://other.example/api"
-      },
-      "expected": "/api/air/xxxxx"
+      "expected": "/api/air/xxxxx",
+      "rewrites": [
+        {
+          "from": "/api/air",
+          "to": "https://other.example/api"
+        }
+      ]
     },
     {
       "name": "端点自带完整地址时只改它的路径",
       "url": "https://h.example/api/air/list?x=1",
-      "rewrite": {
-        "from": "/api/air",
-        "to": "/api/project-a/air"
-      },
-      "expected": "https://h.example/api/project-a/air/list?x=1"
+      "expected": "https://h.example/api/project-a/air/list?x=1",
+      "rewrites": [
+        {
+          "from": "/api/air",
+          "to": "/api/project-a/air"
+        }
+      ]
+    },
+    {
+      "name": "首条命中后不再串联后续规则",
+      "url": "/api/air/list",
+      "rewrites": [
+        {
+          "from": "/api/air",
+          "to": "/v1/air"
+        },
+        {
+          "from": "/api",
+          "to": "/v2"
+        },
+        {
+          "from": "/v1/air",
+          "to": "/chained"
+        }
+      ],
+      "expected": "/v1/air/list"
+    },
+    {
+      "name": "首条不命中时回落到后续规则",
+      "url": "/api/water/list",
+      "rewrites": [
+        {
+          "from": "/api/air",
+          "to": "/v1/air"
+        },
+        {
+          "from": "/api",
+          "to": "/v2"
+        }
+      ],
+      "expected": "/v2/water/list"
+    },
+    {
+      "name": "起点是根且排在前面时全部路径都走它",
+      "url": "/api/air/list",
+      "rewrites": [
+        {
+          "from": "/",
+          "to": "/gateway"
+        },
+        {
+          "from": "/api/air",
+          "to": "/v1/air"
+        }
+      ],
+      "expected": "/gateway/api/air/list"
+    },
+    {
+      "name": "具体前缀排在根前面时具体前缀优先",
+      "url": "/api/air/list",
+      "rewrites": [
+        {
+          "from": "/api/air",
+          "to": "/v1/air"
+        },
+        {
+          "from": "/",
+          "to": "/gateway"
+        }
+      ],
+      "expected": "/v1/air/list"
+    },
+    {
+      "name": "起点为空与绝对目标的规则被跳过并回落到下一条",
+      "url": "/api/air/list",
+      "rewrites": [
+        {
+          "from": "",
+          "to": "/nowhere"
+        },
+        {
+          "from": "/api/air",
+          "to": "https://other.example/api"
+        },
+        {
+          "from": "/api/air",
+          "to": "/v1/air"
+        }
+      ],
+      "expected": "/v1/air/list"
     }
   ]
 }

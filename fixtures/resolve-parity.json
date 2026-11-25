@@ -1,5 +1,5 @@
 {
-  "$comment": "两侧请求准备规则的一致性样本。Rust 的 `resolve_endpoint`（MCP 端）与 TS 的 `prepareRequest`（桌面端）读同一份本文件，产出必须逐字节相同。两份实现各写一遍规则，故只有一份共享样本才能钉住它们没分叉。`expected.missingVars` 与 `expected.missingPathParams` 比的是**集合**而非顺序：两侧收集未解析项的次序各自是本地的（渲染层按它渲染告警胶囊，MCP 侧按它报 `_missing_vars`），契约只承诺「哪些变量没解析出来」「哪个路径占位符没取到值」。multipart 另有一份样本（`multipart-parity.json`），因为它的 boundary 每次现生成、值无法写死。`input.rewrite` 在场时 base URL 与路径前缀改写规则一起住在环境里（环境 × 模块）那一格：渲染进程那一侧直接拿两个值，MCP 那一侧的 `resolve_endpoint` 只从格子里读改写规则，故这类用例在两侧走的是不同的取数路径。`input.rewrite` 缺席时 base URL 走端点自己的 override。",
+  "$comment": "两侧请求准备规则的一致性样本。Rust 的 `resolve_endpoint`（MCP 端）与 TS 的 `prepareRequest`（桌面端）读同一份本文件，产出必须逐字节相同。两份实现各写一遍规则，故只有一份共享样本才能钉住它们没分叉。`expected.missingVars` 与 `expected.missingPathParams` 比的是**集合**而非顺序：两侧收集未解析项的次序各自是本地的（渲染层按它渲染告警胶囊，MCP 侧按它报 `_missing_vars`），契约只承诺「哪些变量没解析出来」「哪个路径占位符没取到值」。multipart 另有一份样本（`multipart-parity.json`），因为它的 boundary 每次现生成、值无法写死。`input.rewrites` 非空时 base URL 与路径前缀改写规则一起住在环境里（环境 × 模块）那一格：渲染进程那一侧直接拿两个值，MCP 那一侧的 `resolve_endpoint` 只从格子里读改写规则，故这类用例在两侧走的是不同的取数路径。`input.rewrite` 缺席时 base URL 走端点自己的 override。",
   "cases": [
     {
       "name": "变量替换 + query + bearer 鉴权 + json body",
@@ -13,12 +13,35 @@
         "urlPath": "/users/{{userId}}",
         "baseUrl": "https://{{host}}/v1",
         "params": [
-          { "id": "p1", "key": "page", "value": "1", "enabled": true },
-          { "id": "p2", "key": "skip", "value": "x", "enabled": false }
+          {
+            "id": "p1",
+            "key": "page",
+            "value": "1",
+            "enabled": true
+          },
+          {
+            "id": "p2",
+            "key": "skip",
+            "value": "x",
+            "enabled": false
+          }
         ],
-        "headers": [{ "id": "h1", "key": "X-Token", "value": "Bearer {{token}}", "enabled": true }],
-        "body": { "mode": "json", "content": "{\"id\":\"{{userId}}\"}" },
-        "auth": { "kind": "bearer", "bearer": "{{token}}" }
+        "headers": [
+          {
+            "id": "h1",
+            "key": "X-Token",
+            "value": "Bearer {{token}}",
+            "enabled": true
+          }
+        ],
+        "body": {
+          "mode": "json",
+          "content": "{\"id\":\"{{userId}}\"}"
+        },
+        "auth": {
+          "kind": "bearer",
+          "bearer": "{{token}}"
+        }
       },
       "expected": {
         "url": "https://api.example.test/v1/users/42?page=1",
@@ -43,10 +66,17 @@
         "baseUrl": "https://api.example.test",
         "params": [],
         "headers": [],
-        "body": { "mode": "form", "content": "name=ada" },
+        "body": {
+          "mode": "form",
+          "content": "name=ada"
+        },
         "auth": {
           "kind": "apikey",
-          "apikey": { "key": "api_key", "value": "{{key}}", "inLocation": "query" }
+          "apikey": {
+            "key": "api_key",
+            "value": "{{key}}",
+            "inLocation": "query"
+          }
         }
       },
       "expected": {
@@ -70,8 +100,13 @@
         "baseUrl": "https://h.test",
         "params": [],
         "headers": [],
-        "body": { "mode": "json", "content": "{{empty}}" },
-        "auth": { "kind": "none" }
+        "body": {
+          "mode": "json",
+          "content": "{{empty}}"
+        },
+        "auth": {
+          "kind": "none"
+        }
       },
       "expected": {
         "url": "https://h.test/x",
@@ -94,8 +129,13 @@
         "baseUrl": "https://h.test",
         "params": [],
         "headers": [],
-        "body": { "mode": "none", "content": "" },
-        "auth": { "kind": "none" }
+        "body": {
+          "mode": "none",
+          "content": ""
+        },
+        "auth": {
+          "kind": "none"
+        }
       },
       "expected": {
         "url": "https://h.test/v1/api",
@@ -113,10 +153,22 @@
         "method": "GET",
         "urlPath": "/search",
         "baseUrl": "https://h.test",
-        "params": [{ "id": "p1", "key": "q", "value": "{{q}}", "enabled": true }],
+        "params": [
+          {
+            "id": "p1",
+            "key": "q",
+            "value": "{{q}}",
+            "enabled": true
+          }
+        ],
         "headers": [],
-        "body": { "mode": "none", "content": "" },
-        "auth": { "kind": "none" }
+        "body": {
+          "mode": "none",
+          "content": ""
+        },
+        "auth": {
+          "kind": "none"
+        }
       },
       "expected": {
         "url": "https://h.test/search?q=a%20b",
@@ -132,10 +184,22 @@
         "method": "GET",
         "urlPath": "/x",
         "baseUrl": "https://h.test",
-        "params": [{ "id": "p1", "key": "", "value": "{{unknown}}", "enabled": true }],
+        "params": [
+          {
+            "id": "p1",
+            "key": "",
+            "value": "{{unknown}}",
+            "enabled": true
+          }
+        ],
         "headers": [],
-        "body": { "mode": "none", "content": "" },
-        "auth": { "kind": "none" }
+        "body": {
+          "mode": "none",
+          "content": ""
+        },
+        "auth": {
+          "kind": "none"
+        }
       },
       "expected": {
         "url": "https://h.test/x",
@@ -156,8 +220,17 @@
         "baseUrl": "https://h.test",
         "params": [],
         "headers": [],
-        "body": { "mode": "none", "content": "" },
-        "auth": { "kind": "basic", "basic": { "username": "{{u}}", "password": "{{p}}" } }
+        "body": {
+          "mode": "none",
+          "content": ""
+        },
+        "auth": {
+          "kind": "basic",
+          "basic": {
+            "username": "{{u}}",
+            "password": "{{p}}"
+          }
+        }
       },
       "expected": {
         "url": "https://h.test/me",
@@ -180,10 +253,17 @@
         "baseUrl": "https://h.test",
         "params": [],
         "headers": [],
-        "body": { "mode": "none", "content": "" },
+        "body": {
+          "mode": "none",
+          "content": ""
+        },
         "auth": {
           "kind": "apikey",
-          "apikey": { "key": "api_key", "value": "{{k}}", "inLocation": "query" }
+          "apikey": {
+            "key": "api_key",
+            "value": "{{k}}",
+            "inLocation": "query"
+          }
         }
       },
       "expected": {
@@ -201,13 +281,28 @@
         "urlPath": "/users/{id}/posts/{postId}",
         "baseUrl": "https://h.test",
         "pathParams": [
-          { "id": "pp1", "key": "id", "value": "42", "enabled": true },
-          { "id": "pp2", "key": "postId", "value": "7", "enabled": true }
+          {
+            "id": "pp1",
+            "key": "id",
+            "value": "42",
+            "enabled": true
+          },
+          {
+            "id": "pp2",
+            "key": "postId",
+            "value": "7",
+            "enabled": true
+          }
         ],
         "params": [],
         "headers": [],
-        "body": { "mode": "none", "content": "" },
-        "auth": { "kind": "none" }
+        "body": {
+          "mode": "none",
+          "content": ""
+        },
+        "auth": {
+          "kind": "none"
+        }
       },
       "expected": {
         "url": "https://h.test/users/42/posts/7",
@@ -224,11 +319,23 @@
         "method": "GET",
         "urlPath": "/files/{name}",
         "baseUrl": "https://h.test",
-        "pathParams": [{ "id": "pp1", "key": "name", "value": "a b/c", "enabled": true }],
+        "pathParams": [
+          {
+            "id": "pp1",
+            "key": "name",
+            "value": "a b/c",
+            "enabled": true
+          }
+        ],
         "params": [],
         "headers": [],
-        "body": { "mode": "none", "content": "" },
-        "auth": { "kind": "none" }
+        "body": {
+          "mode": "none",
+          "content": ""
+        },
+        "auth": {
+          "kind": "none"
+        }
       },
       "expected": {
         "url": "https://h.test/files/a%20b%2Fc",
@@ -248,8 +355,13 @@
         "pathParams": [],
         "params": [],
         "headers": [],
-        "body": { "mode": "none", "content": "" },
-        "auth": { "kind": "none" }
+        "body": {
+          "mode": "none",
+          "content": ""
+        },
+        "auth": {
+          "kind": "none"
+        }
       },
       "expected": {
         "url": "https://h.test/users/{id}",
@@ -261,16 +373,30 @@
     },
     {
       "name": "路径参数的值先解析变量再替换",
-      "env": { "uid": "42" },
+      "env": {
+        "uid": "42"
+      },
       "input": {
         "method": "GET",
         "urlPath": "/users/{id}",
         "baseUrl": "https://h.test",
-        "pathParams": [{ "id": "pp1", "key": "id", "value": "{{uid}}", "enabled": true }],
+        "pathParams": [
+          {
+            "id": "pp1",
+            "key": "id",
+            "value": "{{uid}}",
+            "enabled": true
+          }
+        ],
         "params": [],
         "headers": [],
-        "body": { "mode": "none", "content": "" },
-        "auth": { "kind": "none" }
+        "body": {
+          "mode": "none",
+          "content": ""
+        },
+        "auth": {
+          "kind": "none"
+        }
       },
       "expected": {
         "url": "https://h.test/users/42",
@@ -287,11 +413,23 @@
         "method": "GET",
         "urlPath": "/users/{id}",
         "baseUrl": "https://h.test",
-        "pathParams": [{ "id": "pp1", "key": "id", "value": "{{uid}}", "enabled": true }],
+        "pathParams": [
+          {
+            "id": "pp1",
+            "key": "id",
+            "value": "{{uid}}",
+            "enabled": true
+          }
+        ],
         "params": [],
         "headers": [],
-        "body": { "mode": "none", "content": "" },
-        "auth": { "kind": "none" }
+        "body": {
+          "mode": "none",
+          "content": ""
+        },
+        "auth": {
+          "kind": "none"
+        }
       },
       "expected": {
         "url": "https://h.test/users/{id}",
@@ -308,11 +446,30 @@
         "method": "GET",
         "urlPath": "/users/{id}",
         "baseUrl": "https://h.test",
-        "pathParams": [{ "id": "pp1", "key": "id", "value": "42", "enabled": true }],
-        "params": [{ "id": "p1", "key": "id", "value": "7", "enabled": true }],
+        "pathParams": [
+          {
+            "id": "pp1",
+            "key": "id",
+            "value": "42",
+            "enabled": true
+          }
+        ],
+        "params": [
+          {
+            "id": "p1",
+            "key": "id",
+            "value": "7",
+            "enabled": true
+          }
+        ],
         "headers": [],
-        "body": { "mode": "none", "content": "" },
-        "auth": { "kind": "none" }
+        "body": {
+          "mode": "none",
+          "content": ""
+        },
+        "auth": {
+          "kind": "none"
+        }
       },
       "expected": {
         "url": "https://h.test/users/42?id=7",
@@ -332,14 +489,66 @@
         "method": "GET",
         "urlPath": "/api/air/list",
         "baseUrl": "http://{{host}}",
-        "rewrite": { "from": "/api/air", "to": "/api/{{project}}/air" },
         "params": [],
         "headers": [],
-        "body": { "mode": "none", "content": "" },
-        "auth": { "kind": "none" }
+        "body": {
+          "mode": "none",
+          "content": ""
+        },
+        "auth": {
+          "kind": "none"
+        },
+        "rewrites": [
+          {
+            "from": "/api/air",
+            "to": "/api/{{project}}/air"
+          }
+        ]
       },
       "expected": {
         "url": "http://127.0.0.1:8080/api/project-a/air/list",
+        "headers": [["Accept", "application/json"]],
+        "body": null,
+        "missingVars": [],
+        "missingPathParams": []
+      }
+    },
+    {
+      "name": "多条改写规则按顺序匹配：命中首条即停止，后续规则不再作用在结果上",
+      "env": {
+        "host": "127.0.0.1:8080",
+        "project": "project-a"
+      },
+      "input": {
+        "method": "GET",
+        "urlPath": "/api/air/list",
+        "baseUrl": "http://{{host}}",
+        "rewrites": [
+          {
+            "from": "/api/air",
+            "to": "/v1/{{project}}/air"
+          },
+          {
+            "from": "/api",
+            "to": "/v2"
+          },
+          {
+            "from": "/v1",
+            "to": "/chained"
+          }
+        ],
+        "params": [],
+        "headers": [],
+        "body": {
+          "mode": "none",
+          "content": ""
+        },
+        "auth": {
+          "kind": "none"
+        }
+      },
+      "expected": {
+        "url": "http://127.0.0.1:8080/v1/project-a/air/list",
         "headers": [["Accept", "application/json"]],
         "body": null,
         "missingVars": [],
@@ -357,9 +566,21 @@
         "urlPath": "/graphql",
         "baseUrl": "https://{{host}}",
         "params": [],
-        "headers": [{ "id": "h1", "key": "Content-Type", "value": "text/plain", "enabled": true }],
-        "body": { "mode": "none", "content": "" },
-        "auth": { "kind": "none" },
+        "headers": [
+          {
+            "id": "h1",
+            "key": "Content-Type",
+            "value": "text/plain",
+            "enabled": true
+          }
+        ],
+        "body": {
+          "mode": "none",
+          "content": ""
+        },
+        "auth": {
+          "kind": "none"
+        },
         "protocol": "graphql",
         "graphql": {
           "query": "query User($id: ID!) { user(id: $id) { id } }",
@@ -389,8 +610,13 @@
         "baseUrl": "https://{{host}}",
         "params": [],
         "headers": [],
-        "body": { "mode": "none", "content": "" },
-        "auth": { "kind": "none" },
+        "body": {
+          "mode": "none",
+          "content": ""
+        },
+        "auth": {
+          "kind": "none"
+        },
         "protocol": "graphql",
         "graphql": {
           "query": "{ ping }",
@@ -420,8 +646,13 @@
         "baseUrl": "https://{{host}}",
         "params": [],
         "headers": [],
-        "body": { "mode": "none", "content": "" },
-        "auth": { "kind": "none" },
+        "body": {
+          "mode": "none",
+          "content": ""
+        },
+        "auth": {
+          "kind": "none"
+        },
         "protocol": "graphql",
         "graphql": {
           "query": "mutation { noop }",
@@ -452,8 +683,13 @@
         "baseUrl": "https://{{host}}",
         "params": [],
         "headers": [],
-        "body": { "mode": "none", "content": "" },
-        "auth": { "kind": "none" },
+        "body": {
+          "mode": "none",
+          "content": ""
+        },
+        "auth": {
+          "kind": "none"
+        },
         "protocol": "graphql",
         "graphql": {
           "query": "query Q {  user(id: $id) { id } }",

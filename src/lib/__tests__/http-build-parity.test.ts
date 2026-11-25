@@ -55,12 +55,12 @@ function envOf(variables: Record<string, string>): Environment {
 }
 
 describe('prepareRequest 与 Rust 的 resolve_endpoint 产出一致', () => {
-  it('样本里恰好有 19 条用例', () => {
+  it('样本里恰好有 20 条用例', () => {
     // 条数写死：样本的键名漂了或样本被改小时，这条断言必须变红。写成「大于 0」
     // 的话，下面那几行断言一条都走不到，测试还是绿的。三条 GraphQL 用例由后端追加。
     assert.equal(
       FIXTURE.cases.length,
-      19,
+      20,
       '用例的条数变了：键名漂了或样本被改小时，这条断言必须变红',
     );
   });

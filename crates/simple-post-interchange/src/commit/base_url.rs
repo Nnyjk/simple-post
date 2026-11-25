@@ -83,11 +83,11 @@ fn push_candidate(candidates: &mut Vec<String>, url: &str) {
 
 /// 把一个模块的地址写进它那一格，并回报。
 ///
-/// 导入只写规格里给出的那一段：规格给了地址就写地址，规格没提代理时那一格原有的代理保留，
-/// 用户配的网关不被一次导入抹掉。
+/// 导入只写规格里给出的那一段：规格给了地址就写地址，规格没提改写规则时那一格原有的规则
+/// 保留，用户配好的路径前缀改写不被一次导入抹掉。
 ///
-/// 报告里写回那一格**实际**的改写规则：规格给了规则就是规格那个，规格没给就是那一格原来
-/// 那个（可能没有规则）。
+/// 报告里写回那一格**实际**的改写规则：规格给了规则就是规格那几条，规格没给就是那一格原来
+/// 那些（可能没有规则）。
 ///
 /// 没有默认环境就没有格子可填，于是地址无处可去——报告里 `environment_name` 为 `None`，
 /// 用户能看见「地址没有落进任何一格」，而不是以为它已经生效了。
@@ -95,25 +95,31 @@ pub(super) fn wire_base_url(
     conn: &mut Connection,
     module_id: &str,
     url: &str,
-    rewrite: Option<&RewriteRule>,
+    rewrites: &[RewriteRule],
     environment: Option<&Environment>,
     report: &mut CommitReport,
 ) -> Result<(), AppError> {
-    let mut applied_rewrite = None;
+    let mut applied_rewrites = Vec::new();
     if let Some(env) = environment {
-        // `rewrite` 传 `None` = 那一格的规则不动，故规格没提规则时该格原有的规则保留。
+        // 规则列表为空 = 那一格的规则不动，故规格没给规则时该格原有的规则保留。
+        let value = if rewrites.is_empty() {
+            None
+        } else {
+            Some(rewrites)
+        };
         let updated =
-            db::environments::set_module_base_url(conn, &env.id, module_id, Some(url), rewrite)?;
+            db::environments::set_module_base_url(conn, &env.id, module_id, Some(url), value)?;
         // 读回那一格实际的规则，而不是把规格里那份原样抄进报告：规格没给规则时那一格
         // 可能本来就配着。
-        applied_rewrite = updated
+        applied_rewrites = updated
             .module_base_urls
             .get(module_id)
-            .and_then(|cell| cell.rewrite.clone());
+            .map(|cell| cell.rewrites.clone())
+            .unwrap_or_default();
     }
     report.base_urls.push(super::AppliedBaseUrl {
         url: url.to_string(),
-        rewrite: applied_rewrite,
+        rewrites: applied_rewrites,
         module_id: module_id.to_string(),
         environment_name: environment.map(|e| e.name.clone()),
     });

@@ -19,12 +19,15 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  applyRewrite,
+  applyRewrites,
   collapseUrlSlashes,
+  findShadowedRuleIndices,
   joinBaseUrl,
+  normalizeRewriteFrom,
   resolveEndpointBaseUrl,
   resolveVars,
   resolveVarsWithMissing,
+  validateRewriteRules,
 } from '../url';
 import type { EndpointDetail, Environment } from '@/types/domain';
 
@@ -40,7 +43,7 @@ const ENV = {
     mod_b: { url: 'https://b-data.example.com' },
     mod_c: {
       url: 'http://svc.internal:8080/api/a',
-      rewrite: { from: '/api/air', to: '/api/project-a/air' },
+      rewrites: [{ from: '/api/air', to: '/api/project-a/air' }],
     },
   },
 } as unknown as Environment;
@@ -57,7 +60,7 @@ describe('resolveEndpointBaseUrl — 自定义 is selected by presence, not trut
     const r = resolveEndpointBaseUrl(endpoint(), ENV, 'mod_a');
     assert.equal(r.baseUrl, 'https://a-data.example.com');
     assert.equal(r.source, 'module');
-    assert.equal(r.rewrite, null);
+    assert.deepEqual(r.rewrites, []);
   });
 
   it('treats an empty override as 自定义 with no prefix', () => {
@@ -65,7 +68,7 @@ describe('resolveEndpointBaseUrl — 自定义 is selected by presence, not trut
     assert.equal(r.source, 'override');
     // 要点就在这里：`resolveEndpointBaseUrl` 不得回落到模块那一格。
     assert.equal(r.baseUrl, '');
-    assert.equal(r.rewrite, null);
+    assert.deepEqual(r.rewrites, []);
   });
 
   it('keeps a legacy host override working as a prefix', () => {
@@ -78,7 +81,7 @@ describe('resolveEndpointBaseUrl — 自定义 is selected by presence, not trut
     assert.equal(r.baseUrl, 'https://custom.example.com');
   });
 
-  it('keeps the cell’s rewrite when the endpoint carries its own address', () => {
+  it('keeps the cell’s rewrites when the endpoint carries its own address', () => {
     // 改写只作用在端点自己的路径上，与主机是谁的无关：端点自带地址时路径照样改写。
     const r = resolveEndpointBaseUrl(
       endpoint({ baseUrlOverride: 'https://custom.example.com' }),
@@ -86,7 +89,7 @@ describe('resolveEndpointBaseUrl — 自定义 is selected by presence, not trut
       'mod_c',
     );
     assert.equal(r.source, 'override');
-    assert.deepEqual(r.rewrite, { from: '/api/air', to: '/api/project-a/air' });
+    assert.deepEqual(r.rewrites, [{ from: '/api/air', to: '/api/project-a/air' }]);
   });
 
   it('resolves to nothing when no env is selected', () => {
@@ -112,10 +115,10 @@ describe('resolveEndpointBaseUrl — one independent cell per (module, env)', ()
     );
   });
 
-  it('gives the cell’s rewrite along with its address', () => {
+  it('gives the cell’s rewrites along with its address', () => {
     const r = resolveEndpointBaseUrl(endpoint(), ENV, 'mod_c');
     assert.equal(r.baseUrl, 'http://svc.internal:8080/api/a');
-    assert.deepEqual(r.rewrite, { from: '/api/air', to: '/api/project-a/air' });
+    assert.deepEqual(r.rewrites, [{ from: '/api/air', to: '/api/project-a/air' }]);
     assert.equal(r.source, 'module');
   });
 
@@ -148,41 +151,141 @@ describe('resolveEndpointBaseUrl — one independent cell per (module, env)', ()
  *
  * 路径边界这一条是必需的：没有它，`/api/air` 会命中 `/api/airplane`。
  */
-describe('applyRewrite — replaces the endpoint’s own path prefix', () => {
+describe('applyRewrites — replaces the endpoint’s own path prefix in order', () => {
+  const rule = (from: string, to: string) => ({ from, to });
+
   it('replaces the prefix and keeps the rest', () => {
     assert.equal(
-      applyRewrite('/api/air/xxxxx', { from: '/api/air', to: '/api/project-a/air' }),
+      applyRewrites('/api/air/xxxxx', [rule('/api/air', '/api/project-a/air')]),
       '/api/project-a/air/xxxxx',
     );
   });
 
   it('leaves the URL alone when there is no rule', () => {
-    assert.equal(applyRewrite('/api/air/xxxxx', null), '/api/air/xxxxx');
+    assert.equal(applyRewrites('/api/air/xxxxx', null), '/api/air/xxxxx');
+    assert.equal(applyRewrites('/api/air/xxxxx', []), '/api/air/xxxxx');
   });
 
   it('leaves the URL alone when the start is blank', () => {
     assert.equal(
-      applyRewrite('/api/air/xxxxx', { from: '   ', to: '/api/project-a/air' }),
+      applyRewrites('/api/air/xxxxx', [rule('   ', '/api/project-a/air')]),
       '/api/air/xxxxx',
     );
   });
 
   it('does not match a prefix that ends in the middle of a path segment', () => {
     assert.equal(
-      applyRewrite('/api/airplane/xxxxx', { from: '/api/air', to: '/api/project-a/air' }),
+      applyRewrites('/api/airplane/xxxxx', [rule('/api/air', '/api/project-a/air')]),
       '/api/airplane/xxxxx',
     );
   });
 
   it('ignores the trailing slashes of the start', () => {
     assert.equal(
-      applyRewrite('/api/air/xxxxx', { from: '/api/air/', to: '/api/project-a/air' }),
+      applyRewrites('/api/air/xxxxx', [rule('/api/air/', '/api/project-a/air')]),
       '/api/project-a/air/xxxxx',
     );
   });
 
   it('drops the prefix when the target is blank', () => {
-    assert.equal(applyRewrite('/api/air/xxxxx', { from: '/api/air', to: '' }), '/xxxxx');
+    assert.equal(applyRewrites('/api/air/xxxxx', [rule('/api/air', '')]), '/xxxxx');
+  });
+
+  it('stops at the first match and never chains the later rules', () => {
+    const rules = [rule('/api/air', '/v1/air'), rule('/api', '/v2'), rule('/v1/air', '/chained')];
+    assert.equal(applyRewrites('/api/air/list', rules), '/v1/air/list');
+  });
+
+  it('falls through to the next rule when the first misses', () => {
+    const rules = [rule('/api/air', '/v1/air'), rule('/api', '/v2')];
+    assert.equal(applyRewrites('/api/water/list', rules), '/v2/water/list');
+  });
+
+  it('lets rule order decide whether the root or a specific prefix wins', () => {
+    const catchAllFirst = [rule('/', '/gateway'), rule('/api/air', '/v1/air')];
+    assert.equal(applyRewrites('/api/air/list', catchAllFirst), '/gateway/api/air/list');
+    const specificFirst = [rule('/api/air', '/v1/air'), rule('/', '/gateway')];
+    assert.equal(applyRewrites('/api/air/list', specificFirst), '/v1/air/list');
+  });
+
+  it('skips unusable rules and lets the next one match', () => {
+    const rules = [
+      rule('', '/nowhere'),
+      rule('/api/air', 'https://other.example/api'),
+      rule('/api/air', '/v1/air'),
+    ];
+    assert.equal(applyRewrites('/api/air/list', rules), '/v1/air/list');
+  });
+});
+
+describe('normalizeRewriteFrom — the de-duplication key', () => {
+  it('trims and strips every trailing slash', () => {
+    assert.equal(normalizeRewriteFrom('  /api/air/  '), '/api/air');
+    assert.equal(normalizeRewriteFrom('/api/air//'), '/api/air');
+    assert.equal(normalizeRewriteFrom('/'), '/');
+    assert.equal(normalizeRewriteFrom('///'), '/');
+    assert.equal(normalizeRewriteFrom('   '), '');
+  });
+});
+
+describe('validateRewriteRules — local draft validation before persisting', () => {
+  const rule = (from: string, to: string) => ({ from, to });
+
+  it('accepts a blank placeholder row so a just-added row can be typed into', () => {
+    const result = validateRewriteRules([rule('', ''), rule('/api/air', '/v1')]);
+    assert.equal(result.hasError, false);
+    assert.deepEqual(result.errorsByIndex, {});
+  });
+
+  it('flags a target without a start', () => {
+    const result = validateRewriteRules([rule('', '/v1')]);
+    assert.equal(result.hasError, true);
+    assert.match(result.errorsByIndex[0], /起点/);
+  });
+
+  it('flags an absolute target — a rewrite may only touch the path', () => {
+    const result = validateRewriteRules([rule('/api/air', 'https://other.example/api')]);
+    assert.equal(result.hasError, true);
+    assert.match(result.errorsByIndex[0], /协议|主机/);
+  });
+
+  it('flags every row sharing a normalized start', () => {
+    const result = validateRewriteRules([rule('/api/air', '/v1'), rule('/api/air/', '/v2')]);
+    assert.equal(result.hasError, true);
+    assert.match(result.errorsByIndex[0], /重复/);
+    assert.match(result.errorsByIndex[1], /重复/);
+  });
+
+  it('accepts distinct starts', () => {
+    const result = validateRewriteRules([rule('/api/air', '/v1'), rule('/api/water', '/v2')]);
+    assert.equal(result.hasError, false);
+  });
+});
+
+describe('findShadowedRuleIndices — the non-blocking order hint', () => {
+  const rule = (from: string, to: string) => ({ from, to });
+
+  it('reports a later rule covered by a root rule in front of it', () => {
+    assert.deepEqual(findShadowedRuleIndices([rule('/', '/gateway'), rule('/api/air', '/v1')]), {
+      1: 0,
+    });
+  });
+
+  it('reports a later rule covered by a parent prefix in front of it', () => {
+    assert.deepEqual(findShadowedRuleIndices([rule('/api', '/v2'), rule('/api/air', '/v1')]), {
+      1: 0,
+    });
+  });
+
+  it('stays quiet when the specific prefix comes first', () => {
+    assert.deepEqual(findShadowedRuleIndices([rule('/api/air', '/v1'), rule('/api', '/v2')]), {});
+  });
+
+  it('is not fooled by a prefix that only shares a segment start', () => {
+    assert.deepEqual(
+      findShadowedRuleIndices([rule('/api/air', '/v1'), rule('/api/airplane', '/v2')]),
+      {},
+    );
   });
 });
 

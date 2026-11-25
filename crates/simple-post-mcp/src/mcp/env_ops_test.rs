@@ -51,7 +51,7 @@ fn seed(st: &AppState) {
                     "m_env".to_string(),
                     ModuleBaseUrl {
                         url: "http://example.test".into(),
-                        rewrite: None,
+                        rewrites: Vec::new(),
                     },
                 )]
                 .into_iter()
@@ -125,4 +125,71 @@ async fn env_update_accepts_a_row_that_was_read_back() {
         "未点名的字段必须保持原值"
     );
     assert_eq!(after.disabled_variables, before.disabled_variables);
+}
+
+/// 一格里可以放多条改写规则，顺序就是优先级，落库后原样读回。
+#[tokio::test]
+async fn env_set_baseurl_stores_the_rewrites_in_order() {
+    let st = state();
+    seed(&st);
+
+    tool_env_set_baseurl(
+        &st,
+        json!({
+            "env_id": "env_patch",
+            "module_id": "m_env",
+            "url": "http://example.test",
+            "rewrites": [
+                { "from": "/api/air", "to": "/v1/air" },
+                { "from": "/api", "to": "/v2" },
+            ],
+        }),
+    )
+    .await
+    .expect("合法的多条规则应当写入");
+
+    let stored =
+        simple_post_core::db::with_conn(&st.pool, |c| environments::get(c, "env_patch")).unwrap();
+    let rewrites: Vec<(&str, &str)> = stored.module_base_urls["m_env"]
+        .rewrites
+        .iter()
+        .map(|r| (r.from.as_str(), r.to.as_str()))
+        .collect();
+    assert_eq!(
+        rewrites,
+        vec![("/api/air", "/v1/air"), ("/api", "/v2")],
+        "顺序本身是契约"
+    );
+}
+
+/// 同一格里重复的起点（末尾斜杠的差异也算）被写入口拒绝，且那一格保持原样。
+#[tokio::test]
+async fn env_set_baseurl_rejects_duplicate_starts() {
+    let st = state();
+    seed(&st);
+
+    let res = tool_env_set_baseurl(
+        &st,
+        json!({
+            "env_id": "env_patch",
+            "module_id": "m_env",
+            "url": "http://example.test",
+            "rewrites": [
+                { "from": "/api/air", "to": "/v1" },
+                { "from": "/api/air/", "to": "/v2" },
+            ],
+        }),
+    )
+    .await;
+
+    match res {
+        Err(simple_post_core::error::AppError::Validation(_)) => {}
+        other => panic!("重复起点必须报校验错误，得到 {other:?}"),
+    }
+    let stored =
+        simple_post_core::db::with_conn(&st.pool, |c| environments::get(c, "env_patch")).unwrap();
+    assert!(
+        stored.module_base_urls["m_env"].rewrites.is_empty(),
+        "被拒绝的写入不得留下半份规则"
+    );
 }

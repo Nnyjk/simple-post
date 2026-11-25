@@ -66,7 +66,15 @@ export function freezeEnvironments(envs: readonly Environment[]): Environment[] 
     variables: { ...env.variables },
     disabledVariables: [...(env.disabledVariables ?? [])],
     moduleBaseUrls: Object.fromEntries(
-      Object.entries(env.moduleBaseUrls ?? {}).map(([moduleId, cell]) => [moduleId, { ...cell }]),
+      Object.entries(env.moduleBaseUrls ?? {}).map(([moduleId, cell]) => [
+        moduleId,
+        {
+          ...cell,
+          // 深拷贝规则数组：快照与实时 store 共享同一个数组时，界面上的排序会改到这一批
+          // 正在用的规则。
+          rewrites: (cell.rewrites ?? []).map((rule) => ({ ...rule })),
+        },
+      ]),
     ),
   }));
 }

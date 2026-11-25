@@ -32,15 +32,15 @@ pub(super) async fn resolve_dynamic_values(
     let resolved =
         crate::variable_fill::resolve_base_url(detail, env, overrides.module_id.as_deref());
     let base_url = resolved.base_url;
-    let rewrite = resolved.rewrite;
+    let rewrites = resolved.rewrites;
     // 扫描用的是**生效后**的模板：调用方的覆盖值会替换端点里的那一份，而替换发生在
     // 变量池合并之后，故扫描必须看生效的那一份——否则覆盖值里写的 `{{name}}` 不会
     // 触发取数，原样发出去。
     // 路径前缀改写作用在端点自己的 URL 上，故扫描的是**改写之后**的那一份：改写没
     // 命中时就是原路径（目标里的标记不会被扫到——那个目标这次不参与请求）。
-    let eff_url = crate::variable_fill::apply_rewrite(
+    let eff_url = crate::variable_fill::apply_rewrites(
         &overrides.url.clone().unwrap_or_else(|| detail.url.clone()),
-        rewrite.as_ref(),
+        &rewrites,
     );
     let eff_params = overrides
         .params

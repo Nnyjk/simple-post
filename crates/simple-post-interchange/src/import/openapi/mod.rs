@@ -211,11 +211,10 @@ fn group_of(
         key: key.clone(),
         name,
         description: None,
-        base_url: view
-            .servers
-            .host
-            .clone()
-            .map(|url| IrBaseUrl { url, rewrite: None }),
+        base_url: view.servers.host.clone().map(|url| IrBaseUrl {
+            url,
+            rewrites: Vec::new(),
+        }),
         endpoints: Vec::new(),
         collections: Vec::new(),
         scripts: IrScripts::default(),

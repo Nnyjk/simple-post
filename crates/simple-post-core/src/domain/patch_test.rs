@@ -445,7 +445,7 @@ fn a_project_environment_variable_and_scripts_read_back_can_be_written_back_as_a
             "m1".to_string(),
             ModuleBaseUrl {
                 url: "https://air".into(),
-                rewrite: None,
+                rewrites: Vec::new(),
             },
         )]),
         variables: HashMap::from([("token".to_string(), "t".to_string())]),

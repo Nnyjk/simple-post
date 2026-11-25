@@ -56,9 +56,9 @@ pub struct CommitReport {
 pub struct AppliedBaseUrl {
     /// 写进那一格的模块地址。
     pub url: String,
-    /// 写进那一格的路径前缀改写规则。规格没给规则时那一格可能本来就配着，故它可能非
-    /// `None`：报告里写的是那一格**实际**的规则。
-    pub rewrite: Option<RewriteRule>,
+    /// 写进那一格的有序路径前缀改写规则。规格没给规则时那一格可能本来就配着，故它可能
+    /// 非空：报告里写的是那一格**实际**的规则。
+    pub rewrites: Vec<RewriteRule>,
     /// 写进了哪个模块的格子。
     pub module_id: String,
     /// 写进了哪个环境。项目没有默认环境时为 `None`——地址没有落进任何一格。
@@ -226,7 +226,7 @@ pub fn commit_in_tx(
                 conn,
                 module_id,
                 &cell.url,
-                cell.rewrite.as_ref(),
+                &cell.rewrites,
                 environment,
                 &mut report,
             )?;
@@ -305,7 +305,7 @@ pub fn commit_in_tx(
                             conn,
                             &group_id,
                             &cell.url,
-                            cell.rewrite.as_ref(),
+                            &cell.rewrites,
                             environment,
                             &mut report,
                         )?;

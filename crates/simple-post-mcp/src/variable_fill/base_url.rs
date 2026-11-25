@@ -18,13 +18,13 @@ pub enum BaseUrlSource {
     None,
 }
 
-/// 解析出来的一组值：模块地址、路径前缀改写规则与来源。
+/// 解析出来的一组值：模块地址、有序的路径前缀改写规则与来源。
 #[derive(Debug, Clone)]
 pub struct ResolvedBaseUrl {
     /// 模块地址——模块在环境里那一格的 `url`。
     pub base_url: String,
-    /// 路径前缀改写规则——那一格的 `rewrite`。`None` = 没有改写。
-    pub rewrite: Option<RewriteRule>,
+    /// 有序的路径前缀改写规则——那一格的 `rewrites`。空 = 没有改写。
+    pub rewrites: Vec<RewriteRule>,
     /// 这个结果是从哪来的。
     pub source: BaseUrlSource,
 }
@@ -38,7 +38,8 @@ pub struct ResolvedBaseUrl {
 ///   3. `""`：前两处都没有时为空。
 ///
 /// 路径前缀改写规则只作用在**端点自己的 URL** 上，与地址来源无关：端点自带自定义主机时，
-/// 路径照样按那一格的规则改写——主机是端点自己的事，路径前缀是这一格的事。
+/// 路径照样按那一格的规则改写——主机是端点自己的事，路径前缀是这一格的事。规则按列表顺序
+/// 匹配，命中首条即停止。
 ///
 /// **没有回退层**：格子里没有值就是没有地址，不借用别的模块的格子；缺失即最终结果。
 /// `env.module_base_urls` 按 `module_id` 建键。环境由调用方给出：端点行不再绑定环境，故它要么
@@ -51,7 +52,7 @@ pub fn resolve_base_url(
     // 那一格（环境 × 模块）里的配置：模块地址与路径前缀改写规则都在这里。没有模块就没有
     // 格子，模块的配置不是一个可以被借用的东西。
     let cell = module_id.and_then(|m| env.and_then(|e| e.module_base_urls.get(m)));
-    let rewrite = cell.and_then(|c| c.rewrite.clone());
+    let rewrites = cell.map(|c| c.rewrites.clone()).unwrap_or_default();
 
     // `Some("")` 是明确选择而不是缺省：端点处于自定义模式，URL 字段里就是完整地址，
     // 再前置环境的 base URL 会把它弄坏。与 src/lib/url.ts 的
@@ -59,7 +60,7 @@ pub fn resolve_base_url(
     if let Some(ovr) = detail.base_url_override.as_deref() {
         return ResolvedBaseUrl {
             base_url: ovr.to_string(),
-            rewrite,
+            rewrites,
             source: BaseUrlSource::Override,
         };
     }
@@ -70,29 +71,28 @@ pub fn resolve_base_url(
     match cell {
         Some(cell) if !cell.url.is_empty() => ResolvedBaseUrl {
             base_url: cell.url.clone(),
-            rewrite,
+            rewrites,
             source: BaseUrlSource::Module,
         },
         _ => ResolvedBaseUrl {
             base_url: String::new(),
-            rewrite,
+            rewrites,
             source: BaseUrlSource::None,
         },
     }
 }
 
-/// 把端点**自己 URL** 的路径前缀从 `from` 换成 `to`。
+/// 按列表顺序依次把端点**自己 URL** 的路径前缀从 `from` 换成 `to`，命中首条即停止。
 ///
-/// 实现住在 `simple_post_core::url::apply_rewrite`：核心库那一层是中立位置，MCP 侧与导入
+/// 实现住在 `simple_post_core::url::apply_rewrites`：核心库那一层是中立位置，MCP 侧与导入
 /// 导出侧都要用它，三处各写一份就会分叉。
 ///
-/// 示例：
-///   `apply_rewrite("/api/air/xxxxx", Some(&rule))`（规则由 `from: "/api/air"` 改写为 `to: "/api/project-a/air"`）
-///   求值为 `"/api/project-a/air/xxxxx"`。
-/// 与 `src/lib/url.ts` 的 `applyRewrite` 对应；两边必须一致，否则预览与真正发出的请求描述的
-/// 是两个 URL。共享样本是 `fixtures/base-url-parity.json`。
-pub fn apply_rewrite(url: &str, rule: Option<&RewriteRule>) -> String {
-    simple_post_core::url::apply_rewrite(url, rule)
+/// 示例（规则 `from: "/api/air"` → `to: "/api/project-a/air"`）：
+///   `apply_rewrites("/api/air/xxxxx", &[rule])` 求值为 `"/api/project-a/air/xxxxx"`。
+/// 与 `src/lib/url.ts` 的 `applyRewrites` 对应；两边必须一致，否则预览与真正发出的请求描述
+/// 的是两个 URL。共享样本是 `fixtures/base-url-parity.json`。
+pub fn apply_rewrites(url: &str, rules: &[RewriteRule]) -> String {
+    simple_post_core::url::apply_rewrites(url, rules)
 }
 
 /// 安全地拼接 `base_url` 与 `path`。`path` 自带 scheme 时按已是绝对地址处理，拼接处

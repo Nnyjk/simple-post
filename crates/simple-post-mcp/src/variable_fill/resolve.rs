@@ -9,7 +9,7 @@ use simple_post_core::domain::{EndpointDetail, Environment, GraphQlRequest};
 use simple_post_core::error::AppError;
 
 use super::auth::resolve_auth;
-use super::base_url::{apply_rewrite, collapse_url_slashes, join_base_url, resolve_base_url};
+use super::base_url::{apply_rewrites, collapse_url_slashes, join_base_url, resolve_base_url};
 use super::request::{append_apikey_query, append_query_string, build_headers};
 use super::template::resolve_template;
 use super::types::{EndpointOverrides, ResolvedEndpoint};
@@ -20,7 +20,7 @@ use super::types::{EndpointOverrides, ResolvedEndpoint};
 /// 把端点 + 环境 + 覆盖值合成为完全解析好的线上形状。解析顺序（对应 `buildFetchInit`）：
 ///   1. 套用覆盖值（url / method / headers / params / body）
 ///   2. 解析模块地址与路径前缀改写规则（见 [`resolve_base_url`]），并用改写规则改写端点
-///      自己的 URL（见 [`apply_rewrite`]）
+///      自己的 URL（见 [`apply_rewrites`]）
 ///   3. 到处替换 `{{var}}`（URL 路径、headers、params、body 内容、鉴权字段），最后收掉路径里的
 ///      重复斜杠（见 [`collapse_url_slashes`] —— 只有替换才会把拼接插入的分隔符变成 `//`）
 ///   4. 追加启用的 query 参数（编码后）
@@ -119,11 +119,11 @@ pub fn resolve_endpoint_with(
     // ---- baseUrl 解析 + URL 替换 ------------------------
     let resolved = resolve_base_url(detail, env, overrides.and_then(|o| o.module_id.as_deref()));
     let base_url = resolved.base_url;
-    let rewrite = resolved.rewrite;
+    let rewrites = resolved.rewrites;
 
     // 路径前缀改写作用在**端点自己的 URL** 上，且在拼接之前：模块地址自带的路径段不参与
     // 匹配，主机也不动。改写后的路径随后与模块地址拼接。
-    let rewritten = apply_rewrite(&eff_url, rewrite.as_ref());
+    let rewritten = apply_rewrites(&eff_url, &rewrites);
     let joined = join_base_url(&base_url, &rewritten);
 
     // ---- 路径参数：把 URL 路径里的 {占位符} 换成端点自己的值 ---------

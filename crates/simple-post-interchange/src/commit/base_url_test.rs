@@ -16,7 +16,7 @@ fn module_with_cell(key: &str, name: &str, url: &str, endpoint_key: &str, path: 
         name: name.into(),
         base_url: Some(IrBaseUrl {
             url: url.into(),
-            rewrite: None,
+            rewrites: Vec::new(),
         }),
         endpoints: vec![IrEndpoint {
             key: endpoint_key.into(),
@@ -26,12 +26,12 @@ fn module_with_cell(key: &str, name: &str, url: &str, endpoint_key: &str, path: 
     }
 }
 
-/// 一个带地址与路径前缀改写规则的模块，底下挂一个端点。
+/// 一个带地址与有序路径前缀改写规则的模块，底下挂一个端点。
 fn module_with_cell_and_rewrite(
     key: &str,
     name: &str,
     url: &str,
-    rewrite: Option<&RewriteRule>,
+    rewrites: &[RewriteRule],
     endpoint_key: &str,
     path: &str,
 ) -> IrModule {
@@ -40,7 +40,7 @@ fn module_with_cell_and_rewrite(
         name: name.into(),
         base_url: Some(IrBaseUrl {
             url: url.into(),
-            rewrite: rewrite.cloned(),
+            rewrites: rewrites.to_vec(),
         }),
         endpoints: vec![IrEndpoint {
             key: endpoint_key.into(),
@@ -63,7 +63,7 @@ fn module_with_endpoint_override(
         name: name.into(),
         base_url: Some(IrBaseUrl {
             url: url.into(),
-            rewrite: None,
+            rewrites: Vec::new(),
         }),
         endpoints: vec![IrEndpoint {
             key: endpoint_key.into(),
@@ -135,26 +135,27 @@ fn cell_of(pool: &DbPool, env_id: &str, module_id: &str) -> Option<String> {
 }
 
 /// 某模块在给定环境里那一格的路径前缀改写规则。
-fn cell_rewrite_of(pool: &DbPool, env_id: &str, module_id: &str) -> Option<RewriteRule> {
+fn cell_rewrites_of(pool: &DbPool, env_id: &str, module_id: &str) -> Vec<RewriteRule> {
     db::with_conn(pool, |c| db::environments::get(c, env_id))
         .expect("env")
         .module_base_urls
         .get(module_id)
-        .and_then(|c| c.rewrite.clone())
+        .map(|c| c.rewrites.clone())
+        .unwrap_or_default()
 }
 
 /// 给某模块在给定环境里的那一格写上地址与改写规则。
 ///
-/// `rewrite` 传 `None` = 那一格的规则不动。
+/// `rewrites` 传 `None` = 那一格的规则不动。
 fn seed_cell(
     pool: &DbPool,
     env_id: &str,
     module_id: &str,
     url: &str,
-    rewrite: Option<&RewriteRule>,
+    rewrites: Option<&[RewriteRule]>,
 ) {
     db::with_tx(pool, |c| {
-        db::environments::set_module_base_url(c, env_id, module_id, Some(url), rewrite)?;
+        db::environments::set_module_base_url(c, env_id, module_id, Some(url), rewrites)?;
         Ok::<(), AppError>(())
     })
     .expect("写格子");
@@ -297,15 +298,16 @@ fn the_cell_keeps_its_own_rewrite_when_the_spec_only_gives_an_address() {
     let module_id = seeded_module(&pool, &project_id);
     let env_id = default_env_id(&pool, &project_id);
     // 用户给锚点模块那一格配了路径改写规则。
+    let seeded = [RewriteRule {
+        from: "/api/air".into(),
+        to: "/api/project-a/air".into(),
+    }];
     seed_cell(
         &pool,
         &env_id,
         &module_id,
         "https://old.example.com",
-        Some(&RewriteRule {
-            from: "/api/air".into(),
-            to: "/api/project-a/air".into(),
-        }),
+        Some(&seeded),
     );
 
     let ex = exchange(vec![module_with_cell(
@@ -318,12 +320,14 @@ fn the_cell_keeps_its_own_rewrite_when_the_spec_only_gives_an_address() {
     let report = commit_into_module(&pool, &project_id, &module_id, &ex, true).expect("commit");
 
     assert_eq!(
-        cell_rewrite_of(&pool, &env_id, &module_id).map(|r| r.to),
+        cell_rewrites_of(&pool, &env_id, &module_id)
+            .first()
+            .map(|r| r.to.clone()),
         Some("/api/project-a/air".to_string()),
         "规格没提规则时那一格原有的规则保留"
     );
     assert_eq!(
-        report.base_urls[0].rewrite.as_ref().map(|r| r.to.clone()),
+        report.base_urls[0].rewrites.first().map(|r| r.to.clone()),
         Some("/api/project-a/air".to_string()),
         "报告里写回那一格实际的规则"
     );
@@ -335,37 +339,41 @@ fn a_rewrite_in_the_spec_replaces_the_rewrite_of_the_cell() {
     let (pool, project_id) = fresh_project();
     let module_id = seeded_module(&pool, &project_id);
     let env_id = default_env_id(&pool, &project_id);
+    let seeded = [RewriteRule {
+        from: "/api/air".into(),
+        to: "/api/project-a/air".into(),
+    }];
     seed_cell(
         &pool,
         &env_id,
         &module_id,
         "https://old.example.com",
-        Some(&RewriteRule {
-            from: "/api/air".into(),
-            to: "/api/project-a/air".into(),
-        }),
+        Some(&seeded),
     );
 
+    let spec_rules = [RewriteRule {
+        from: "/api/air".into(),
+        to: "/api/project-b/air".into(),
+    }];
     let ex = exchange(vec![module_with_cell_and_rewrite(
         "/item/0",
         "订单",
         "https://api.example.com",
-        Some(&RewriteRule {
-            from: "/api/air".into(),
-            to: "/api/project-b/air".into(),
-        }),
+        &spec_rules,
         "/item/0/request/0",
         "/orders",
     )]);
     let report = commit_into_module(&pool, &project_id, &module_id, &ex, true).expect("commit");
 
     assert_eq!(
-        cell_rewrite_of(&pool, &env_id, &module_id).map(|r| r.to),
+        cell_rewrites_of(&pool, &env_id, &module_id)
+            .first()
+            .map(|r| r.to.clone()),
         Some("/api/project-b/air".to_string()),
         "规格给了规则就写规格那个"
     );
     assert_eq!(
-        report.base_urls[0].rewrite.as_ref().map(|r| r.to.clone()),
+        report.base_urls[0].rewrites.first().map(|r| r.to.clone()),
         Some("/api/project-b/air".to_string()),
         "报告里写的是那一格实际的规则"
     );
@@ -387,12 +395,11 @@ fn a_cell_without_a_rewrite_reports_no_rewrite() {
     )]);
     let report = commit_into_module(&pool, &project_id, &module_id, &ex, true).expect("commit");
 
-    assert_eq!(
-        cell_rewrite_of(&pool, &env_id, &module_id),
-        None,
+    assert!(
+        cell_rewrites_of(&pool, &env_id, &module_id).is_empty(),
         "那一格没有规则"
     );
-    assert_eq!(report.base_urls[0].rewrite, None, "报告里写没有规则");
+    assert!(report.base_urls[0].rewrites.is_empty(), "报告里写没有规则");
 }
 
 /// 本次导入一个接口都没写进去时，锚点那一格保持原样。

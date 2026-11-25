@@ -1,5 +1,5 @@
 import { listDynamicNames } from '@/lib/dynamic-vars';
-import { applyRewrite } from '@/lib/url';
+import { applyRewrites } from '@/lib/url';
 import type { DynamicValueStatus, DynamicVariableView, RewriteRule } from '@/types/domain';
 import type { VarEntry } from '../var-hint';
 import type { EffectiveRequest } from './effectiveRequest';
@@ -53,7 +53,7 @@ export function enabledDynamicNameSet(dynamicVariables: DynamicVariableView[]): 
  * 扫的是**未替换**的模板，故同名环境变量也会被扫出来——动态变量在替换时压过环境变量
  * （见 `mergePool`），故名单里只留有定义且已启用的那些。
  *
- * `rewrite` 是那一格的路径前缀改写规则。扫描的是**改写之后**的那一份路径：命中时是
+ * `rewrites` 是那一格的有序路径前缀改写规则。扫描的是**改写之后**的那一份路径：命中时是
  * 改写后的路径，没命中时是原路径。目标里的标记因此会被扫到（它进了 URL），而没被
  * 改写掉的那一段里的标记不会被扫到（它不参与这次请求）。
  */
@@ -61,11 +61,11 @@ export function buildDynamicNames(
   baseUrl: string,
   url: string,
   effective: EffectiveRequest,
-  rewrite: RewriteRule | null,
+  rewrites: readonly RewriteRule[],
 ): string[] {
   return listDynamicNames({
     baseUrl,
-    url: applyRewrite(url, rewrite),
+    url: applyRewrites(url, rewrites),
     params: effective.params,
     pathParams: effective.pathParams,
     headers: effective.headers,

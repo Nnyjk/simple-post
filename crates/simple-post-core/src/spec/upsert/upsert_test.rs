@@ -221,7 +221,10 @@ fn the_environment_base_url_rewrite_lands_in_the_same_cell() {
             "environment": {
                 "name": "gray",
                 "base_url": "https://gray.example.com",
-                "base_url_rewrite": { "from": "/api/air", "to": "/api/gray/air" }
+                "base_url_rewrites": [
+                    { "from": "/api/air", "to": "/api/gray/air" },
+                    { "from": "/api", "to": "/api/gray" }
+                ]
             },
             "endpoint": { "name": "查询活动", "method": "GET", "url": "/api/campaigns" }
         }),
@@ -236,8 +239,21 @@ fn the_environment_base_url_rewrite_lands_in_the_same_cell() {
             Some("https://gray.example.com")
         );
         assert_eq!(
-            cell.and_then(|c| c.rewrite.as_ref()).map(|r| r.to.as_str()),
-            Some("/api/gray/air")
+            cell.map(|c| c.rewrites.as_slice()),
+            Some(
+                [
+                    crate::domain::RewriteRule {
+                        from: "/api/air".into(),
+                        to: "/api/gray/air".into(),
+                    },
+                    crate::domain::RewriteRule {
+                        from: "/api".into(),
+                        to: "/api/gray".into(),
+                    },
+                ]
+                .as_slice()
+            ),
+            "多条规则要按提交的顺序落进那一格"
         );
         Ok(())
     })
@@ -825,41 +841,44 @@ fn the_camel_case_spelling_of_multi_word_fields_is_accepted() {
 
 /// 环境那一段的两个地址字段两种拼写都收。
 ///
-/// `base_url` 与 `base_url_rewrite` 各带一个 camelCase 别名（`baseUrl` 与 `baseUrlRewrite`），
-/// 四种拼写落在同一个类型上，故 REST 那条线与 MCP 那条线交上来的形状是同一份。
+/// `base_url` 与 `base_url_rewrites` 各带一个 camelCase 别名（`baseUrl` 与
+/// `baseUrlRewrites`），四种拼写落在同一个类型上，故 REST 那条线与 MCP 那条线交上来的
+/// 形状是同一份。
 #[test]
 fn the_environment_address_fields_accept_both_spellings() {
     let snake: EnvironmentSpec =
         serde_json::from_value(json!({ "base_url": "https://a" })).expect("这份规格应当能反序列化");
     assert_eq!(snake.base_url.as_deref(), Some("https://a"));
-    assert_eq!(snake.base_url_rewrite, None);
+    assert_eq!(snake.base_url_rewrites, None);
 
     let camel: EnvironmentSpec =
         serde_json::from_value(json!({ "baseUrl": "https://a" })).expect("这份规格应当能反序列化");
     assert_eq!(camel.base_url.as_deref(), Some("https://a"));
-    assert_eq!(camel.base_url_rewrite, None);
+    assert_eq!(camel.base_url_rewrites, None);
 
     let snake_rewrite: EnvironmentSpec = serde_json::from_value(json!({
-        "base_url_rewrite": { "from": "/api/air", "to": "/api/a/air" }
+        "base_url_rewrites": [{ "from": "/api/air", "to": "/api/a/air" }]
     }))
     .expect("这份规格应当能反序列化");
     assert_eq!(
         snake_rewrite
-            .base_url_rewrite
+            .base_url_rewrites
             .as_ref()
+            .and_then(|rules| rules.first())
             .map(|r| r.from.as_str()),
         Some("/api/air")
     );
     assert_eq!(snake_rewrite.base_url, None);
 
     let camel_rewrite: EnvironmentSpec = serde_json::from_value(json!({
-        "baseUrlRewrite": { "from": "/api/air", "to": "/api/a/air" }
+        "baseUrlRewrites": [{ "from": "/api/air", "to": "/api/a/air" }]
     }))
     .expect("这份规格应当能反序列化");
     assert_eq!(
         camel_rewrite
-            .base_url_rewrite
+            .base_url_rewrites
             .as_ref()
+            .and_then(|rules| rules.first())
             .map(|r| r.from.as_str()),
         Some("/api/air")
     );
@@ -867,12 +886,15 @@ fn the_environment_address_fields_accept_both_spellings() {
 
     let both: EnvironmentSpec = serde_json::from_value(json!({
         "base_url": "https://a",
-        "baseUrlRewrite": { "from": "/api/air", "to": "/api/a/air" }
+        "baseUrlRewrites": [{ "from": "/api/air", "to": "/api/a/air" }]
     }))
     .expect("这份规格应当能反序列化");
     assert_eq!(both.base_url.as_deref(), Some("https://a"));
     assert_eq!(
-        both.base_url_rewrite.as_ref().map(|r| r.to.as_str()),
+        both.base_url_rewrites
+            .as_ref()
+            .and_then(|rules| rules.first())
+            .map(|r| r.to.as_str()),
         Some("/api/a/air")
     );
 }

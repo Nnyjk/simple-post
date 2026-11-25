@@ -308,10 +308,10 @@ pub struct ProposedBaseUrlDto {
 pub struct AppliedBaseUrlDto {
     /// 写进那一格的模块地址。
     pub url: String,
-    /// 那一格里实际生效的路径前缀改写规则。外来文档给不出规则，故导入只写地址那一半，
-    /// 那一格原有的规则保留；这一项写的是该格**实际**的规则值，没有规则时为 `None`。
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub rewrite: Option<RewriteRule>,
+    /// 那一格里实际生效的有序路径前缀改写规则。外来文档给不出规则，故导入只写地址那一半，
+    /// 那一格原有的规则保留；这一项写的是该格**实际**的规则列表，没有规则时为空。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rewrites: Vec<RewriteRule>,
     /// 写进了哪个模块的格子。
     pub module_id: String,
     /// 写进了哪个环境。项目没有默认环境时为 `None`。

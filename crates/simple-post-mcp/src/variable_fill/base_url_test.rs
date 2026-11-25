@@ -3,7 +3,7 @@
 use simple_post_core::domain::RewriteRule;
 
 use super::base_url::{
-    apply_rewrite, collapse_url_slashes, join_base_url, resolve_base_url, BaseUrlSource,
+    apply_rewrites, collapse_url_slashes, join_base_url, resolve_base_url, BaseUrlSource,
 };
 use super::resolve::resolve_endpoint;
 use super::test_support::{
@@ -18,7 +18,7 @@ fn the_module_cell_resolves_the_endpoints_own_address() {
     let env = env_with_two_modules();
     let got = resolve_base_url(&minimal_endpoint(), Some(&env), Some(MOD_A));
     assert_eq!(got.base_url, "https://mod-a.example.com");
-    assert_eq!(got.rewrite, None);
+    assert!(got.rewrites.is_empty());
     assert_eq!(got.source, BaseUrlSource::Module);
 }
 
@@ -45,11 +45,11 @@ fn a_cell_with_a_rewrite_reports_both_the_address_and_the_rule() {
     let got = resolve_base_url(&minimal_endpoint(), Some(&env), Some(MOD_A));
     assert_eq!(got.base_url, "127.0.0.1:8080");
     assert_eq!(
-        got.rewrite,
-        Some(RewriteRule {
+        got.rewrites,
+        vec![RewriteRule {
             from: "/api/air".into(),
             to: "/api/project-a/air".into(),
-        })
+        }]
     );
     assert_eq!(got.source, BaseUrlSource::Module);
 }
@@ -60,7 +60,7 @@ fn no_module_context_resolves_to_nothing() {
     let env = env_with_two_modules();
     let got = resolve_base_url(&minimal_endpoint(), Some(&env), None);
     assert_eq!(got.base_url, "");
-    assert_eq!(got.rewrite, None);
+    assert!(got.rewrites.is_empty());
     assert_eq!(got.source, BaseUrlSource::None);
 }
 
@@ -83,11 +83,11 @@ fn a_cell_with_only_a_rewrite_resolves_to_no_address() {
     let got = resolve_base_url(&minimal_endpoint(), Some(&env), Some(MOD_A));
     assert_eq!(got.base_url, "");
     assert_eq!(
-        got.rewrite,
-        Some(RewriteRule {
+        got.rewrites,
+        vec![RewriteRule {
             from: "/api/air".into(),
             to: "/api/project-a/air".into(),
-        })
+        }]
     );
     assert_eq!(got.source, BaseUrlSource::None);
 }
@@ -108,7 +108,7 @@ fn a_per_endpoint_override_still_beats_the_module_cell() {
     ep.base_url_override = Some("".to_string());
     let got = resolve_base_url(&ep, Some(&env), Some(MOD_A));
     assert_eq!(got.base_url, "");
-    assert_eq!(got.rewrite, None);
+    assert!(got.rewrites.is_empty());
     assert_eq!(got.source, BaseUrlSource::Override);
 }
 
@@ -128,11 +128,11 @@ fn a_per_endpoint_override_still_gets_the_cells_rewrite_rule() {
     let got = resolve_base_url(&ep, Some(&env), Some(MOD_A));
     assert_eq!(got.base_url, "https://custom.example.com");
     assert_eq!(
-        got.rewrite,
-        Some(RewriteRule {
+        got.rewrites,
+        vec![RewriteRule {
             from: "/api/air".into(),
             to: "/api/project-a/air".into(),
-        })
+        }]
     );
     assert_eq!(got.source, BaseUrlSource::Override);
 }
@@ -240,78 +240,66 @@ fn an_unresolved_variable_in_the_rewrite_target_lands_in_the_missing_report() {
     );
 }
 
-// ---- apply_rewrite ----------------------------------------------------
+// ---- apply_rewrites ---------------------------------------------------
+fn rule(from: &str, to: &str) -> RewriteRule {
+    RewriteRule {
+        from: from.into(),
+        to: to.into(),
+    }
+}
+
 #[test]
-fn apply_rewrite_replaces_the_prefix() {
+fn apply_rewrites_replaces_the_prefix() {
     assert_eq!(
-        apply_rewrite(
-            "/api/air/xxxxx",
-            Some(&RewriteRule {
-                from: "/api/air".into(),
-                to: "/api/project-a/air".into(),
-            }),
-        ),
+        apply_rewrites("/api/air/xxxxx", &[rule("/api/air", "/api/project-a/air")]),
         "/api/project-a/air/xxxxx"
     );
 }
 
 #[test]
-fn apply_rewrite_without_a_rule_changes_nothing() {
-    assert_eq!(apply_rewrite("/api/air/xxxxx", None), "/api/air/xxxxx");
+fn apply_rewrites_without_a_rule_changes_nothing() {
+    assert_eq!(apply_rewrites("/api/air/xxxxx", &[]), "/api/air/xxxxx");
     assert_eq!(
-        apply_rewrite(
-            "/api/air/xxxxx",
-            Some(&RewriteRule {
-                from: "".into(),
-                to: "/api/project-a/air".into(),
-            }),
-        ),
+        apply_rewrites("/api/air/xxxxx", &[rule("", "/api/project-a/air")]),
         "/api/air/xxxxx",
         "起点为空白的规则匹配不了任何东西"
     );
 }
 
 #[test]
-fn apply_rewrite_only_matches_on_a_path_boundary() {
+fn apply_rewrites_only_matches_on_a_path_boundary() {
     // `/api/air` 不该命中 `/api/airplane`。
     assert_eq!(
-        apply_rewrite(
+        apply_rewrites(
             "/api/airplane/xxxxx",
-            Some(&RewriteRule {
-                from: "/api/air".into(),
-                to: "/api/project-a/air".into(),
-            }),
+            &[rule("/api/air", "/api/project-a/air")]
         ),
         "/api/airplane/xxxxx"
     );
 }
 
 #[test]
-fn apply_rewrite_matches_the_url_exactly() {
+fn apply_rewrites_matches_the_url_exactly() {
     assert_eq!(
-        apply_rewrite(
-            "/api/air",
-            Some(&RewriteRule {
-                from: "/api/air".into(),
-                to: "/api/project-a/air".into(),
-            }),
-        ),
+        apply_rewrites("/api/air", &[rule("/api/air", "/api/project-a/air")]),
         "/api/project-a/air"
     );
 }
 
 #[test]
-fn apply_rewrite_with_an_empty_target_drops_the_prefix() {
+fn apply_rewrites_with_an_empty_target_drops_the_prefix() {
     assert_eq!(
-        apply_rewrite(
-            "/api/air/xxxxx",
-            Some(&RewriteRule {
-                from: "/api/air".into(),
-                to: "".into(),
-            }),
-        ),
+        apply_rewrites("/api/air/xxxxx", &[rule("/api/air", "")]),
         "/xxxxx"
     );
+}
+
+#[test]
+fn apply_rewrites_stops_at_the_first_match() {
+    // 命中首条后不再串联后一条：改写结果是 `/v1/air/list`，不会被 `/api` 那条再改一次。
+    let rules = [rule("/api/air", "/v1/air"), rule("/api", "/v2")];
+    assert_eq!(apply_rewrites("/api/air/list", &rules), "/v1/air/list");
+    assert_eq!(apply_rewrites("/api/water/list", &rules), "/v2/water/list");
 }
 
 // ---- join_base_url ---------------------------------------------------

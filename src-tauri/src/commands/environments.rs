@@ -103,17 +103,16 @@ pub fn environments_rename_var(
 
 /// 写（环境 × 模块）那一格：`env.moduleBaseUrls[moduleId]`。
 ///
-/// 格子里有两个字段：`url` 是模块地址，`rewrite` 是路径前缀改写规则。两个字段各自独立：
-/// 起点为空串的规则 = 清空规则。格子上没有别的层，也不向别的模块的值回落，故两个字段都清空时
-/// 起点为空串的规则 = 清空规则。格子上没有别的层，也不向别的模块的值回落，故两个字段都清空时
-/// 这一格就整个消失。
+/// 格子里有两个字段：`url` 是模块地址，`rewrites` 是有序的路径前缀改写规则。两个字段各自
+/// 独立：`null` = 保持原值，`""` / `[]` = 清空。格子上没有别的层，也不向别的模块的值回落，
+/// 故两个字段都清空时这一格就整个消失。
 #[tauri::command]
 pub fn environments_set_module_baseurl(
     state: State<DbPool>,
     env_id: String,
     module_id: String,
     url: Option<String>,
-    rewrite: Option<RewriteRule>,
+    rewrites: Option<Vec<RewriteRule>>,
 ) -> Result<Environment, AppError> {
     crate::db::with_tx(&state, |c| {
         crate::db::environments::set_module_base_url(
@@ -121,7 +120,7 @@ pub fn environments_set_module_baseurl(
             &env_id,
             &module_id,
             url.as_deref(),
-            rewrite.as_ref(),
+            rewrites.as_deref(),
         )
     })
 }

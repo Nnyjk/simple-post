@@ -8,8 +8,8 @@
  * `../../__tests__/crud-slice.test.ts` 钉住，故那些 `value === null` 判断必须写对。
  *
  * `moduleBaseUrls[moduleId]` 是地址唯一存放的地方：每个 (环境 × 模块) 一个独立单元格，
- * 没有继承也没有回退。格子里有两个字段：`url` 是模块地址，`rewrite` 是路径前缀改写规则。
- * `resolveEndpointBaseUrl` 只读其中恰好一个。
+ * 没有继承也没有回退。格子里有两个字段：`url` 是模块地址，`rewrites` 是有序的路径前缀
+ * 改写规则。`resolveEndpointBaseUrl` 只读其中恰好一个。
  *
  * **本切片只写库里的东西。** 「当前环境」是客户端的实时状态，不落库，它由 `bootstrap-slice`
  * 的 `setCurrentEnvironment` 管。
@@ -47,8 +47,8 @@ export interface EnvironmentCrudActions {
   /**
    * 写一个 (环境 × 模块) 格子里的两个字段。
    *
-   * `url` 是模块地址，`rewrite` 是路径前缀改写规则。两个字段各自独立：
-   * `null` = 该字段保持原值；起点与目标都空白的规则 = 清空规则。两个字段都清空时这一格整个
+   * `url` 是模块地址，`rewrites` 是有序的路径前缀改写规则。两个字段各自独立：
+   * `null` = 该字段保持原值；`[]` 或全空白占位行 = 清空规则。两个字段都清空时这一格整个
    * 消失。
    *
    * 每个格子都是独立取值——清一个不能碰到它的邻居。
@@ -57,7 +57,7 @@ export interface EnvironmentCrudActions {
     envId: string,
     moduleId: string,
     url: string | null,
-    rewrite: RewriteRule | null,
+    rewrites: RewriteRule[] | null,
   ) => Promise<void>;
   deleteEnvironment: (envId: string) => Promise<void>;
   /**
@@ -181,25 +181,24 @@ export const createEnvironmentCrud: StateCreator<AppState, [], [], EnvironmentCr
         })),
     );
   },
-  setEnvironmentModuleBaseUrl: (envId, moduleId, url, rewrite) => {
+  setEnvironmentModuleBaseUrl: (envId, moduleId, url, rewrites) => {
     const prev = get().environments.find((e) => e.id === envId);
     if (!prev) return Promise.resolve();
-    // 格子里两个字段各自独立：`null` 保持原值。起点与目标都空白的规则落成 `null`（没有规则），
-    // 与后端 `db::environments::set_module_base_url` 同一套。
+    // 格子里两个字段各自独立：`null` 保持原值。全空白的占位行落不进来，与后端
+    // `db::environments::set_module_base_url` 里 `clean_rewrites` 同一套。
     const cell = prev.moduleBaseUrls[moduleId];
+    const nextRewrites =
+      rewrites === null
+        ? (cell?.rewrites ?? [])
+        : rewrites.filter((r) => r.from.trim() !== '' || r.to.trim() !== '');
     const nextCell: ModuleBaseUrl = {
       url: url === null ? (cell?.url ?? '') : url,
-      rewrite:
-        rewrite === null
-          ? (cell?.rewrite ?? null)
-          : rewrite.from.trim() === '' && rewrite.to.trim() === ''
-            ? null
-            : rewrite,
+      rewrites: nextRewrites,
     };
     const nextModuleBaseUrls = { ...prev.moduleBaseUrls };
     // 两个字段都空了就把这一格删掉，免得已清空的环境还留着一个空的 `moduleId → {}` 外壳，
     // 在任何按键比对环境对象的 UI 里都读作「这里配了地址」。
-    if (nextCell.url === '' && nextCell.rewrite === null) {
+    if (nextCell.url === '' && nextRewrites.length === 0) {
       delete nextModuleBaseUrls[moduleId];
     } else {
       nextModuleBaseUrls[moduleId] = nextCell;
@@ -208,9 +207,9 @@ export const createEnvironmentCrud: StateCreator<AppState, [], [], EnvironmentCr
     set((s) => ({
       environments: s.environments.map((env) => (env.id === envId ? optimistic : env)),
     }));
-    // 同一格子的写请求按提交的先后顺序一个接一个发出去：设置面板的路径改写那一列有两个
-    // 输入框，用户先改起点再改目标就是两次写。并发发出时服务器可能先把后提交的那条处理掉，
-    // SQLite 里就留下旧的那条规则——界面显示的是新规则，请求却按旧规则改写。
+    // 同一格子的写请求按提交的先后顺序一个接一个发出去：规则列表的每一次改动（输入框失焦、
+    // 排序、删除）都会提交一次。并发发出时服务器可能先把后提交的那条处理掉，SQLite 里就留下
+    // 旧的规则列表——界面显示的是新顺序，请求却按旧顺序改写。
     //
     // 排队的是**请求**：乐观更新照旧立刻做，输入框才不会卡。
     const key = `${envId}:${moduleId}`;
@@ -225,7 +224,7 @@ export const createEnvironmentCrud: StateCreator<AppState, [], [], EnvironmentCr
             envId,
             moduleId,
             url,
-            rewrite,
+            rewrites,
           }),
         () => {
           // 只有这一格**最新**的那次写失败时才回滚：更早的那次失败时，后来的写已经把界面

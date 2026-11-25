@@ -102,15 +102,18 @@ fn environment_schema() -> Value {
                 "type": "string",
                 "description": "The module address of the (environment x module) cell. That cell has no other dimension to fall back on."
             },
-            "baseUrlRewrite": {
-                "type": "object",
-                "description": "Replaces the endpoint's own path prefix \"from\" with \"to\". Omit it to keep the cell's rule; pass {\"from\": \"\", \"to\": \"\"} to clear it.",
-                "properties": {
-                    "from": { "type": "string" },
-                    "to": { "type": "string" }
-                },
-                "required": ["from", "to"],
-                "additionalProperties": false
+            "baseUrlRewrites": {
+                "type": "array",
+                "description": "Ordered path prefix rewrites for that cell; first match wins. Omit to keep; [] clears.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "from": { "type": "string" },
+                        "to": { "type": "string" }
+                    },
+                    "required": ["from", "to"],
+                    "additionalProperties": false
+                }
             }
         },
         "additionalProperties": false

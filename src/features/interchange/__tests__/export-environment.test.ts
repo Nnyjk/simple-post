@@ -50,7 +50,7 @@ const ENVIRONMENTS: Environment[] = [
  */
 function preview(
   environmentId: string,
-  baseUrl?: { url: string; rewrite?: { from: string; to: string } },
+  baseUrl?: { url: string; rewrites?: { from: string; to: string }[] },
 ): ExportPreview {
   return {
     groups: [

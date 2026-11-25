@@ -121,19 +121,58 @@ pub struct RewriteRule {
 /// 一个（环境 × 模块）格子里的地址配置。
 ///
 /// - `url` 是**模块地址**——文档里写的、模块对外声明的那个地址。
-/// - `rewrite` 是**路径前缀改写规则**——只改写端点自己的 URL 路径，模块地址里的主机与
-///   路径段一概不动。
+/// - `rewrites` 是**有序的路径前缀改写规则**——只改写端点自己的 URL 路径，模块地址里的主机与
+///   路径段一概不动。按列表顺序依次匹配，命中第一条后不再向后匹配。
 ///
 /// 两者回答两个不同的问题：前者决定打哪个主机，后者决定路径怎么改。主机不变、只换路径前缀
-/// 这一类需求由 `rewrite` 表达。
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+/// 这一类需求由 `rewrites` 表达。
+#[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModuleBaseUrl {
     /// 模块地址。
     pub url: String,
-    /// 路径前缀改写规则。`None` = 没有改写。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rewrite: Option<RewriteRule>,
+    /// 路径前缀改写规则列表，按顺序匹配，首条命中即停止。空表示没有改写。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rewrites: Vec<RewriteRule>,
+}
+
+/// [`ModuleBaseUrl`] 的读取形状：同时认得历史单个 `rewrite` 与现在的 `rewrites` 列表。
+///
+/// 旧库的 `environments.module_base_urls_json` 里存的是 `{ "url": …, "rewrite": {…} }`；
+/// 直接换字段会让既有 store.db 读不出来。故读的时候把 `rewrite` 提升成单元素列表，使
+/// `SCHEMA_VERSION` 不必上涨（上涨会删库）。
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawModuleBaseUrl {
+    url: String,
+    #[serde(default)]
+    rewrites: Option<Vec<RewriteRule>>,
+    #[serde(default)]
+    rewrite: Option<RewriteRule>,
+}
+
+impl<'de> Deserialize<'de> for ModuleBaseUrl {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let raw = RawModuleBaseUrl::deserialize(deserializer)?;
+        let rewrites = match (raw.rewrites, raw.rewrite) {
+            (Some(_), Some(_)) => {
+                return Err(D::Error::custom(
+                    "cannot specify both 'rewrite' and 'rewrites'",
+                ))
+            }
+            (Some(list), None) => list,
+            (None, Some(rule)) => vec![rule],
+            (None, None) => Vec::new(),
+        };
+        Ok(ModuleBaseUrl {
+            url: raw.url,
+            rewrites,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

@@ -291,7 +291,7 @@ fn servers_are_taken_per_module_and_never_borrowed() {
                 name: "with".into(),
                 base_url: Some(IrBaseUrl {
                     url: "https://api.example.com".into(),
-                    rewrite: None,
+                    rewrites: Vec::new(),
                 }),
                 endpoints: vec![ep("a", HttpMethod::Get, "/a")],
                 ..Default::default()
@@ -324,7 +324,7 @@ fn module_with_cell(cell_url: &str, endpoint: IrEndpoint) -> Exchange {
             name: "m".into(),
             base_url: Some(IrBaseUrl {
                 url: cell_url.into(),
-                rewrite: None,
+                rewrites: Vec::new(),
             }),
             endpoints: vec![endpoint],
             ..Default::default()
@@ -999,10 +999,16 @@ fn a_rewrite_in_the_cell_rewrites_the_exported_path() {
             name: "m".into(),
             base_url: Some(IrBaseUrl {
                 url: "https://api.example.com".into(),
-                rewrite: Some(RewriteRule {
-                    from: "/api/air".into(),
-                    to: "/api/project-a/air".into(),
-                }),
+                rewrites: vec![
+                    RewriteRule {
+                        from: "/api/air".into(),
+                        to: "/api/project-a/air".into(),
+                    },
+                    RewriteRule {
+                        from: "/api".into(),
+                        to: "/api/first-wins".into(),
+                    },
+                ],
             }),
             endpoints: vec![ep("a", HttpMethod::Get, "/api/air/list")],
             ..Default::default()

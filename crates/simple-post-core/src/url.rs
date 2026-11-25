@@ -26,6 +26,7 @@ pub fn percent_encode(s: &str) -> String {
 }
 
 use crate::domain::RewriteRule;
+use crate::error::AppError;
 
 /// 前导 `scheme://` 的字节长度，没有则 `None`。
 ///
@@ -52,34 +53,47 @@ pub fn scheme_prefix_len(s: &str) -> Option<usize> {
     }
 }
 
-/// 把端点**自己 URL** 的路径前缀从 `from` 换成 `to`。
+/// 规范化一条改写规则的起点，用于判重。
+///
+/// 去首尾空白，再去掉末尾所有 `/`；去掉后为空（如 `"/"`、`"///"`）时返回 `"/"`。
+/// 故 `"/api/air"` 与 `"/api/air/"` 是同一个起点，`"/"` 与 `"///"` 也是。
+pub fn normalize_rewrite_from(from: &str) -> String {
+    let trimmed = from.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let stripped = trimmed.trim_end_matches('/');
+    if stripped.is_empty() {
+        "/".to_string()
+    } else {
+        stripped.to_string()
+    }
+}
+
+/// 单条规则对 URL 的改写结果；不命中返回 `None`。
 ///
 /// 规则只作用在路径上：主机与查询串一概不动。
 ///
-/// - 规则缺席，或 `from` 去掉首尾空白之后为空 → 原样返回（没有起点就没有规则）。
-/// - `to` 是绝对地址（带 `scheme://` 或以 `//` 开头）→ 原样返回。改写只准改路径，
+/// - `from` 去掉首尾空白之后为空 → `None`（没有起点就没有规则）。
+/// - `to` 是绝对地址（带 `scheme://` 或以 `//` 开头）→ `None`。改写只准改路径，
 ///   不准把请求挪到另一个主机上去——那会把凭据发到别处。
 /// - `from` 去掉尾部所有 `/`；起点就是 `/` 时它指的是**路径根**，整条路径换到 `to` 底下。
 /// - 路径以 `from` 开头，**且**其后紧跟的那一位是 `/`（或路径恰好等于 `from`）→ 换成
 ///   `to` 加其余部分。边界这一条是必需的：没有它，`/api/air` 会命中 `/api/airplane`。
-/// - 其余情况原样返回。
 ///
 /// `from` 按**原文**匹配：它不做 `{{var}}` 替换，故那里的标记永远不会被展开。`to` 会被
 /// 随后的 `{{var}}` 替换扫到（它进了 URL）。
 ///
-/// 与渲染进程的 `src/lib/url.ts::applyRewrite` 对应；两者必须一致，否则预览与真正发出去的
+/// 与渲染进程的 `src/lib/url.ts::tryApplyRewrite` 对应；两者必须一致，否则预览与真正发出去的
 /// 请求描述的是两个 URL。共享样本是 `fixtures/base-url-parity.json`。
-pub fn apply_rewrite(url: &str, rule: Option<&RewriteRule>) -> String {
-    let Some(rule) = rule else {
-        return url.to_string();
-    };
+pub fn try_apply_rewrite(url: &str, rule: &RewriteRule) -> Option<String> {
     let from_raw = rule.from.trim();
     if from_raw.is_empty() {
-        return url.to_string();
+        return None;
     }
     let to = rule.to.trim();
     if is_absolute_target(to) {
-        return url.to_string();
+        return None;
     }
 
     let (head, path, tail) = split_url(url);
@@ -89,15 +103,60 @@ pub fn apply_rewrite(url: &str, rule: Option<&RewriteRule>) -> String {
         // 故这里是直接相接（`/gateway` + `/api/air/list`）。
         format!("{to}{path}")
     } else {
-        let Some(rest) = path.strip_prefix(from) else {
-            return url.to_string();
-        };
+        let rest = path.strip_prefix(from)?;
         if !rest.is_empty() && !rest.starts_with('/') {
-            return url.to_string();
+            return None;
         }
         format!("{to}{rest}")
     };
-    format!("{head}{new_path}{tail}")
+    Some(format!("{head}{new_path}{tail}"))
+}
+
+/// 按列表顺序依次尝试改写，**命中第一条后立即返回**（不串联执行后续规则）；
+/// 全部未命中时原样返回。
+pub fn apply_rewrites(url: &str, rules: &[RewriteRule]) -> String {
+    for rule in rules {
+        if let Some(next) = try_apply_rewrite(url, rule) {
+            return next;
+        }
+    }
+    url.to_string()
+}
+
+/// 校验一组改写规则：起点不得为空、目标不得是绝对地址、同一组内规范化起点不得重复。
+///
+/// 重复的起点意味着后面那条永远匹配不到（首条命中即停止），故在写入口直接拒绝。
+/// 调用方应先 [`clean_rewrites`] 掉全空白占位行，否则占位行会被判成「起点为空」。
+pub fn validate_rewrites(rules: &[RewriteRule]) -> Result<(), AppError> {
+    let mut seen = std::collections::HashSet::new();
+    for rule in rules {
+        if rule.from.trim().is_empty() {
+            return Err(AppError::Validation(
+                "路径改写规则的起点不能为空".to_string(),
+            ));
+        }
+        if is_absolute_target(rule.to.trim()) {
+            return Err(AppError::Validation(
+                "路径改写目标不能包含协议或主机地址".to_string(),
+            ));
+        }
+        let key = normalize_rewrite_from(&rule.from);
+        if !seen.insert(key.clone()) {
+            return Err(AppError::Validation(format!(
+                "模块路径改写存在重复起点「{key}」"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// 剔除全空白的占位行（`from` 与 `to` 去空白后都为空），保留其余规则的原样与顺序。
+pub fn clean_rewrites(rules: &[RewriteRule]) -> Vec<RewriteRule> {
+    rules
+        .iter()
+        .filter(|r| !(r.from.trim().is_empty() && r.to.trim().is_empty()))
+        .cloned()
+        .collect()
 }
 
 /// 目标是不是一个绝对地址。带 `scheme://` 或以 `//` 开头的都算。

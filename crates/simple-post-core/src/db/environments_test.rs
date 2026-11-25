@@ -27,7 +27,14 @@ fn sample_env(id: &str, project_id: &str, name: &str) -> Environment {
 fn cell(url: &str) -> ModuleBaseUrl {
     ModuleBaseUrl {
         url: url.into(),
-        rewrite: None,
+        rewrites: Vec::new(),
+    }
+}
+
+fn rule(from: &str, to: &str) -> RewriteRule {
+    RewriteRule {
+        from: from.into(),
+        to: to.into(),
     }
 }
 
@@ -136,20 +143,17 @@ fn the_seeded_rewrite_comes_back_with_its_cell() {
     let pay = got.module_base_urls.get("m_pay").unwrap();
     assert_eq!(pay.url, "http://localhost:4000/demo/pay");
     assert_eq!(
-        pay.rewrite,
-        Some(RewriteRule {
-            from: "/api/pay".into(),
-            to: "/api/demo/pay".into(),
-        }),
+        pay.rewrites,
+        vec![rule("/api/pay", "/api/demo/pay")],
         "格子里的路径改写规则要跟着格子一起存下来"
     );
     assert!(
         got.module_base_urls
             .get("m_auth")
             .unwrap()
-            .rewrite
-            .is_none(),
-        "没有规则的格子读回来是 None"
+            .rewrites
+            .is_empty(),
+        "没有规则的格子读回来是空列表"
     );
 }
 
@@ -163,11 +167,8 @@ fn set_module_base_url_writes_one_cell_and_leaves_its_siblings() {
     let pay = env.module_base_urls.get("m_pay").unwrap();
     assert_eq!(pay.url, "http://pay");
     assert_eq!(
-        pay.rewrite,
-        Some(RewriteRule {
-            from: "/api/pay".into(),
-            to: "/api/demo/pay".into(),
-        }),
+        pay.rewrites,
+        vec![rule("/api/pay", "/api/demo/pay")],
         "只写地址时，这一格原有的改写规则必须保持不变"
     );
     assert_eq!(
@@ -199,16 +200,8 @@ fn set_module_base_url_overwrites_rather_than_appending() {
 fn writing_only_the_rewrite_leaves_the_address_alone() {
     let pool = fresh_pool();
     let env = db::with_tx(&pool, |c| {
-        set_module_base_url(
-            c,
-            "env_dev",
-            "m_auth",
-            None,
-            Some(&RewriteRule {
-                from: "/api/air".into(),
-                to: "/api/project-a/air".into(),
-            }),
-        )
+        let rules = [rule("/api/air", "/api/project-a/air")];
+        set_module_base_url(c, "env_dev", "m_auth", None, Some(&rules))
     })
     .unwrap();
     let auth = env.module_base_urls.get("m_auth").unwrap();
@@ -216,35 +209,21 @@ fn writing_only_the_rewrite_leaves_the_address_alone() {
         auth.url, "http://localhost:4000/demo/auth",
         "只写改写规则时，这一格原有的地址必须保持不变"
     );
-    assert_eq!(
-        auth.rewrite,
-        Some(RewriteRule {
-            from: "/api/air".into(),
-            to: "/api/project-a/air".into(),
-        })
-    );
+    assert_eq!(auth.rewrites, vec![rule("/api/air", "/api/project-a/air")]);
 }
 
 #[test]
 fn clearing_the_rewrite_keeps_the_address() {
     let pool = fresh_pool();
     let env = db::with_tx(&pool, |c| {
-        set_module_base_url(
-            c,
-            "env_dev",
-            "m_pay",
-            None,
-            Some(&RewriteRule {
-                from: "".into(),
-                to: "".into(),
-            }),
-        )
+        let blank = [rule("", "")];
+        set_module_base_url(c, "env_dev", "m_pay", None, Some(&blank))
     })
     .unwrap();
     let pay = env.module_base_urls.get("m_pay").unwrap();
     assert_eq!(pay.url, "http://localhost:4000/demo/pay");
     assert!(
-        pay.rewrite.is_none(),
+        pay.rewrites.is_empty(),
         "起点与目标都空白的规则清掉规则，但这一格还有地址，故这一格留着"
     );
 }
@@ -259,11 +238,8 @@ fn clearing_a_cell_does_not_borrow_a_sibling_modules_value() {
     let pay = env.module_base_urls.get("m_pay").unwrap();
     assert_eq!(pay.url, "", "地址被清空，这一格没有地址可解析");
     assert_eq!(
-        pay.rewrite,
-        Some(RewriteRule {
-            from: "/api/pay".into(),
-            to: "/api/demo/pay".into(),
-        }),
+        pay.rewrites,
+        vec![rule("/api/pay", "/api/demo/pay")],
         "清地址不动改写规则"
     );
     assert_eq!(
@@ -278,10 +254,7 @@ fn clearing_the_last_cell_drops_the_module_entirely() {
     let pool = fresh_pool();
     // 一个既没有地址也没有改写规则的格子解析不出任何东西，留着只会让按键遍历的读法误判成
     // 「此处已配置」。
-    let blank = RewriteRule {
-        from: "".into(),
-        to: "".into(),
-    };
+    let blank = [rule("", "")];
     let env = db::with_tx(&pool, |c| {
         set_module_base_url(c, "env_dev", "m_auth", Some(""), Some(&blank))?;
         set_module_base_url(c, "env_dev", "m_order", Some(""), Some(&blank))?;
@@ -307,11 +280,8 @@ fn writing_neither_field_leaves_the_cell_untouched() {
     let pay = env.module_base_urls.get("m_pay").unwrap();
     assert_eq!(pay.url, "http://localhost:4000/demo/pay");
     assert_eq!(
-        pay.rewrite,
-        Some(RewriteRule {
-            from: "/api/pay".into(),
-            to: "/api/demo/pay".into(),
-        }),
+        pay.rewrites,
+        vec![rule("/api/pay", "/api/demo/pay")],
         "两个字段都传 None 时，这一格原样保留"
     );
     assert!(
@@ -364,6 +334,127 @@ fn update_can_replace_module_base_urls() {
     assert_eq!(
         got.module_base_urls.get("m_auth").unwrap().url,
         "http://new"
+    );
+}
+
+#[test]
+fn set_module_base_url_stores_the_rules_in_order() {
+    let pool = fresh_pool();
+    let rules = [
+        rule("/api/air", "/v1/air"),
+        rule("/api", "/v2"),
+        rule("/", "/gateway"),
+    ];
+    let env = db::with_tx(&pool, |c| {
+        set_module_base_url(c, "env_dev", "m_auth", None, Some(&rules))
+    })
+    .unwrap();
+    assert_eq!(env.module_base_urls.get("m_auth").unwrap().rewrites, rules);
+    let got = db::with_conn(&pool, |c| get(c, "env_dev")).unwrap();
+    assert_eq!(
+        got.module_base_urls.get("m_auth").unwrap().rewrites,
+        rules,
+        "顺序本身是契约，落库后必须原样读回"
+    );
+}
+
+#[test]
+fn set_module_base_url_drops_blank_placeholder_rows() {
+    let pool = fresh_pool();
+    let rules = [rule(" ", "  "), rule("/api/air", "/v1")];
+    let env = db::with_tx(&pool, |c| {
+        set_module_base_url(c, "env_dev", "m_auth", None, Some(&rules))
+    })
+    .unwrap();
+    assert_eq!(
+        env.module_base_urls.get("m_auth").unwrap().rewrites,
+        vec![rule("/api/air", "/v1")],
+        "全空白占位行不落库"
+    );
+}
+
+#[test]
+fn set_module_base_url_rejects_duplicate_starts() {
+    // 末尾斜杠的差异也算同一个起点：`/api/air` 与 `/api/air/` 匹配的是同一批路径。
+    let pool = fresh_pool();
+    let rules = [rule("/api/air", "/v1"), rule("/api/air/", "/v2")];
+    let err = db::with_tx(&pool, |c| {
+        set_module_base_url(c, "env_dev", "m_auth", None, Some(&rules))
+    })
+    .unwrap_err();
+    assert_eq!(err.code(), "validation");
+    let got = db::with_conn(&pool, |c| get(c, "env_dev")).unwrap();
+    assert!(
+        got.module_base_urls
+            .get("m_auth")
+            .unwrap()
+            .rewrites
+            .is_empty(),
+        "被拒绝的写入不得留下半份规则"
+    );
+}
+
+#[test]
+fn set_module_base_url_rejects_an_empty_start_and_an_absolute_target() {
+    let pool = fresh_pool();
+    let empty_start = [rule("   ", "/v1")];
+    let err = db::with_tx(&pool, |c| {
+        set_module_base_url(c, "env_dev", "m_auth", None, Some(&empty_start))
+    })
+    .unwrap_err();
+    assert_eq!(err.code(), "validation");
+
+    let absolute = [rule("/api/air", "https://other.example/api")];
+    let err = db::with_tx(&pool, |c| {
+        set_module_base_url(c, "env_dev", "m_auth", None, Some(&absolute))
+    })
+    .unwrap_err();
+    assert_eq!(err.code(), "validation");
+}
+
+#[test]
+fn the_whole_map_write_path_runs_the_same_validation() {
+    // 整张 map 的写路径与单格写路径必须给出同一个结论，否则非法配置能从另一条路进去。
+    let pool = fresh_pool();
+    let err = db::with_tx(&pool, |c| {
+        let mut map = HashMap::new();
+        map.insert(
+            "m_auth".to_string(),
+            ModuleBaseUrl {
+                url: "http://auth".into(),
+                rewrites: vec![rule("/api/air", "/v1"), rule("/api/air/", "/v2")],
+            },
+        );
+        update(
+            c,
+            "env_dev",
+            EnvironmentPatch {
+                module_base_urls: Some(map),
+                ..Default::default()
+            },
+        )
+    })
+    .unwrap_err();
+    assert_eq!(err.code(), "validation");
+}
+
+#[test]
+fn the_legacy_single_rewrite_field_is_promoted_to_a_one_item_list() {
+    // 旧库的 `module_base_urls_json` 里存的是 `{ url, rewrite }`；读出来必须变成一条规则的列表，
+    // 否则 `SCHEMA_VERSION` 一涨就会删掉用户所有的项目、环境与树。
+    let cell: ModuleBaseUrl = serde_json::from_str(
+        r#"{"url":"http://pay","rewrite":{"from":"/api/pay","to":"/api/demo/pay"}}"#,
+    )
+    .unwrap();
+    assert_eq!(cell.rewrites, vec![rule("/api/pay", "/api/demo/pay")]);
+    let both: Result<ModuleBaseUrl, _> = serde_json::from_str(
+        r#"{"url":"http://pay","rewrite":{"from":"/a","to":"/b"},"rewrites":[]}"#,
+    );
+    assert!(both.is_err(), "同时给出两种字段是形状错误");
+    let serialised = serde_json::to_string(&cell).unwrap();
+    assert!(
+        !serialised.contains("\"rewrite\""),
+        "只输出 rewrites：{serialised}"
     );
 }
 
