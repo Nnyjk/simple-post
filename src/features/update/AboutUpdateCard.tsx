@@ -15,12 +15,7 @@ import { Switch } from '@/components/ui/switch';
 import { ExternalLink } from '@/components/ui/external-link';
 import { useAppStore } from '@/stores/app-store';
 import { APP_VERSION } from '@/lib/app-version';
-import {
-  GITHUB_MIRRORS,
-  PROJECT_GITHUB_URL,
-  mirrorGithubUrl,
-  resolveGithubMirror,
-} from '@/lib/github-mirror';
+import { GITHUB_MIRRORS, projectHomeUrl, resolveGithubMirror } from '@/lib/github-mirror';
 import { isUpdaterAvailable } from '@/lib/updater';
 import { describeCheckOutcome } from '@/lib/update/messages';
 import { relativeTime } from '@/lib/update/time';
@@ -134,7 +129,7 @@ export function AboutUpdateCard() {
               <span className="flex items-center gap-1">
                 <span className="font-mono text-xs text-foreground">{currentVersion}</span>
                 <ExternalLink
-                  href={mirrorGithubUrl(PROJECT_GITHUB_URL, githubMirror)}
+                  href={projectHomeUrl(githubMirror)}
                   label="在 GitHub 上打开项目主页"
                   className={cn(
                     'inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-overlay-hover hover:text-foreground',

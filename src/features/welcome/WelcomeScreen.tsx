@@ -5,7 +5,7 @@ import { cn, focusRing } from '@/lib/utils';
 import { AppIcon } from '@/components/ui/app-icon';
 import { ExternalLink } from '@/components/ui/external-link';
 import { WindowControls } from '@/components/ui/window-controls';
-import { PROJECT_GITHUB_URL, mirrorGithubUrl } from '@/lib/github-mirror';
+import { projectHomeUrl } from '@/lib/github-mirror';
 import { UpdatePill } from '@/features/update/UpdatePill';
 import { UpdateDot } from '@/features/update/UpdateDot';
 
@@ -188,9 +188,9 @@ export function WelcomeScreen() {
               {/* 红点跟着「有没有新版」走，而不是跟着顶栏那枚 pill 走：「稍后再说」只收起 pill。 */}
               {updateAvailable && <UpdateDot />}
             </button>
-            {/* 文档就是仓库里的 README，故这一条直接去 GitHub：镜像设置照旧生效。 */}
+            {/* 文档就是仓库里的 README。镜像只挑能呈现网页的那几个，前缀镜像会把仓库页 403。 */}
             <ExternalLink
-              href={mirrorGithubUrl(PROJECT_GITHUB_URL, githubMirror)}
+              href={projectHomeUrl(githubMirror)}
               label="在 GitHub 上查看文档"
               className={cn(
                 'inline-flex items-center gap-1.5 rounded-md border border-border bg-card/40 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:bg-overlay-hover hover:text-foreground',
