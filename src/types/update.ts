@@ -42,6 +42,13 @@ export interface UpdateDeployment {
   command: string | null;
   /** 这台机器能不能执行更新：运维声明了更新命令 **且** 部署开了口令模式。 */
   applyEnabled: boolean;
+  /**
+   * 服务端记下的上一次更新检查时刻（RFC3339 UTC）；从未查过为 `null`。
+   *
+   * 它跨浏览器刷新存活：渲染层内存里的 `updateInfo` 刷新即丢，设置页的「上次检查」
+   * 因此以它为回退。
+   */
+  lastCheckedAt: string | null;
 }
 
 /** `POST /api/update/apply` 的结果。不判断成败：退出码与输出就是命令本身的结果。 */

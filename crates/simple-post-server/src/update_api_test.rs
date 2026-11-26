@@ -8,9 +8,22 @@ use std::ffi::OsString;
 use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 
+use simple_post_core::db::DbPool;
+
 use super::*;
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+/// 一次性的空库。`preferences` 那一行要能读写，故这里真的建一个库，不 mock 掉 DB。
+fn temp_pool(tag: &str) -> DbPool {
+    let dir = std::env::temp_dir().join(format!(
+        "simple-post-update-api-test-{}-{}",
+        std::process::id(),
+        tag
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    simple_post_core::db::init(&dir).expect("db init")
+}
 
 /// 在持有进程级锁的前提下设置这两个环境变量，drop 时恢复原值。
 struct ScopedEnv {
@@ -64,7 +77,7 @@ impl Drop for ScopedEnv {
 async fn apply_is_disabled_without_a_configured_command() {
     let _env = ScopedEnv::with(None, None);
 
-    let deployment = deployment(true);
+    let deployment = deployment(&temp_pool("disabled-command"), true);
     assert!(!deployment.apply_enabled);
     assert!(matches!(apply(true).await, Err(ApplyError::Disabled)));
 }
@@ -75,7 +88,7 @@ async fn apply_is_disabled_without_a_password() {
 
     // 命令配了，但这一进程没有口令模式 —— `serve-web` 未设口令时任何人可访问，
     // 那种部署里不能给「执行命令」开一个入口。
-    let deployment = deployment(false);
+    let deployment = deployment(&temp_pool("disabled-password"), false);
     assert!(!deployment.apply_enabled);
     assert!(matches!(apply(false).await, Err(ApplyError::Disabled)));
 }
@@ -84,7 +97,7 @@ async fn apply_is_disabled_without_a_password() {
 async fn apply_runs_the_configured_command() {
     let _env = ScopedEnv::with(Some("echo hi"), None);
 
-    let deployment = deployment(true);
+    let deployment = deployment(&temp_pool("enabled"), true);
     assert!(deployment.apply_enabled, "两道门都成立时应可执行");
 
     let result = apply(true).await.expect("command runs");
@@ -119,7 +132,7 @@ async fn a_second_apply_while_one_is_running_is_busy() {
 async fn docker_shape_is_reported_when_declared() {
     let _env = ScopedEnv::with(None, Some("docker"));
 
-    let deployment = deployment(true);
+    let deployment = deployment(&temp_pool("docker"), true);
     assert_eq!(deployment.shape, "docker");
     // 版本随响应走：界面把它钉成「当前版本」，不需要再打一次 GitHub。
     assert_eq!(
@@ -144,6 +157,25 @@ fn docker_command_reads_the_compose_file_from_the_repository_root() {
             " && ",
             "docker compose --project-directory . -f docker/docker-compose.yml up -d simple-post",
         )
+    );
+}
+
+#[test]
+fn last_checked_at_is_stored_and_returned_by_deployment() {
+    let pool = temp_pool("last-checked");
+    // 空库：卡片因此说「尚未检查过更新」。
+    assert_eq!(stored_last_checked_at(&pool), None);
+    assert_eq!(deployment(&pool, false).last_checked_at, None);
+
+    record_last_checked_at(&pool, "2026-11-26T01:02:03Z");
+    assert_eq!(
+        stored_last_checked_at(&pool).as_deref(),
+        Some("2026-11-26T01:02:03Z")
+    );
+    // 部署形态带上这条时刻：web 端刷新浏览器后，设置页靠它写「上次检查」。
+    assert_eq!(
+        deployment(&pool, false).last_checked_at.as_deref(),
+        Some("2026-11-26T01:02:03Z")
     );
 }
 

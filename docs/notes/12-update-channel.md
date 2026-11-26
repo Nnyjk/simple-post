@@ -34,7 +34,7 @@ Tauri updater 插件 → GET .../releases/latest/download/latest.json → 签名
 
 ```
 浏览器 → GET /api/update/check[?force=1]      → update_api::check → core 缓存 → GitHub
-       → GET /api/update/deployment           → update_api::deployment（形态 + 镜像 + 命令 + applyEnabled + 服务端版本）
+       → GET /api/update/deployment           → update_api::deployment（形态 + 镜像 + 命令 + applyEnabled + 服务端版本 + 上次检查时刻）
        → POST /api/update/apply               → update_api::apply → sh -c <SIMPLE_POST_UPDATE_COMMAND>
 ```
 

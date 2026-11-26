@@ -235,6 +235,9 @@ pub fn run() {
             crate::commands::log_export,
             crate::commands::log_export_file,
             crate::commands::log_client_event,
+            // 用系统默认浏览器打开网页：桌面 webview 不处理 `<a target="_blank">`，
+            // 故设置页与欢迎页的 GitHub 入口都经过这条命令。
+            crate::commands::open_external_url,
             // 流式传输：SSE 的 start/cancel 与 WebSocket 的 open/send/close。
             crate::commands::stream_request,
             crate::commands::stream_cancel,

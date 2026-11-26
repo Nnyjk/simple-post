@@ -34,14 +34,20 @@ impl UpdateCheckQuery {
     }
 }
 
-pub(crate) async fn update_check(Query(query): Query<UpdateCheckQuery>) -> Json<UpdateCheck> {
-    Json(update_api::check(query.force()).await)
+pub(crate) async fn update_check(
+    State(state): State<Arc<WebState>>,
+    Query(query): Query<UpdateCheckQuery>,
+) -> Json<UpdateCheck> {
+    Json(update_api::check(&state.pool, query.force()).await)
 }
 
 pub(crate) async fn update_deployment(
     State(state): State<Arc<WebState>>,
 ) -> Json<UpdateDeployment> {
-    Json(update_api::deployment(state.password.is_some()))
+    Json(update_api::deployment(
+        &state.pool,
+        state.password.is_some(),
+    ))
 }
 
 pub(crate) async fn update_apply(

@@ -1,9 +1,11 @@
-import { Suspense, lazy, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { FilePlus, Settings as SettingsIcon, BookOpen, Package, ArrowRight } from 'lucide-react';
 import { useAppStore, type Theme } from '@/stores/app-store';
 import { cn, focusRing } from '@/lib/utils';
 import { AppIcon } from '@/components/ui/app-icon';
+import { ExternalLink } from '@/components/ui/external-link';
 import { WindowControls } from '@/components/ui/window-controls';
+import { PROJECT_GITHUB_URL, mirrorGithubUrl } from '@/lib/github-mirror';
 import { UpdatePill } from '@/features/update/UpdatePill';
 import { UpdateDot } from '@/features/update/UpdateDot';
 
@@ -12,14 +14,6 @@ const THEME_ICON: Record<Theme, string> = {
   light: '☀️',
   system: '🖥️',
 };
-
-/**
- * 「查看文档」的占位提示走懒加载边界：对话框会拉进 GSAP，欢迎页在 entry chunk 里，
- * 不该替它付这份冷启动成本。
- */
-const WelcomeNoticeDialog = lazy(() =>
-  import('./WelcomeNoticeDialog').then((m) => ({ default: m.WelcomeNoticeDialog })),
-);
 
 /**
  * Welcome —— 独立的起始界面。`activeProjectId === ''` 时显示，也就是应用的启动态：
@@ -48,8 +42,9 @@ export function WelcomeScreen() {
   // 与设置页「可更新」行同一个判据：boolean，选择器返回稳定值。
   const updateAvailable = useAppStore((s) => s.updateInfo?.available === true);
 
+  const githubMirror = useAppStore((s) => s.githubMirror);
+
   const containerRef = useRef<HTMLDivElement>(null);
-  const [docsNoticeOpen, setDocsNoticeOpen] = useState(false);
 
   // 主视觉的错峰入场 —— 走 CSS，不用 GSAP。
   //
@@ -67,11 +62,6 @@ export function WelcomeScreen() {
   }, []);
 
   if (activeProjectId !== '') return null;
-
-  const handleDocs = () => {
-    // 占位 —— 完整文档计划在 v0.2 推出
-    setDocsNoticeOpen(true);
-  };
 
   const hasProjects = loaded && projects.length > 0;
 
@@ -198,9 +188,10 @@ export function WelcomeScreen() {
               {/* 红点跟着「有没有新版」走，而不是跟着顶栏那枚 pill 走：「稍后再说」只收起 pill。 */}
               {updateAvailable && <UpdateDot />}
             </button>
-            <button
-              type="button"
-              onClick={handleDocs}
+            {/* 文档就是仓库里的 README，故这一条直接去 GitHub：镜像设置照旧生效。 */}
+            <ExternalLink
+              href={mirrorGithubUrl(PROJECT_GITHUB_URL, githubMirror)}
+              label="在 GitHub 上查看文档"
               className={cn(
                 'inline-flex items-center gap-1.5 rounded-md border border-border bg-card/40 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:bg-overlay-hover hover:text-foreground',
                 focusRing,
@@ -208,7 +199,7 @@ export function WelcomeScreen() {
             >
               <BookOpen className="h-3.5 w-3.5" />
               查看文档
-            </button>
+            </ExternalLink>
           </div>
 
           {/* 页脚，显示当前主题 */}
@@ -228,13 +219,6 @@ export function WelcomeScreen() {
           </div>
         </div>
       </main>
-
-      {/* 「查看文档」的占位提示。仅在真的打开时才挂载，懒加载的 chunk 也才在那时取。 */}
-      {docsNoticeOpen && (
-        <Suspense fallback={null}>
-          <WelcomeNoticeDialog open onClose={() => setDocsNoticeOpen(false)} />
-        </Suspense>
-      )}
     </div>
   );
 }

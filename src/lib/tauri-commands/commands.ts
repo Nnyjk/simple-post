@@ -149,6 +149,12 @@ export const COMMANDS = {
   logExport: 'log_export',
   logExportFile: 'log_export_file',
 
+  // ----- 宿主交互（桌面壳） -----
+  // `openExternalUrl` 只落在桌面壳：webview 不处理 `<a target="_blank">`（wry 没有
+  // 新窗口处理器时一律拒绝），故桌面端的 GitHub 入口改由 Rust 交给系统默认浏览器。
+  // 浏览器形态本身就是一条链接，`WEB_ROUTES` 里因此刻意没有条目。
+  openExternalUrl: 'open_external_url',
+
   // ----- updates -----
   // `updateCheck` 两条传输都有：桌面的 `update_check` 命令调 server crate 的同一个函数，
   // 拿到的是线上实时 release body；`serve-web` 走 `/api/update/check`。

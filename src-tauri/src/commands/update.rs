@@ -24,7 +24,13 @@ use crate::update_api::UpdateCheck;
 ///
 /// 返回 [`UpdateCheck`] 而不是 `Option`：抓取失败也走 `Ok`，降级信息在响应体的 `error`
 /// 字段里 —— 与 `GET /api/update/check` 的 200 约定一致，界面在两条传输下读同一套判别。
+///
+/// 拿到结论的那一刻由 [`crate::update_api::check`] 写进 `preferences`，web 端因此刷新
+/// 浏览器后仍写得出「上次检查」。
 #[tauri::command]
-pub async fn update_check(force: Option<bool>) -> Result<UpdateCheck, AppError> {
-    Ok(crate::update_api::check(force.unwrap_or(false)).await)
+pub async fn update_check(
+    state: tauri::State<'_, crate::db::DbPool>,
+    force: Option<bool>,
+) -> Result<UpdateCheck, AppError> {
+    Ok(crate::update_api::check(&state, force.unwrap_or(false)).await)
 }

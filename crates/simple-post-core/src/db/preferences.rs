@@ -120,6 +120,13 @@ pub mod keys {
     /// 收藏的行不计入这个条数（见 `db::response_history::set_favorite`）。这是全局设置：一次修改对
     /// 所有项目、所有接口都生效，故它住在跨项目的 `preferences` 袋子里，而不是某个项目上。
     pub const RESPONSE_HISTORY_KEEP: &str = "response_history.keep";
+
+    /// `"update.last_checked_at"` → string。**默认缺失。** 最近一次拿到结论的更新检查时刻
+    /// （RFC3339 UTC，与响应体的 `checkedAt` 是同一个值）。
+    ///
+    /// 存在库里而不是 localStorage：web 端刷新浏览器会丢掉渲染层内存里那份结果，而设置页
+    /// 仍要写得出「上次检查」。它同时也是那次 `update` 缓存的年龄。
+    pub const UPDATE_LAST_CHECKED_AT: &str = "update.last_checked_at";
 }
 
 /// 每个 endpoint 最多保留多少条未收藏历史的上限。
