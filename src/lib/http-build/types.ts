@@ -8,6 +8,7 @@ import type {
   RequestProtocol,
   RewriteRule,
 } from '@/types/domain';
+import type { MultipartPartByteRange } from '../multipart';
 import type { RequestProblem } from '../request-validation';
 
 /**
@@ -152,6 +153,13 @@ export interface PreparedRequest {
    * 它不进 cURL 预览，也不进落库的请求快照。
    */
   vars: Record<string, string>;
+  /**
+   * `multipart` 模式下每个分片在请求体里的字节区间。**只有带上文件分片时才非空**：
+   * 上传进度按它折算到具体那一行，其它模式没有可映射的行。
+   *
+   * 区间与 `body` / `bodyBase64` 是同一趟装配的产物，故分母与真正发出去的字节数一致。
+   */
+  multipartPartRanges?: MultipartPartByteRange[];
   /**
    * URL 路径里没取到值的占位符名（`/users/{id}` 的 `id`）。
    *

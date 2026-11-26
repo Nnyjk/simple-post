@@ -1133,3 +1133,277 @@ async fn oversized_chunked_response_stops_reading_at_the_limit() {
         stats.body_bytes_written
     );
 }
+
+// 传输进度
+//
+// 进度条按这些数字画：已交给传输层的字节数必须单调不减、末帧必须等于请求体总长度（否则
+// 进度条永远停不到 100%），服务端自报的接收进度只能从它自己说的那几种通道里读出来。
+
+/// 起一个服务器：读完请求头连请求体一起吃掉，然后回一份固定的响应。
+async fn spawn_echo_server(content_type: &'static str, body: &'static str) -> u16 {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        while let Ok((mut sock, _)) = listener.accept().await {
+            tokio::spawn(async move {
+                let mut seen: Vec<u8> = Vec::new();
+                let mut buf = [0u8; 8192];
+                let mut head_end: Option<usize> = None;
+                while head_end.is_none() {
+                    let Ok(n) = sock.read(&mut buf).await else {
+                        return;
+                    };
+                    if n == 0 {
+                        return;
+                    }
+                    seen.extend_from_slice(&buf[..n]);
+                    head_end = seen
+                        .windows(4)
+                        .position(|w| w == b"\r\n\r\n")
+                        .map(|p| p + 4);
+                }
+                let head_end = head_end.unwrap();
+                let head = String::from_utf8_lossy(&seen[..head_end]).to_string();
+                let want = head
+                    .lines()
+                    .find_map(|l| {
+                        let (k, v) = l.split_once(':')?;
+                        k.trim()
+                            .eq_ignore_ascii_case("content-length")
+                            .then(|| v.trim().parse::<usize>().ok())?
+                    })
+                    .unwrap_or(0);
+                while seen.len() - head_end < want {
+                    let Ok(n) = sock.read(&mut buf).await else {
+                        return;
+                    };
+                    if n == 0 {
+                        return;
+                    }
+                    seen.extend_from_slice(&buf[..n]);
+                }
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = sock.write_all(response.as_bytes()).await;
+                let _ = sock.flush().await;
+            });
+        }
+    });
+    port
+}
+
+/// 上传阶段的进度：首帧是 0，末帧等于总长度，中间单调不减。
+#[tokio::test]
+async fn upload_progress_runs_from_zero_to_the_body_length() {
+    let port = spawn_echo_server("text/plain", "ok").await;
+    // 超过一个 32 KiB 分块才有多帧。
+    let payload = "x".repeat(200 * 1024);
+    let total = payload.len() as u64;
+
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let sink_seen = seen.clone();
+    let sink: ProgressSink = Box::new(move |p| sink_seen.lock().unwrap().push(p));
+
+    let input = HttpRequestInput {
+        method: "POST".into(),
+        url: format!("http://127.0.0.1:{port}/upload"),
+        headers: vec![("Content-Type".into(), "text/plain".into())],
+        body: Some(payload),
+        body_base64: None,
+        timeout_ms: 5_000,
+        follow_redirects: true,
+        max_response_size_kb: 16,
+        tls: TlsSettings::default(),
+    };
+    let out = execute_with_policy_and_progress(&input, OutboundPolicy::default(), Some(sink)).await;
+    assert!(out.ok, "请求应当成功：{:?}", out.error);
+
+    let frames = seen.lock().unwrap();
+    assert!(frames.len() >= 2, "200 KiB 的请求体不该只有一帧");
+    assert_eq!(frames[0].sent_bytes, 0, "首帧在切第一块之前发出");
+    assert_eq!(frames[0].total_bytes, total);
+    for pair in frames.windows(2) {
+        assert!(
+            pair[1].sent_bytes >= pair[0].sent_bytes,
+            "已发送字节数不能回退：{} → {}",
+            pair[0].sent_bytes,
+            pair[1].sent_bytes
+        );
+    }
+    assert_eq!(
+        frames.last().unwrap().sent_bytes,
+        total,
+        "末帧必须等于请求体总长度，否则进度条停不到 100%"
+    );
+    assert!(
+        frames.iter().all(|f| f.server_received_bytes.is_none()),
+        "上传阶段服务端还没说话"
+    );
+}
+
+/// 没有请求体时不发任何进度帧：进度条没有东西可画。
+#[tokio::test]
+async fn a_request_without_a_body_emits_no_progress() {
+    let port = spawn_echo_server("text/plain", "ok").await;
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let sink_seen = seen.clone();
+    let sink: ProgressSink = Box::new(move |p| sink_seen.lock().unwrap().push(p));
+
+    let input = HttpRequestInput {
+        method: "GET".into(),
+        url: format!("http://127.0.0.1:{port}/health"),
+        headers: vec![],
+        body: None,
+        body_base64: None,
+        timeout_ms: 5_000,
+        follow_redirects: true,
+        max_response_size_kb: 16,
+        tls: TlsSettings::default(),
+    };
+    execute_with_policy_and_progress(&input, OutboundPolicy::default(), Some(sink)).await;
+    assert!(seen.lock().unwrap().is_empty());
+}
+
+/// 服务端在 NDJSON 响应体里自报接收进度时，客户端把它读出来。
+#[tokio::test]
+async fn receive_progress_is_read_from_ndjson_events() {
+    let port = spawn_echo_server(
+        "application/x-ndjson",
+        "{\"type\":\"progress\",\"receivedBytes\":10,\"totalBytes\":40}\n\
+         {\"type\":\"progress\",\"receivedBytes\":40,\"totalBytes\":40}\n",
+    )
+    .await;
+
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let sink_seen = seen.clone();
+    let sink: ProgressSink = Box::new(move |p| sink_seen.lock().unwrap().push(p));
+
+    let input = HttpRequestInput {
+        method: "POST".into(),
+        url: format!("http://127.0.0.1:{port}/upload"),
+        headers: vec![],
+        body: Some("payload".into()),
+        body_base64: None,
+        timeout_ms: 5_000,
+        follow_redirects: true,
+        max_response_size_kb: 16,
+        tls: TlsSettings::default(),
+    };
+    let out = execute_with_policy_and_progress(&input, OutboundPolicy::default(), Some(sink)).await;
+    assert!(out.ok, "请求应当成功：{:?}", out.error);
+
+    let frames = seen.lock().unwrap();
+    let received: Vec<u64> = frames
+        .iter()
+        .filter_map(|f| f.server_received_bytes)
+        .collect();
+    assert_eq!(received, vec![10, 40], "两帧自报进度都该被读出来");
+    assert!(
+        frames
+            .iter()
+            .filter(|f| f.server_received_bytes.is_some())
+            .all(|f| f.server_total_bytes == Some(40)),
+        "自报的总量也要一起带上，进度条拿它当分母"
+    );
+}
+
+/// 服务端用响应头报接收进度时也认。
+#[tokio::test]
+async fn receive_progress_is_read_from_a_response_header() {
+    // 头部必须在收到响应时就有，故这里手写一份带 `X-Received-Bytes` 的响应。
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        while let Ok((mut sock, _)) = listener.accept().await {
+            tokio::spawn(async move {
+                let mut buf = [0u8; 4096];
+                let mut seen: Vec<u8> = Vec::new();
+                loop {
+                    let Ok(n) = sock.read(&mut buf).await else {
+                        return;
+                    };
+                    if n == 0 {
+                        return;
+                    }
+                    seen.extend_from_slice(&buf[..n]);
+                    if seen.windows(4).any(|w| w == b"\r\n\r\n") {
+                        break;
+                    }
+                }
+                let _ = sock
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\n\
+                          Content-Type: text/plain\r\n\
+                          X-Received-Bytes: 7\r\n\
+                          X-Upload-Total-Bytes: 7\r\n\
+                          Content-Length: 2\r\n\
+                          Connection: close\r\n\r\nok",
+                    )
+                    .await;
+                let _ = sock.flush().await;
+            });
+        }
+    });
+
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let sink_seen = seen.clone();
+    let sink: ProgressSink = Box::new(move |p| sink_seen.lock().unwrap().push(p));
+
+    let input = HttpRequestInput {
+        method: "POST".into(),
+        url: format!("http://127.0.0.1:{port}/upload"),
+        headers: vec![],
+        body: Some("payload".into()),
+        body_base64: None,
+        timeout_ms: 5_000,
+        follow_redirects: true,
+        max_response_size_kb: 16,
+        tls: TlsSettings::default(),
+    };
+    let out = execute_with_policy_and_progress(&input, OutboundPolicy::default(), Some(sink)).await;
+    assert!(out.ok, "请求应当成功：{:?}", out.error);
+
+    let frames = seen.lock().unwrap();
+    let header_frame = frames
+        .iter()
+        .find(|f| f.server_received_bytes.is_some())
+        .expect("响应头里的接收进度必须被读出来");
+    assert_eq!(header_frame.server_received_bytes, Some(7));
+    assert_eq!(header_frame.server_total_bytes, Some(7));
+}
+
+/// 普通响应体里出现长得像进度事件的 JSON 也不算：那条通道要显式声明。
+#[tokio::test]
+async fn a_plain_json_body_is_not_mistaken_for_progress() {
+    let port = spawn_echo_server(
+        "application/json",
+        "{\"type\":\"progress\",\"receivedBytes\":1}",
+    )
+    .await;
+
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let sink_seen = seen.clone();
+    let sink: ProgressSink = Box::new(move |p| sink_seen.lock().unwrap().push(p));
+
+    let input = HttpRequestInput {
+        method: "GET".into(),
+        url: format!("http://127.0.0.1:{port}/x"),
+        headers: vec![],
+        body: None,
+        body_base64: None,
+        timeout_ms: 5_000,
+        follow_redirects: true,
+        max_response_size_kb: 16,
+        tls: TlsSettings::default(),
+    };
+    execute_with_policy_and_progress(&input, OutboundPolicy::default(), Some(sink)).await;
+    assert!(
+        seen.lock()
+            .unwrap()
+            .iter()
+            .all(|f| f.server_received_bytes.is_none()),
+        "普通的 JSON 响应不是进度通道"
+    );
+}

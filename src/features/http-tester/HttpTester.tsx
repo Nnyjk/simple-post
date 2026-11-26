@@ -42,6 +42,7 @@ export function HttpTester() {
   const updateNode = useAppStore((s) => s.updateNode);
   const updateEndpointDetail = useAppStore((s) => s.updateEndpointDetail);
   const setRequestPending = useAppStore((s) => s.setRequestPending);
+  const setUploadProgress = useAppStore((s) => s.setUploadProgress);
   const setLastResponse = useAppStore((s) => s.setLastResponse);
   const setLastScriptOutcome = useAppStore((s) => s.setLastScriptOutcome);
   const applyEnvWrites = useAppStore((s) => s.applyEnvWrites);
@@ -61,6 +62,10 @@ export function HttpTester() {
   // 请求，不该让 B 的标签也显示「请求中…」，也不该把 B 的 Send 按钮一起锁上。
   const requestPending = useAppStore((s) =>
     s.activeTabId ? (s.lastResponses[s.activeTabId]?.pending ?? false) : false,
+  );
+  // 传输进度也挂在标签上，与在途标记同一份状态：换标签看到的必须是那个标签自己的进度。
+  const uploadProgress = useAppStore((s) =>
+    s.activeTabId ? (s.lastResponses[s.activeTabId]?.uploadProgress ?? null) : null,
   );
   const requestSettings = useAppStore((s) => s.requestSettings);
   // 动态变量挂在项目里，故这一页只认**消费方项目**（当前项目）里的定义：
@@ -494,6 +499,7 @@ export function HttpTester() {
     onPathParamGate: handlePathParamGate,
     onRequestProblems: handleRequestProblems,
     setRequestPending,
+    setUploadProgress,
     setLastResponse,
     setLastScriptOutcome,
     applyEnvWrites,
@@ -627,7 +633,13 @@ export function HttpTester() {
         pathParamError,
         onFormatResult: handleFormatResult,
       }}
-      {...{ varEntries, envName: endpointEnv?.name, vars: prepared.vars }}
+      {...{
+        varEntries,
+        envName: endpointEnv?.name,
+        vars: prepared.vars,
+        endpointId: endpoint.id,
+        uploadProgress,
+      }}
     />
   );
 }

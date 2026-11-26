@@ -10,6 +10,7 @@
 import { Suspense, lazy } from 'react';
 import type { RequestBody } from '@/types/domain';
 import type { FormatResult } from '@/lib/utils';
+import type { TabUploadProgress } from '@/stores/slices/ui-response';
 import type { VarEntry } from './var-hint';
 import { EditorSkeleton } from './EditorSkeleton';
 
@@ -22,6 +23,8 @@ export function BodyEditor({
   onFormatResult,
   varEntries,
   envName,
+  endpointId,
+  uploadProgress,
 }: {
   value: RequestBody;
   onChange: (body: RequestBody) => void;
@@ -32,6 +35,10 @@ export function BodyEditor({
   varEntries: VarEntry[];
   /** 当前环境名，显示在候选浮层的标题上。 */
   envName?: string;
+  /** 当前标签 id。文件分片的读取状态按它重置：换端点时不该沿用上一个的分片表。 */
+  endpointId?: string;
+  /** 当前标签这一次发送的传输进度。 */
+  uploadProgress?: TabUploadProgress | null;
 }) {
   return (
     <Suspense fallback={<EditorSkeleton />}>
@@ -42,6 +49,8 @@ export function BodyEditor({
         onFormatResult={onFormatResult}
         varEntries={varEntries}
         envName={envName}
+        endpointId={endpointId}
+        uploadProgress={uploadProgress}
       />
     </Suspense>
   );

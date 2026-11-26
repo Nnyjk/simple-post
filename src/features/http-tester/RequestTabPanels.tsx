@@ -8,6 +8,7 @@ import { ScriptPanel } from './ScriptPanel';
 import { GraphQlPanel, type GraphQlPanelTools } from './GraphQlPanel';
 import { TlsPanel } from './TlsPanel';
 import type { EndpointDraft } from '@/stores/store-types';
+import type { TabUploadProgress } from '@/stores/slices/ui-response';
 import type { FormatResult } from '@/lib/utils';
 import type {
   AuthConfig,
@@ -53,6 +54,8 @@ export function RequestTabPanels({
   graphqlTools,
   patchDraft,
   onFormatResult,
+  endpointId,
+  uploadProgress,
 }: {
   tab: TesterTabId;
   params: KeyValue[];
@@ -88,6 +91,10 @@ export function RequestTabPanels({
   graphqlTools: GraphQlPanelTools;
   patchDraft: (patch: Partial<EndpointDraft>) => void;
   onFormatResult: (result: FormatResult) => void;
+  /** 当前标签 id。文件分片的读取状态按它重置。 */
+  endpointId: string;
+  /** 当前标签这一次发送的传输进度。 */
+  uploadProgress: TabUploadProgress | null;
 }) {
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
@@ -131,6 +138,8 @@ export function RequestTabPanels({
       )}
       {tab === 'body' && (
         <BodyEditor
+          endpointId={endpointId}
+          uploadProgress={uploadProgress}
           value={body}
           onChange={(body) => patchDraft({ body })}
           // 错误由父组件钉住：校验是 发送 / 保存 / 格式化 触发的动作，而非从输入派生

@@ -6,7 +6,12 @@ import {
   resolveVarsWithMissing,
 } from '../url';
 import { pathPlaceholders, substitutePathParams } from '../path-params';
-import { assembleMultipart, newMultipartBoundary } from '../multipart';
+import {
+  assembleMultipart,
+  multipartPartByteRanges,
+  newMultipartBoundary,
+  type MultipartPartByteRange,
+} from '../multipart';
 import { binaryContentType, parseMultipartParts, resolveBody } from '../body';
 import { appendQueryString } from './query';
 import { appendApikeyToQuery, resolveAuth } from './auth';
@@ -155,11 +160,15 @@ export function prepareRequest(rawInput: PrepareRequestInput): PreparedRequest {
   // multipart、在另一边发出去是完全没有 body。
   let body: string | null = graphQlBody;
   let bodyBase64: string | null = null;
+  let multipartPartRanges: MultipartPartByteRange[] | undefined;
   if (!isGraphQl && (resolved.text !== null || resolved.base64 !== null)) {
     if (input.body.mode === 'multipart' && boundary !== null) {
-      const assembled = assembleMultipart(parseMultipartParts(resolved.text ?? ''), boundary);
+      const parts = parseMultipartParts(resolved.text ?? '');
+      const assembled = assembleMultipart(parts, boundary);
       body = assembled.text;
       bodyBase64 = assembled.base64;
+      // 上传进度要折算到具体文件行上，故区间与 body 同一趟算：分母与真正发出去的字节数一致。
+      multipartPartRanges = multipartPartByteRanges(parts, boundary);
     } else {
       body = resolved.text;
       bodyBase64 = resolved.base64;
@@ -181,6 +190,7 @@ export function prepareRequest(rawInput: PrepareRequestInput): PreparedRequest {
     problems,
     // 变量池随结果一起走：OAuth2 取 token 时要用的正是这一份（见 `PreparedRequest.vars`）。
     vars: pool,
+    multipartPartRanges,
   };
 }
 

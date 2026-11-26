@@ -13,7 +13,7 @@ use crate::domain::{
     ScriptPhase, TlsSettings,
 };
 use crate::error::AppError;
-use crate::http_executor::{self, HttpRequestInput, HttpResult};
+use crate::http_executor::{self, HttpRequestInput, HttpResult, ProgressSink};
 
 use super::chain::{collect_chain, merge_env};
 use super::limits::DEFAULT_SCRIPT_LIMITS;
@@ -62,6 +62,18 @@ pub async fn send_with_scripts(
     pool: &db::DbPool,
     input: ScriptedSendInput,
 ) -> Result<ScriptedSendOutcome, AppError> {
+    send_with_scripts_and_progress(pool, input, None).await
+}
+
+/// 带传输进度的 [`send_with_scripts`]。
+///
+/// 进度只描述这一次请求的上传与响应接收，与脚本两个阶段无关：前置脚本改写完请求之后，
+/// 回调才开始报数。
+pub async fn send_with_scripts_and_progress(
+    pool: &db::DbPool,
+    input: ScriptedSendInput,
+    progress: Option<ProgressSink>,
+) -> Result<ScriptedSendOutcome, AppError> {
     // HTTPS 出站设置：全局默认（`settings.tls`）与端点自己的那份（`tls_override`）合成。
     // 合成只有这一处，故桌面端、`serve-web` 端与 MCP 端对「这次请求用哪份证书」不会各说各话。
     let tls = crate::tls::resolve(&input.settings.tls, input.tls_override.as_ref());
@@ -90,8 +102,11 @@ pub async fn send_with_scripts(
     };
     if chain.is_empty() {
         // 没有脚本：与今天完全同路径。
-        let http =
-            http_executor::execute(&to_http_input(&input.request, &input.settings, &tls)).await;
+        let http = http_executor::execute_with_progress(
+            &to_http_input(&input.request, &input.settings, &tls),
+            progress,
+        )
+        .await;
         return Ok(ScriptedSendOutcome {
             http,
             script: None,
@@ -110,7 +125,11 @@ pub async fn send_with_scripts(
     .await;
 
     // 发出去的是脚本改写后的请求。
-    let http = http_executor::execute(&to_http_input(&pre.request, &input.settings, &tls)).await;
+    let http = http_executor::execute_with_progress(
+        &to_http_input(&pre.request, &input.settings, &tls),
+        progress,
+    )
+    .await;
 
     // 测试脚本：响应回来之后。
     //

@@ -56,6 +56,12 @@ fn body_limit() -> axum::extract::DefaultBodyLimit {
     axum::extract::DefaultBodyLimit::max(crate::interchange_api::TRANSFER_BODY_LIMIT_BYTES)
 }
 
+/// `POST /api/http/send-progress` 的请求体上限。
+///
+/// 带文件分片的 form-data 把字节以 base64 放在 JSON 里（比原字节大三分之一），2 MB 的默认
+/// 上限会把几十 KB 的文件也拦在门外。128 MB 与桌面侧一次发送的合理体积同一量级。
+const SEND_PROGRESS_BODY_LIMIT_BYTES: usize = 128 * 1024 * 1024;
+
 /// 组装 axum router。`spa_dir` 是 `dist/` 的**绝对**路径，由调用方解析一次传入。
 ///
 /// `state.password` 为 `Some` 时给除 `auth::is_public_path` 公开名单外的全部路由装上 bearer
@@ -86,6 +92,14 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
                 .delete(projects_delete),
         )
         .route("/api/http/send", post(http_send))
+        // 同一份请求体，响应改为 SSE：先逐帧推传输进度，最后一条是终局。
+        // 单独抬高请求体上限：axum 默认 2 MB，而带文件分片的 multipart 很容易超过它。
+        .route(
+            "/api/http/send-progress",
+            post(http_send_progress).layer(axum::extract::DefaultBodyLimit::max(
+                SEND_PROGRESS_BODY_LIMIT_BYTES,
+            )),
+        )
         // SSE：同一份请求形状，响应改为 `text/event-stream`。`{id}` 上的 DELETE 只取消，
         // 从不出站请求，故它和 send 一样不含路径参数里的资源。
         .route("/api/http/stream", post(http_stream))

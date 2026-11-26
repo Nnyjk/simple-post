@@ -5,6 +5,7 @@ import type {
   ScriptOutcome,
   StoredRequestSnapshot,
 } from '@/types/domain';
+import type { MultipartPartByteRange } from '@/lib/multipart';
 import { uid } from '@/lib/utils';
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
 import type { AppState } from '../app-store';
@@ -70,6 +71,27 @@ function mergeLoaded(
 }
 
 /**
+ * 一个标签上一次发送的传输进度。
+ *
+ * 它描述**正在发的那一次**，与 `response` 不同：后者是已经回来的那一份。响应落地时清掉它，
+ * 否则进度条会停在 100%。
+ */
+export interface TabUploadProgress {
+  /** 已交给传输层的请求体字节数。 */
+  sentBytes: number;
+  /** 请求体总字节数。 */
+  totalBytes: number;
+  /** 服务器自报已接收的字节数；它不回传标准化进度时为 `null`。 */
+  serverReceivedBytes: number | null;
+  serverTotalBytes: number | null;
+  /**
+   * 每个分片在装配后请求体里的字节区间，来自那一次发送的 `PreparedRequest`。界面按它把整体
+   * 字节数折算到具体的文件行。
+   */
+  partRanges: MultipartPartByteRange[];
+}
+
+/**
  * 一个标签（接口工作区）当前的那份响应 —— 四样东西合在一处。
  *
  * 它们**描述同一次调用**，故必须一起换：换响应就要换掉请求快照与脚本产出，
@@ -93,6 +115,13 @@ export interface EndpointResponseState {
   scriptOutcome: ScriptOutcome | null;
   /** 这个标签上有没有在途请求。 */
   pending: boolean;
+  /**
+   * 这一次发送的传输进度。`null` = 没有在传，或上一次发送已经收尾（响应落地时清掉）。
+   *
+   * 它与 `pending` 是两回事：`pending` 覆盖整次发送（含动态变量解析、脚本），进度只覆盖
+   * 请求体在路上的那一段。
+   */
+  uploadProgress: TabUploadProgress | null;
 }
 
 export interface UiResponseState {
@@ -178,6 +207,12 @@ export interface UiResponseActions {
   /** 标记某个标签上有没有在途请求。 */
   setRequestPending: (tabId: string, pending: boolean) => void;
   /**
+   * 记下某个标签这一次发送的传输进度；`null` 清空。
+   *
+   * 调用点按 `signal.aborted` 过滤过期更新：被顶替的那次发送的最后一帧不该写进新的那一次。
+   */
+  setUploadProgress: (tabId: string, progress: TabUploadProgress | null) => void;
+  /**
    * 把某个标签的那份响应**搬**到另一个标签下。草稿接口保存后会换成新 id 的标签：
    * `saveDraftEndpoint` 先关掉草稿标签，再按新 id 开一个接口标签，而标签 id 就是响应的键。
    * 故保存时要把那份响应搬过去，否则用户刚发出来的那次响应在保存之后就没了。
@@ -201,6 +236,7 @@ function writeTabResponse(
     request: null,
     scriptOutcome: null,
     pending: false,
+    uploadProgress: null,
   };
   return { ...map, [tabId]: patch(prev) };
 }
@@ -373,6 +409,15 @@ export const createUiResponse: StateCreator<AppState, [], [], UiResponse> = (set
         scriptOutcome: null,
         // 在途标记**不**跟着换：响应到达时 `handleSend` 的 finally 还没跑，清掉它会让 PendingState 先消失、然后才轮到响应出现。
         pending: prev.pending,
+        // 响应到手 = 上传已经结束，进度条不该停在 100%。下一次发送会重新建立它。
+        uploadProgress: null,
+      })),
+    })),
+  setUploadProgress: (tabId, progress) =>
+    set((s) => ({
+      lastResponses: writeTabResponse(s.lastResponses, tabId, (prev) => ({
+        ...prev,
+        uploadProgress: progress,
       })),
     })),
   setLastScriptOutcome: (tabId, outcome) =>

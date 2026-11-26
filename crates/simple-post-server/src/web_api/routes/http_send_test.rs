@@ -210,3 +210,136 @@ async fn a_send_with_an_endpoint_runs_the_scripts_and_reports_them() {
     // 请求本身的成败照旧。
     assert_eq!(body["http"]["response"]["status"], 200);
 }
+
+/// `POST /api/http/send-progress` 把同一份请求发出去，进度帧先到、终局最后到。
+///
+/// 这条流是浏览器端唯一的进度通道：`/api/http/send` 一次返回整段 JSON，读不了中间过程。
+/// 故线形状必须钉住——每帧 `data:` 都是 `{type, …}`，终局那一句带着与 `/send` 同形的信封。
+#[tokio::test]
+async fn send_progress_streams_frames_and_ends_with_the_outcome() {
+    let (api_url, seen) = upstream().await;
+    let (addr, dir) = serve_test_router().await;
+    seed(&dir, &api_url);
+
+    // 有请求体就有进度帧：首帧在写出第一块之前，末帧等于总长度。体积压在假上游一次
+    // `read` 能吃掉的范围里——上游只读一次就回响应，请求体太大时它会提前关连接。
+    let payload = "x".repeat(4096);
+    let response = reqwest::Client::new()
+        .post(format!("http://{addr}/api/http/send-progress"))
+        .json(&serde_json::json!({
+            "method": "POST",
+            "url": format!("{api_url}/upload"),
+            "headers": [],
+            "body": payload,
+            "timeoutMs": 5000,
+            "followRedirects": true,
+            "maxResponseSizeKb": 1024
+        }))
+        .send()
+        .await
+        .expect("request completes");
+    assert_eq!(response.status(), 200);
+    assert!(
+        response
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .starts_with("text/event-stream"),
+        "响应必须是事件流"
+    );
+
+    let text = response.text().await.expect("stream body");
+    let frames: Vec<serde_json::Value> = text
+        .lines()
+        .filter_map(|line| line.strip_prefix("data:"))
+        .map(|data| serde_json::from_str(data.trim()).expect("每帧都是 JSON"))
+        .collect();
+
+    let progress: Vec<&serde_json::Value> =
+        frames.iter().filter(|f| f["type"] == "progress").collect();
+    assert!(progress.len() >= 2, "首帧与末帧都该在");
+    assert_eq!(
+        progress[0]["progress"]["sentBytes"], 0,
+        "首帧在写出第一块之前"
+    );
+    assert_eq!(
+        progress[0]["progress"]["totalBytes"],
+        payload.len() as u64,
+        "分母是请求体的字节数"
+    );
+    assert!(
+        progress
+            .iter()
+            .all(|f| f["progress"]["sentBytes"].is_number()),
+        "每帧都带已发送字节数"
+    );
+
+    let last = frames.last().expect("至少有一帧");
+    assert_eq!(last["type"], "done", "终局必须是 done");
+    assert_eq!(last["outcome"]["http"]["response"]["status"], 200);
+    assert!(
+        last["outcome"].get("script").is_none(),
+        "没传 endpointId 就没有脚本那一段"
+    );
+
+    // 请求真的发出去了。
+    let requests = seen.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    assert!(
+        requests[0].starts_with("POST /upload HTTP/1.1"),
+        "got: {}",
+        requests[0]
+    );
+}
+
+/// 上游连不上时，流仍以 `done` 收尾，网络失败的描述在信封的 `http` 那一半。
+///
+/// 传输层的失败不是「执行层之外的错误」：`/api/http/send` 对它返回 `{ok:false,error}` 而不是
+/// 5xx，这条流必须给出同一个信封，否则同一个请求在两个入口下变成两种结果。
+#[tokio::test]
+async fn send_progress_reports_a_transport_failure_in_the_envelope() {
+    let (addr, dir) = serve_test_router().await;
+    seed(&dir, "");
+
+    let response = reqwest::Client::new()
+        .post(format!("http://{addr}/api/http/send-progress"))
+        .json(&serde_json::json!({
+            "method": "GET",
+            "url": "http://127.0.0.1:1/never",
+            "headers": [],
+            "body": null,
+            "timeoutMs": 1000,
+            "followRedirects": true,
+            "maxResponseSizeKb": 1024
+        }))
+        .send()
+        .await
+        .expect("request completes");
+    assert_eq!(response.status(), 200);
+
+    let text = response.text().await.expect("stream body");
+    let last: serde_json::Value = text
+        .lines()
+        .filter_map(|line| line.strip_prefix("data:"))
+        .map(|data| serde_json::from_str::<serde_json::Value>(data.trim()).unwrap())
+        .next_back()
+        .expect("至少有一帧");
+    assert_eq!(last["type"], "done");
+    assert_eq!(last["outcome"]["http"]["ok"], false);
+    // 连不上 loopback 上没人监听的端口：Windows 上可能先撞超时，两条都算传输层失败。
+    let kind = last["outcome"]["http"]["error"]["kind"]
+        .as_str()
+        .unwrap_or("");
+    assert!(
+        kind == "network" || kind == "timeout",
+        "传输层失败的种类应当是 network 或 timeout，got: {kind}"
+    );
+    assert!(
+        !last["outcome"]["http"]["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .is_empty(),
+        "错误消息要有内容：{last}"
+    );
+}

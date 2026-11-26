@@ -5,11 +5,16 @@
 //! 它们是对单个请求的动作，不是树结构的一部分。
 
 use std::collections::HashMap;
+use std::convert::Infallible;
 use std::sync::Arc;
 
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{HeaderName, HeaderValue, StatusCode},
+    response::{
+        sse::{Event, KeepAlive, Sse},
+        IntoResponse, Response,
+    },
     Json,
 };
 use serde::Deserialize;
@@ -18,12 +23,47 @@ use serde_json::{json, Value};
 use crate::db;
 use crate::domain::{RequestSettings, ResourceNodeType};
 use crate::error::AppError;
-use crate::script::{send_with_scripts, ScriptOverride, ScriptRequest, ScriptedSendInput};
+use crate::script::{
+    send_with_scripts, send_with_scripts_and_progress, ScriptOverride, ScriptRequest,
+    ScriptedSendInput,
+};
 
 use super::super::{ensure_server_id, map_app_error, HttpErrorResponse, WebState};
 
 use super::super::dto::{HttpSendBody, NodeCreateBody, NodeMoveBody};
-use crate::dto::SendOutcomeDto;
+use crate::dto::{HttpSendProgressEvent, SendOutcomeDto};
+
+/// 把 REST 的扁平请求体折成脚本发送的输入。
+///
+/// 两条发送路由（`/send` 与 `/send-progress`）共用它：字段映射只写一遍，两个入口对同一份
+/// payload 不会给出不同的请求。
+fn scripted_input(body: HttpSendBody) -> ScriptedSendInput {
+    ScriptedSendInput {
+        endpoint_id: body.endpoint_id,
+        request: ScriptRequest {
+            method: body.method,
+            url: body.url,
+            headers: body.headers,
+            body: body.body,
+            body_base64: body.body_base64,
+        },
+        env: body.env.unwrap_or_default(),
+        settings: RequestSettings {
+            timeout_ms: body.timeout_ms,
+            follow_redirects: body.follow_redirects,
+            max_response_size_kb: body.max_response_size_kb,
+            tls: body.tls.unwrap_or_default(),
+        },
+        // 端点自己的 HTTPS 设置。`None` = 继承全局默认，合成在
+        // `script::send_with_scripts` 里做，故 REST 与 Tauri 两侧同一个算法。
+        tls_override: body.tls_override,
+        // 端点自己那两段脚本：payload 送来的那份覆盖存的那份（缺席的字段仍用存的）。
+        script_override: Some(ScriptOverride {
+            pre_request: body.pre_request_script,
+            test: body.test_script,
+        }),
+    }
+}
 
 /// `POST /api/http/send` —— 裸 URL 逃生口。
 ///
@@ -31,43 +71,85 @@ use crate::dto::SendOutcomeDto;
 /// 解析，出站策略只在 `http_executor` 执行层把关。节点级的 `/send` 不注册，否则就是第二条
 /// 不受管辖的出站通道。
 /// body 里带 `endpointId` 时，请求按脚本链走一遍：前置脚本在发出之前改写它，测试脚本在
-/// 响应回来之后断言并写回环境变量。整条序列由 `simple_post_core::script::send_with_scripts`
-/// 一处实现，故桌面端与 MCP 端不会分叉。
+/// 响应回来之后断言并写回环境变量。整条序列由
+/// `simple_post_core::script::send_with_scripts` 一处实现，故桌面端与 MCP 端不会分叉。
 pub(crate) async fn http_send(
     State(s): State<Arc<WebState>>,
     Json(body): Json<HttpSendBody>,
 ) -> Result<Json<SendOutcomeDto>, HttpErrorResponse> {
-    let outcome = send_with_scripts(
-        &s.pool,
-        ScriptedSendInput {
-            endpoint_id: body.endpoint_id,
-            request: ScriptRequest {
-                method: body.method,
-                url: body.url,
-                headers: body.headers,
-                body: body.body,
-                body_base64: body.body_base64,
-            },
-            env: body.env.unwrap_or_default(),
-            settings: RequestSettings {
-                timeout_ms: body.timeout_ms,
-                follow_redirects: body.follow_redirects,
-                max_response_size_kb: body.max_response_size_kb,
-                tls: body.tls.unwrap_or_default(),
-            },
-            // 端点自己的 HTTPS 设置。`None` = 继承全局默认，合成在
-            // `script::send_with_scripts` 里做，故 REST 与 Tauri 两侧同一个算法。
-            tls_override: body.tls_override,
-            // 端点自己那两段脚本：payload 送来的那份覆盖存的那份（缺席的字段仍用存的）。
-            script_override: Some(ScriptOverride {
-                pre_request: body.pre_request_script,
-                test: body.test_script,
-            }),
-        },
-    )
-    .await
-    .map_err(map_app_error)?;
+    let outcome = send_with_scripts(&s.pool, scripted_input(body))
+        .await
+        .map_err(map_app_error)?;
     Ok(Json(SendOutcomeDto::from(outcome)))
+}
+
+/// `POST /api/http/send-progress`：与 `/api/http/send` 同一份请求体，响应改成
+/// `text/event-stream`，先逐帧推传输进度，最后一条是终局。
+///
+/// 每帧 `data:` 都是一个 [`HttpSendProgressEvent`]：`{type:'progress',progress}` 若干帧，
+/// 然后 `{type:'done',outcome}`（信封与 `/api/http/send` 相同）或 `{type:'error',message}`。
+///
+/// 队列**无界**：进度回调是传输层同步调用的，有界队列满一次就会在等待发送的路径上阻塞
+/// 上传。流被客户端断开时 `AbortOnDrop` 中止后台任务，请求随之中断，不会有人在读一个没人
+/// 要的响应体。
+pub(crate) async fn http_send_progress(
+    State(s): State<Arc<WebState>>,
+    Json(body): Json<HttpSendBody>,
+) -> Result<Response, HttpErrorResponse> {
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<HttpSendProgressEvent>();
+    let progress_tx = tx.clone();
+    let sink: simple_post_core::http_executor::ProgressSink = Box::new(move |progress| {
+        // 接收端已经走了（客户端断开）时丢掉这一帧：`AbortOnDrop` 随后会中止任务。
+        let _ = progress_tx.send(HttpSendProgressEvent::Progress { progress });
+    });
+
+    let pool = s.pool.clone();
+    let task = tokio::spawn(async move {
+        let event =
+            match send_with_scripts_and_progress(&pool, scripted_input(body), Some(sink)).await {
+                Ok(outcome) => HttpSendProgressEvent::Done {
+                    outcome: Box::new(SendOutcomeDto::from(outcome)),
+                },
+                Err(e) => HttpSendProgressEvent::Error {
+                    message: e.to_string(),
+                },
+            };
+        let _ = tx.send(event);
+    });
+
+    let events =
+        futures_util::stream::unfold((rx, AbortOnDrop(task)), |(mut rx, guard)| async move {
+            let event = rx.recv().await?;
+            let data = serde_json::to_string(&event)
+                .expect("HttpSendProgressEvent 一定可序列化：字段都是数字与字符串");
+            Some((
+                Ok::<_, Infallible>(Event::default().data(data)),
+                (rx, guard),
+            ))
+        });
+
+    let mut response = Sse::new(events)
+        .keep_alive(KeepAlive::default())
+        .into_response();
+    // nginx 默认 `proxy_buffering on` 会把 SSE 攒成整段再发；`X-Accel-Buffering: no` 是
+    // 唯一的**逐响应**关闭开关。
+    response.headers_mut().insert(
+        HeaderName::from_static("x-accel-buffering"),
+        HeaderValue::from_static("no"),
+    );
+    Ok(response)
+}
+
+/// 事件流被丢弃时中止后台任务。
+///
+/// `tokio::task::JoinHandle` 在 `Drop` 时**不会**中止任务（与 `abort` 是两回事），故这里显式
+/// 调一次：否则客户端断开后请求仍会跑到底，只为了往一个没人读的通道里发一帧。
+struct AbortOnDrop(tokio::task::JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }
 
 #[cfg(test)]

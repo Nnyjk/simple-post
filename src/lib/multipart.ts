@@ -86,6 +86,54 @@ function concatBytes(chunks: readonly Uint8Array<ArrayBuffer>[]): Uint8Array<Arr
 }
 
 /**
+ * 一个分片的内容在装配后请求体里的字节区间（左闭右开）。
+ *
+ * `index` 是它在**原始分片数组**里的下标，停用的分片不出现。渲染层据此把整体的上传 /
+ * 接收字节数折算到具体那一行。
+ */
+export interface MultipartPartByteRange {
+  index: number;
+  start: number;
+  end: number;
+}
+
+/** 装配时的一段字节，附带它来自哪个分片（框界为空）。 */
+interface BodyChunk {
+  bytes: Uint8Array<ArrayBuffer>;
+  /** 分片在原始数组里的下标；分片之间的框界与收尾分隔符为 `null`。 */
+  partIndex: number | null;
+}
+
+/**
+ * 按 RFC 2046 的次序把分片与框界拼成一段段字节。**唯一的装配实现**：
+ * `buildMultipartBody` 与 `multipartPartByteRanges` 都从它出发，故两者的偏移永远一致。
+ */
+function bodyChunks(parts: readonly MultipartPart[], boundary: string): BodyChunk[] {
+  const chunks: BodyChunk[] = [];
+  parts.forEach((part, index) => {
+    // 停用的分片不进 body：它还留在表格里，用户改主意时勾回来即可。
+    if (!part.enabled) return;
+    let disposition = `Content-Disposition: form-data; name="${escapeHeaderParam(part.name)}"`;
+    if (part.filename) disposition += `; filename="${escapeHeaderParam(part.filename)}"`;
+    chunks.push({
+      bytes: utf8Bytes(`--${boundary}\r\n${disposition}\r\n`),
+      partIndex: null,
+    });
+
+    const contentType = partContentType(part);
+    if (contentType) {
+      chunks.push({ bytes: utf8Bytes(`Content-Type: ${contentType}\r\n`), partIndex: null });
+    }
+
+    chunks.push({ bytes: utf8Bytes('\r\n'), partIndex: null });
+    chunks.push({ bytes: partBytes(part), partIndex: index });
+    chunks.push({ bytes: utf8Bytes('\r\n'), partIndex: null });
+  });
+  chunks.push({ bytes: utf8Bytes(`--${boundary}--\r\n`), partIndex: null });
+  return chunks;
+}
+
+/**
  * 分片数组 + boundary → 真正写进 socket 的 body。行尾是 CRLF（RFC 2046）。
  *
  * 零个分片得到 `--<boundary>--\r\n`，仍是格式合法的 multipart。
@@ -94,23 +142,27 @@ export function buildMultipartBody(
   parts: readonly MultipartPart[],
   boundary: string,
 ): Uint8Array<ArrayBuffer> {
-  const chunks: Uint8Array<ArrayBuffer>[] = [];
-  for (const part of parts) {
-    // 停用的分片不进 body：它还留在表格里，用户改主意时勾回来即可。
-    if (!part.enabled) continue;
-    let disposition = `Content-Disposition: form-data; name="${escapeHeaderParam(part.name)}"`;
-    if (part.filename) disposition += `; filename="${escapeHeaderParam(part.filename)}"`;
-    chunks.push(utf8Bytes(`--${boundary}\r\n${disposition}\r\n`));
+  return concatBytes(bodyChunks(parts, boundary).map((chunk) => chunk.bytes));
+}
 
-    const contentType = partContentType(part);
-    if (contentType) chunks.push(utf8Bytes(`Content-Type: ${contentType}\r\n`));
-
-    chunks.push(utf8Bytes('\r\n'));
-    chunks.push(partBytes(part));
-    chunks.push(utf8Bytes('\r\n'));
+/**
+ * 每个分片内容在装配后请求体里的字节区间。
+ *
+ * 与 `buildMultipartBody` 共用 `bodyChunks`，故窗口是按同一份字节算的：上传到 42% 时落在
+ * 哪个文件分片里，两边不会有第二种答案。
+ */
+export function multipartPartByteRanges(
+  parts: readonly MultipartPart[],
+  boundary: string,
+): MultipartPartByteRange[] {
+  const ranges: MultipartPartByteRange[] = [];
+  let at = 0;
+  for (const chunk of bodyChunks(parts, boundary)) {
+    const end = at + chunk.bytes.length;
+    if (chunk.partIndex !== null) ranges.push({ index: chunk.partIndex, start: at, end });
+    at = end;
   }
-  chunks.push(utf8Bytes(`--${boundary}--\r\n`));
-  return concatBytes(chunks);
+  return ranges;
 }
 
 /**

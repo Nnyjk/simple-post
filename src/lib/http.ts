@@ -31,8 +31,11 @@ import type {
 } from '@/types/domain';
 import type { RequestSettings } from '@/stores/app-store';
 import { COMMANDS, invokeCmd, type CallApiOptions } from './tauri-commands';
+import { sendWithProgress, type HttpTransferProgress } from './http-progress';
 import { buildFetchInit, type PreparedRequest } from './http-build';
 import { applyOAuth2Token, fetchOAuth2Token } from './oauth2';
+
+export type { HttpTransferProgress } from './http-progress';
 
 export interface SendInput {
   method: HttpMethod;
@@ -227,15 +230,19 @@ function envelopeToApiResponse(r: RustHttpResult, input: SendInput, url: string)
   };
 }
 
-/** 分发一次 `invokeCmd` 调用并把结果折成 `ApiResponse` + 脚本产出，绝不抛异常。 */
+/** 分发一次发送并把结果折成 `ApiResponse` + 脚本产出，绝不抛异常。 */
 async function invokeAndMap(
   args: Record<string, unknown>,
   input: SendInput,
   url: string,
   options: CallApiOptions,
+  onProgress?: (progress: HttpTransferProgress) => void,
 ): Promise<{ response: ApiResponse; script: ScriptOutcome | null }> {
   try {
-    const r = await invokeCmd<RustSendOutcome>(COMMANDS.httpRequest, args, options);
+    // 有回调时走进度通道：两条命令指向同一个发送序列，差别只在多一条事件流。
+    const r = onProgress
+      ? await sendWithProgress<RustSendOutcome>(args, options.signal, onProgress)
+      : await invokeCmd<RustSendOutcome>(COMMANDS.httpRequest, args, options);
     return { response: envelopeToApiResponse(r.http, input, url), script: r.script ?? null };
   } catch (err) {
     // `invokeCmd` 会 reject 的情形：
@@ -335,6 +342,11 @@ interface SendPreparedInput {
    * 设置就**整体**取代全局那份，故后端收到的不是逐字段的补丁。
    */
   tlsOverride?: TlsSettings | null;
+  /**
+   * 传输进度。给了它就走 `http_request_progress` / `POST /api/http/send-progress`，
+   * 否则走原来的整段响应通道——没有进度要报的调用点（裸 URL、测试）不会多开一条事件流。
+   */
+  onProgress?: (progress: HttpTransferProgress) => void;
 }
 
 /** 一次发送的结果：响应 + 脚本的产出（没有脚本时 `script` 为 null）。 */
@@ -441,6 +453,8 @@ export async function sendPreparedRequest(input: SendPreparedInput): Promise<Sen
     // 响应里的 `url` 报**注入前**的那份：它会随响应落进历史表，而 query 档的 token 就写在这个 URL 里。
     request.url,
     options,
+    // 只有带文件分片的 multipart 才有可映射的行，但通道本身与模式无关：后端有体就报进度。
+    input.onProgress,
   );
   return { response, script, outbound };
 }
