@@ -361,10 +361,10 @@ fn assert_same_set<T: Ord + std::fmt::Debug>(
 /// 故 `generate_handler!` 里没有它们的处理函数是**对的**，不是漏注册。
 const WEB_ONLY_COMMANDS: &[&str] = &["update_deployment", "update_apply"];
 
-/// 文档化的桌面例外：这一条只有桌面壳有 —— 浏览器形态把日志交给浏览器下载，镜像里的数据
-/// 目录属于服务端，没有「写进本机日志目录再打开文件管理器」这件事。故 `WEB_ROUTES` 里没有
-/// 对应条目是**对的**，不是漏登记。
-const DESKTOP_ONLY_COMMANDS: &[&str] = &["log_export_file"];
+/// 文档化的桌面例外：这两条只有桌面壳有 —— 浏览器形态把日志交给浏览器下载（镜像里的数据
+/// 目录属于服务端，没有「写进本机日志目录再打开文件管理器」这件事），链接则走浏览器自己的
+/// `target="_blank"` 而不必借系统命令。故 `WEB_ROUTES` 里没有对应条目是**对的**，不是漏登记。
+const DESKTOP_ONLY_COMMANDS: &[&str] = &["log_export_file", "open_external_url"];
 
 /// `http_request` 的 `#[tauri::command]` 定义住在 `src-tauri/src/lib.rs` 自己身上（不在
 /// `commands/` 目录里）。它的**命令名仍然在** `COMMANDS` 表（前端键 `httpRequest`），
