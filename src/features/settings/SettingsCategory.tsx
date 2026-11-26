@@ -120,6 +120,11 @@ export interface SettingRowProps {
   tone?: 'default' | 'danger';
   /** 为 true 时隐藏本行的上边框（用于卡片内的首行，免得顶部多出一条孤线）。 */
   flush?: boolean;
+  /**
+   * 控件在行内的纵向对齐。`start`（缺省）让控件与标签顶端对齐；`center` 用于控件只有
+   * 一行、而标签带第二行描述的场合 —— 那时顶端对齐会让控件看起来压在第一行上。
+   */
+  align?: 'start' | 'center';
   disabled?: boolean;
 }
 
@@ -132,6 +137,7 @@ export function SettingRow({
   badge,
   tone = 'default',
   flush = false,
+  align = 'start',
   disabled = false,
 }: SettingRowProps) {
   return (
@@ -169,7 +175,7 @@ export function SettingRow({
           </div>
         )}
       </div>
-      <div className="shrink-0">{control}</div>
+      <div className={cn('shrink-0', align === 'center' && 'self-center')}>{control}</div>
     </div>
   );
 }

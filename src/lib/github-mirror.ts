@@ -10,6 +10,12 @@
 
 export type GithubMirrorId = 'direct' | 'ghfast' | 'ghproxy' | 'kkgithub' | 'moeyy';
 
+/**
+ * 本项目的 GitHub 主页。README（即使用文档）与 issue 都在那里，欢迎页的「查看文档」
+ * 与设置页版本号旁的图标都指向它。
+ */
+export const PROJECT_GITHUB_URL = 'https://github.com/Nnyjk/simple-post';
+
 export const GITHUB_MIRRORS: { id: GithubMirrorId; label: string; hint: string }[] = [
   { id: 'direct', label: '直连 GitHub', hint: '官方地址，国内网络可能较慢或不可达' },
   { id: 'ghfast', label: 'ghfast.top', hint: '前缀镜像 · 网页与 raw 文件均可用' },

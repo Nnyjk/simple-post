@@ -12,16 +12,22 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Select } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
+import { ExternalLink } from '@/components/ui/external-link';
 import { useAppStore } from '@/stores/app-store';
 import { APP_VERSION } from '@/lib/app-version';
-import { GITHUB_MIRRORS, resolveGithubMirror } from '@/lib/github-mirror';
+import {
+  GITHUB_MIRRORS,
+  PROJECT_GITHUB_URL,
+  mirrorGithubUrl,
+  resolveGithubMirror,
+} from '@/lib/github-mirror';
 import { isUpdaterAvailable } from '@/lib/updater';
 import { describeCheckOutcome } from '@/lib/update/messages';
 import { relativeTime } from '@/lib/update/time';
 import { SettingsCategory, SettingRow } from '../settings/SettingsCategory';
 import { LogExportCard } from './LogExportCard';
 import { UpdateDialog } from './UpdateDialog';
-import { cn } from '@/lib/utils';
+import { cn, focusRing } from '@/lib/utils';
 
 export function AboutUpdateCard() {
   const info = useAppStore((s) => s.updateInfo);
@@ -54,7 +60,9 @@ export function AboutUpdateCard() {
   // 内置版本优先：「关于」页里的版本号不该取决于这次检查有没有联网。
   const currentVersion = pinned || APP_VERSION || info?.current || '';
 
-  const lastChecked = info ? relativeTime(info.checkedAt, Date.now()) : null;
+  // web 端刷新浏览器后 `info` 是空的，而那条时刻由服务端存着（随部署形态回来），
+  // 故它排在 `info` 之后作为回退 —— 刷新不该让「上次检查」退回「尚未检查」。
+  const lastChecked = relativeTime(info?.checkedAt ?? deployment?.lastCheckedAt, Date.now());
   const failed = Boolean(error) || Boolean(info?.error);
   // 结果文案统一出自 `describeCheckOutcome`，卡片与顶栏不会对同一次检查说两种话。
   const outcome = error ?? (info ? describeCheckOutcome(info) : null);
@@ -119,9 +127,23 @@ export function AboutUpdateCard() {
           flush
           label="当前版本"
           description="正在运行的 Simple Post 版本"
+          // 版本号只有一行，标签带第二行描述：靠顶端对齐会读成压在标签上。
+          align="center"
           control={
             currentVersion ? (
-              <span className="font-mono text-xs text-foreground">{currentVersion}</span>
+              <span className="flex items-center gap-1">
+                <span className="font-mono text-xs text-foreground">{currentVersion}</span>
+                <ExternalLink
+                  href={mirrorGithubUrl(PROJECT_GITHUB_URL, githubMirror)}
+                  label="在 GitHub 上打开项目主页"
+                  className={cn(
+                    'inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-overlay-hover hover:text-foreground',
+                    focusRing,
+                  )}
+                >
+                  <GithubMark />
+                </ExternalLink>
+              </span>
             ) : (
               <span className="text-micro text-muted-foreground">未知</span>
             )
@@ -176,5 +198,18 @@ export function AboutUpdateCard() {
       <LogExportCard />
       <UpdateDialog open={dialogOpen} onOpenChange={setDialogOpen} />
     </>
+  );
+}
+
+/**
+ * GitHub 的「Cat」标记。
+ *
+ * 用内联 SVG 而不是 `lucide-react`：1.x 起不再带品牌图标，而这里要的正是品牌本身。
+ */
+function GithubMark() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true" fill="currentColor" className="h-3.5 w-3.5">
+      <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z" />
+    </svg>
   );
 }

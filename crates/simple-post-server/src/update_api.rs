@@ -18,6 +18,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use serde::Serialize;
+use simple_post_core::db::{self, DbPool};
 use tokio::sync::Mutex;
 
 pub use simple_post_core::update::UpdateCheck;
@@ -59,6 +60,11 @@ pub struct UpdateDeployment {
     pub command: Option<&'static str>,
     /// 这一台机器能不能执行更新。由 [`UPDATE_COMMAND_ENV`] 与口令模式**同时**决定。
     pub apply_enabled: bool,
+    /// 库里记下的上一次「拿到结论」的检查时刻（RFC3339 UTC）；从未查过为 `None`。
+    ///
+    /// web 端刷新浏览器会丢掉渲染层内存里那份检查结果，故这条时刻由服务端存，
+    /// 让设置页刷新后仍写得出「上次检查」。
+    pub last_checked_at: Option<String>,
 }
 
 /// `POST /api/update/apply` 的响应体。不做成败判定：退出码与输出就是命令本身的结果。
@@ -101,8 +107,35 @@ impl ApplyError {
 }
 
 /// 走 core 的进程内缓存查一次。`force` 由 `?force=1` 控制。
-pub async fn check(force: bool) -> UpdateCheck {
-    simple_post_core::update::check(force).await
+///
+/// 拿到结论时把它写进 `preferences`：web 端刷新浏览器会丢掉渲染层那份结果，而
+/// 「上次检查」只有库里这条时刻能跨刷新留住（`checkedAt` 命中缓存时仍是那次抓取的时间，
+/// 故重复写同一个值就是它的自然结果）。
+pub async fn check(pool: &DbPool, force: bool) -> UpdateCheck {
+    let result = simple_post_core::update::check(force).await;
+    if result.error.is_none() {
+        record_last_checked_at(pool, &result.checked_at);
+    }
+    result
+}
+
+/// 记下一次「拿到结论」的时刻。
+///
+/// 写失败只留一行诊断：这条时刻只用于显示，它不该把一次成功的检查变成失败。
+fn record_last_checked_at(pool: &DbPool, checked_at: &str) {
+    let key = db::preferences::keys::UPDATE_LAST_CHECKED_AT;
+    let written = db::with_conn(pool, |c| db::preferences::set(c, key, &checked_at));
+    if let Err(error) = written {
+        eprintln!("[update_api] 保存上次检查时刻失败: {error:?}");
+    }
+}
+
+/// 库里记下的上一次检查时刻。没有这一行、或值不是字符串时当作没有记录。
+fn stored_last_checked_at(pool: &DbPool) -> Option<String> {
+    let key = db::preferences::keys::UPDATE_LAST_CHECKED_AT;
+    db::with_conn(pool, |c| db::preferences::get::<String>(c, key))
+        .ok()
+        .flatten()
 }
 
 /// 运维声明的更新命令。空白串视同未声明——空命令会以 `sh -c ""` 成功返回，看起来像
@@ -128,7 +161,7 @@ fn is_docker() -> bool {
 /// `GET /api/update/deployment` 的内容。`password_mode` 由调用方从 `WebState.password`
 /// 传进来——口令模式只有那一处判定（`serve-web` 启动时从 `SIMPLE_POST_WEB_PASSWORD` /
 /// `--password` 解析），这里不重读环境变量。
-pub fn deployment(password_mode: bool) -> UpdateDeployment {
+pub fn deployment(pool: &DbPool, password_mode: bool) -> UpdateDeployment {
     let docker = is_docker();
     UpdateDeployment {
         version: simple_post_core::update::current_version(),
@@ -136,6 +169,7 @@ pub fn deployment(password_mode: bool) -> UpdateDeployment {
         image: if docker { Some(DOCKER_IMAGE) } else { None },
         command: if docker { Some(DOCKER_COMMAND) } else { None },
         apply_enabled: password_mode && update_command().is_some(),
+        last_checked_at: stored_last_checked_at(pool),
     }
 }
 

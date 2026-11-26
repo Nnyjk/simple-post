@@ -22,6 +22,9 @@ pub(crate) mod dto;
 // 薄壳——REST 路由调的是同一批函数。
 mod dynamic_variables;
 mod environments;
+// 用系统默认浏览器打开网页。桌面 webview 不处理 `<a target="_blank">`，故这条命令
+// 专门给「去 GitHub 看看」这类入口用。
+mod external;
 // 导入 / 导出的四个入口。逻辑在 `crate::interchange_api`（server crate），这里只是
 // Tauri 侧的薄壳——REST 路由调的是同一批函数。
 mod interchange;
@@ -51,6 +54,7 @@ mod update;
 pub use dto::*;
 pub use dynamic_variables::*;
 pub use environments::*;
+pub use external::*;
 pub use interchange::*;
 pub use logs::*;
 pub use mcp_auto_start::*;
