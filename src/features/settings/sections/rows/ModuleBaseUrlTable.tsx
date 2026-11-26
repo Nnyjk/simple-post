@@ -244,7 +244,19 @@ export function ModuleBaseUrlTable({
                     ) : (
                       <ChevronRight className="h-3.5 w-3.5" />
                     )}
-                    {rules.length > 0 ? `${rules.length} 条` : '未配置'}
+                    {/* 宽度锁在「未配置」上：条数变多时按钮不能跟着变宽，超出这一宽度用省略号，
+                        全文进 title。 */}
+                    <span className="relative inline-block">
+                      <span className="invisible" aria-hidden>
+                        未配置
+                      </span>
+                      <span
+                        className="absolute inset-0 truncate text-left"
+                        title={rules.length > 0 ? `${rules.length} 条` : '未配置'}
+                      >
+                        {rules.length > 0 ? `${rules.length} 条` : '未配置'}
+                      </span>
+                    </span>
                   </Button>
                 )}
                 <Button
