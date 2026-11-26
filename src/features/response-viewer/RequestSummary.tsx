@@ -274,10 +274,20 @@ function Table({
         <tbody>
           {rows.map((row, idx) => (
             <tr key={`${row.name}-${idx}`} className={cn('align-top')}>
-              <td className="truncate border-b border-border/40 px-2 py-1 font-mono text-primary">
+              <td
+                className={cn(
+                  'truncate px-2 py-1 font-mono text-primary',
+                  idx < rows.length - 1 && 'border-b border-border/40',
+                )}
+              >
                 {row.name}
               </td>
-              <td className="border-b border-border/40 px-2 py-1 font-mono text-foreground/80 break-all">
+              <td
+                className={cn(
+                  'px-2 py-1 font-mono text-foreground/80 break-all',
+                  idx < rows.length - 1 && 'border-b border-border/40',
+                )}
+              >
                 {row.value}
               </td>
             </tr>

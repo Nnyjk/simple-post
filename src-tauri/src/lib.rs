@@ -160,6 +160,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             // 本地发请求的命令。
             http_request,
+            // 同一份参数 + 一条进度 Channel。两条命令都指向 core 的同一个发送序列。
+            crate::commands::http_request_progress,
             // 刻意没有「按 endpoint 发送」的命令：前端组装完整请求后交给 `http_request`。
             crate::commands::projects_list,
             crate::commands::projects_create,

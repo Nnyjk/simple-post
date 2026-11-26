@@ -131,6 +131,62 @@ describe('响应按标签存放', () => {
   });
 });
 
+describe('传输进度也挂在标签上', () => {
+  /** 一份进度快照。 */
+  const PROGRESS = {
+    sentBytes: 512,
+    totalBytes: 1024,
+    serverReceivedBytes: null,
+    serverTotalBytes: null,
+    partRanges: [{ index: 1, start: 0, end: 1024 }],
+  };
+
+  it('每个标签各存各的，写一个不影响另一个', () => {
+    const store = useAppStore.getState();
+
+    store.setUploadProgress('e1', PROGRESS);
+    store.setUploadProgress('e2', { ...PROGRESS, sentBytes: 1 });
+
+    const responses = useAppStore.getState().lastResponses;
+    assert.equal(responses['e1']?.uploadProgress?.sentBytes, 512);
+    assert.equal(responses['e2']?.uploadProgress?.sentBytes, 1);
+  });
+
+  it('响应落地就把进度清掉，进度条不会停在 100%', () => {
+    const store = useAppStore.getState();
+
+    store.setUploadProgress('e1', PROGRESS);
+    store.setLastResponse('e1', RESPONSE);
+
+    assert.equal(useAppStore.getState().lastResponses['e1']?.uploadProgress, null);
+  });
+
+  it('传 null 只清进度，响应与在途标记都不动', () => {
+    const store = useAppStore.getState();
+
+    store.setRequestPending('e1', true);
+    store.setLastResponse('e1', RESPONSE);
+    store.setUploadProgress('e1', PROGRESS);
+    store.setUploadProgress('e1', null);
+
+    const state = useAppStore.getState().lastResponses['e1'];
+    assert.equal(state?.uploadProgress, null);
+    assert.equal(state?.response, RESPONSE);
+    assert.equal(state?.pending, true);
+  });
+
+  it('关掉标签，它带着进度一起走', () => {
+    const store = useAppStore.getState();
+
+    store.openTab('endpoint', 'e1');
+    store.openTab('endpoint', 'e2');
+    store.setUploadProgress('e1', PROGRESS);
+    store.closeTab('e1');
+
+    assert.equal(useAppStore.getState().lastResponses['e1'], undefined);
+  });
+});
+
 describe('切接口不再清空响应', () => {
   it('树里点接口不把它刚发出来的那次响应弄丢', () => {
     const store = useAppStore.getState();

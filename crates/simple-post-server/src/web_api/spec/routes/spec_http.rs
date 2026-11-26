@@ -14,6 +14,21 @@ pub(in crate::web_api::spec) fn routes() -> Vec<RouteSpec> {
         },
         RouteSpec {
             method: "POST",
+            path: "/api/http/send-progress",
+            summary: "Execute a request and stream transfer progress as Server-Sent \
+                      Events. The body is identical to /api/http/send. Each SSE \
+                      `data:` line is an HttpSendProgressEvent JSON object: \
+                      {type:'progress',progress:{sentBytes,totalBytes,\
+                      serverReceivedBytes?,serverTotalBytes?}} while uploading or \
+                      while the server reports its accepted bytes, then \
+                      {type:'done',outcome} with the same envelope as \
+                      /api/http/send, or {type:'error',message}. Aborts the request \
+                      when the client disconnects.",
+            request: Some("HttpSendBody"),
+            response: Some("HttpSendProgressEvent"),
+        },
+        RouteSpec {
+            method: "POST",
             path: "/api/http/stream",
             summary: "Execute a request as a Server-Sent Events stream. The body is \
                       the same as /api/http/send plus `streamId`. Each SSE `data:` \

@@ -45,6 +45,30 @@ impl From<simple_post_core::script::ScriptedSendOutcome> for SendOutcomeDto {
     }
 }
 
+/// `POST /api/http/send-progress` 与 Tauri `http_request_progress` 的事件。
+///
+/// 判别字段是 `type`，与 `stream-transport` 里那组事件同一套读法。`progress` 每帧一次，
+/// `done` 带上与 `POST /api/http/send` 完全相同的信封，`error` 是执行层之外的失败
+/// （脚本链装配、数据库读不到等）。
+///
+/// **传输进度与终局是同一个流**：分开两个请求会让「进度到 100%」与「响应到手」之间出现
+/// 一段界面不知道发生了什么的时间。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase", tag = "type")]
+pub enum HttpSendProgressEvent {
+    Progress {
+        progress: simple_post_core::http_executor::HttpTransferProgress,
+    },
+    Done {
+        // 终局信封是这三个变体里最大的一份（一次响应带完整 body），装在 Box 里让每一帧
+        // 事件的尺寸不至于被它撑开。
+        outcome: Box<SendOutcomeDto>,
+    },
+    Error {
+        message: String,
+    },
+}
+
 /// `nodes_create` 随结构节点一并携带的 endpoint 请求配置。
 /// 整块可选、字段全可选：从树上的「新建请求」建出来的 endpoint 起始为空、事后再填。
 #[derive(Debug, Clone, Default, Deserialize)]

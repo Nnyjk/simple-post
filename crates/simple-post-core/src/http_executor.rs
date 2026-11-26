@@ -8,6 +8,7 @@
 //! 使这一层能被 MCP 守护进程复用，而不必拖进 Tauri 的 `#[command]` 宏管线（以及随之而来的
 //! 宏命名空间冲突——见 `lib.rs` 里 `http_request` 的 NOTE）。
 
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use base64::Engine as _;
@@ -94,6 +95,34 @@ impl HttpResult {
         }
     }
 }
+
+// 传输进度。
+
+/// 一次传输的进度快照。
+///
+/// 上传阶段只填前两个字段：`sent_bytes` 是已经交给传输层的请求体字节数，`total_bytes` 是请求体
+/// 总字节数。服务器把接收进度回传时后两个才有值（见 [`read_body_capped_with_progress`] 认的
+/// 那几种标准化响应），渲染层据此在同一根轨道上叠加第二层。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HttpTransferProgress {
+    pub sent_bytes: u64,
+    pub total_bytes: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub server_received_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub server_total_bytes: Option<u64>,
+}
+
+/// 进度回调。可能在异步上传与响应读取两处被调用，故要求 `Send + Sync`。
+pub type ProgressSink = Box<dyn Fn(HttpTransferProgress) + Send + Sync>;
+
+/// 上传分块的字节数。32 KiB 是进度粒度与系统调用次数之间的折中。
+const UPLOAD_CHUNK_BYTES: usize = 32 * 1024;
+
+/// 两帧进度之间的最小间隔。本地回环上一次上传可能只花几毫秒，不节流会把成千上万帧
+/// 塞进 IPC；首帧与末帧不受它限制。
+const PROGRESS_INTERVAL: Duration = Duration::from_millis(40);
 
 // 输入——调用方交接前构造的东西。
 
@@ -275,9 +304,26 @@ const BOUNDARY_LOOKAHEAD_BYTES: u64 = 4;
 ///
 /// 读的是**原始字节**，不解码：响应可能是二进制（图片、压缩包），解码会破坏它。解码与
 /// 「文本还是二进制」的判定由 [`split_response_payload`] 做。
-async fn read_body_capped(
+///
+/// 有进度回调时同一趟还认服务器回传的接收进度，认两种标准化形态，且都不改写响应体本身
+/// （原始字节照旧完整保留到 `max_bytes`）：
+///
+/// * **流式行事件**：`Content-Type` 是 `text/event-stream` / `application/x-ndjson` /
+///   `application/ndjson` / `application/jsonl`，或响应头带 `X-Upload-Progress` /
+///   `X-Receiving-Progress`。SSE 的 `data:` 行与 NDJSON 行里含 `receivedBytes`
+///   （兼容 `received_bytes` / `received`）、可选 `totalBytes`（兼容 `total_bytes` /
+///   `total`）的 JSON 对象即算一帧；带 `type` 时必须是进度类取值。
+/// * **响应头单值**：`X-Received-Bytes` 或 `Upload-Offset`（可选 `X-Upload-Total-Bytes`）
+///   立即上报一帧。
+///
+/// 普通 API 响应（如 `application/json` 且无上述头）不触发扫描，前端保持单色上传进度条。
+async fn read_body_capped_with_progress(
     mut res: reqwest::Response,
     max_bytes: u64,
+    content_type: &str,
+    sent_bytes: u64,
+    total_bytes: u64,
+    progress: Option<&Arc<ProgressSink>>,
 ) -> Result<Vec<u8>, reqwest::Error> {
     let cap = if max_bytes == 0 {
         u64::MAX
@@ -285,19 +331,183 @@ async fn read_body_capped(
         max_bytes.saturating_add(BOUNDARY_LOOKAHEAD_BYTES)
     };
 
+    let mut scanner = progress.and_then(|sink| {
+        let headers = res.headers();
+        let has_line_progress = matches!(
+            content_type
+                .split(';')
+                .next()
+                .unwrap_or("")
+                .trim()
+                .to_ascii_lowercase()
+                .as_str(),
+            "text/event-stream"
+                | "application/x-ndjson"
+                | "application/ndjson"
+                | "application/jsonl"
+        ) || headers.contains_key("x-upload-progress")
+            || headers.contains_key("x-receiving-progress");
+        let header_progress = header_u64(headers, "x-received-bytes")
+            .or_else(|| header_u64(headers, "upload-offset"));
+        if let Some(received) = header_progress {
+            sink(HttpTransferProgress {
+                sent_bytes,
+                total_bytes,
+                server_received_bytes: Some(received),
+                server_total_bytes: header_u64(headers, "x-upload-total-bytes"),
+            });
+        }
+        if !has_line_progress && header_progress.is_none() {
+            return None;
+        }
+        Some(ReceiveProgressScanner {
+            sink: sink.clone(),
+            sent_bytes,
+            total_bytes,
+            buffer: String::new(),
+        })
+    });
+
     let mut buf: Vec<u8> = Vec::new();
     let mut len: u64 = 0;
     while let Some(chunk) = res.chunk().await? {
         let take = std::cmp::min(chunk.len() as u64, cap - len) as usize;
         buf.extend_from_slice(&chunk[..take]);
         len += take as u64;
+        if let Some(scanner) = scanner.as_mut() {
+            scanner.feed(&chunk[..take]);
+        }
         if len >= cap {
             // read_body_capped 读够了：剩下的字节直接丢弃，连接随之关闭，服务端不会把剩下的内容继续推过来。
             break;
         }
     }
+    if let Some(scanner) = scanner.as_mut() {
+        scanner.finish();
+    }
 
     Ok(buf)
+}
+
+/// 响应头里的一个非负整数。不是整数就当它不存在。
+fn header_u64(headers: &reqwest::header::HeaderMap, name: &str) -> Option<u64> {
+    headers.get(name)?.to_str().ok()?.trim().parse().ok()
+}
+
+/// 流式响应体里的标准化接收进度扫描器。**只读**：原始字节由调用方另存一份。
+///
+/// 行切在块中间是常态，故不足一行的尾巴留在 `buffer` 里等下一块。进度事件本身很小，
+/// 超过 [`MAX_PROGRESS_LINE_BYTES`] 还没换行的那行不是进度事件，直接丢掉，避免把一整段
+/// 大 body 攒在内存里。
+struct ReceiveProgressScanner {
+    sink: Arc<ProgressSink>,
+    sent_bytes: u64,
+    total_bytes: u64,
+    buffer: String,
+}
+
+/// 一行进度事件的上限。超过它仍没有换行的内容按「不是进度事件」处理。
+const MAX_PROGRESS_LINE_BYTES: usize = 64 * 1024;
+
+impl ReceiveProgressScanner {
+    fn feed(&mut self, bytes: &[u8]) {
+        self.buffer.push_str(&String::from_utf8_lossy(bytes));
+        while let Some(pos) = self.buffer.find('\n') {
+            let line = self.buffer[..pos].to_string();
+            self.buffer.drain(..=pos);
+            self.on_line(&line);
+        }
+        if self.buffer.len() > MAX_PROGRESS_LINE_BYTES {
+            self.buffer.clear();
+        }
+    }
+
+    /// 流尾没有换行的那一行也要看：服务端可能把最后一帧写在 EOF 上而不补换行。
+    fn finish(&mut self) {
+        if self.buffer.is_empty() {
+            return;
+        }
+        let line = std::mem::take(&mut self.buffer);
+        self.on_line(&line);
+    }
+
+    fn on_line(&self, line: &str) {
+        let line = line.trim();
+        // SSE 的字段前缀。其它字段（`event:` / `id:`）在这一层没有语义。
+        let payload = line.strip_prefix("data:").unwrap_or(line).trim();
+        if payload.is_empty() {
+            return;
+        }
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(payload) else {
+            return;
+        };
+        let Some(object) = value.as_object() else {
+            return;
+        };
+        if let Some(kind) = object.get("type").and_then(|v| v.as_str()) {
+            if !matches!(
+                kind,
+                "progress"
+                    | "upload_progress"
+                    | "upload-progress"
+                    | "receiving_progress"
+                    | "receiving-progress"
+                    | "receive_progress"
+                    | "receive-progress"
+            ) {
+                return;
+            }
+        }
+        let Some(received) = pick_u64(object, &["receivedBytes", "received_bytes", "received"])
+        else {
+            return;
+        };
+        let total = pick_u64(object, &["totalBytes", "total_bytes", "total"]);
+        (self.sink)(HttpTransferProgress {
+            sent_bytes: self.sent_bytes,
+            total_bytes: self.total_bytes,
+            server_received_bytes: Some(received),
+            server_total_bytes: total,
+        });
+    }
+}
+
+/// 按候选键顺序取第一个非负整数。
+fn pick_u64(object: &serde_json::Map<String, serde_json::Value>, keys: &[&str]) -> Option<u64> {
+    keys.iter()
+        .find_map(|key| object.get(*key).and_then(|v| v.as_u64()))
+}
+
+/// 把请求体切成 32 KiB 的块交给 `reqwest`，并沿途报告发送进度。
+///
+/// 首帧在切第一块时发出，末帧在切最后一块时发出；中间帧受 [`PROGRESS_INTERVAL`] 节流。
+fn upload_stream(
+    bytes: Arc<Vec<u8>>,
+    sink: Arc<ProgressSink>,
+    total: u64,
+) -> impl futures_util::Stream<Item = Result<Vec<u8>, std::io::Error>> {
+    let mut offset = 0usize;
+    let mut last_emit: Option<Instant> = None;
+    futures_util::stream::poll_fn(move |_| {
+        if offset >= bytes.len() {
+            return std::task::Poll::Ready(None);
+        }
+        let end = (offset + UPLOAD_CHUNK_BYTES).min(bytes.len());
+        let chunk = bytes[offset..end].to_vec();
+        offset = end;
+        let now = Instant::now();
+        let due = last_emit.is_none_or(|at| now.duration_since(at) >= PROGRESS_INTERVAL);
+        if due || offset == bytes.len() {
+            last_emit = Some(now);
+            sink(HttpTransferProgress {
+                sent_bytes: offset as u64,
+                total_bytes: total,
+                server_received_bytes: None,
+                server_total_bytes: None,
+            });
+        }
+        std::task::Poll::Ready(Some(Ok(chunk)))
+    })
 }
 
 // 线上那一份请求头。
@@ -541,12 +751,34 @@ pub(crate) fn base_client_builder(
 /// 前端调 `lib.rs` 里的 `http_request` Tauri command，由它转发到这里。MCP 守护进程
 /// （`crate::mcp`）经它自己的 `execute_http` 转发层路由请求。
 pub async fn execute(input: &HttpRequestInput) -> HttpResult {
-    execute_with_policy(input, OutboundPolicy::from_env()).await
+    execute_with_progress(input, None).await
+}
+
+/// 带进度的 [`execute`]。`progress` 缺席时与 [`execute`] 逐字节同路。
+pub async fn execute_with_progress(
+    input: &HttpRequestInput,
+    progress: Option<ProgressSink>,
+) -> HttpResult {
+    execute_with_policy_and_progress(input, OutboundPolicy::from_env(), progress).await
 }
 
 /// 带显式策略的 [`execute`]。测试直接用它；由环境驱动的 [`execute`] 是生产入口。
 pub async fn execute_with_policy(input: &HttpRequestInput, policy: OutboundPolicy) -> HttpResult {
+    execute_with_policy_and_progress(input, policy, None).await
+}
+
+/// 带显式策略与进度的 [`execute`]。
+///
+/// 有请求体且给了 `progress` 时，请求体经 [`upload_stream`] 分块写出：每块报告一次已发送字节，
+/// 并在请求头上显式补齐 `content-length`（流式 body 没有长度提示，缺了它服务端会把请求读成
+/// chunked）。没有请求体或没有回调时仍走一次性的 `bytes` body，线形状与从前一致。
+pub async fn execute_with_policy_and_progress(
+    input: &HttpRequestInput,
+    policy: OutboundPolicy,
+    progress: Option<ProgressSink>,
+) -> HttpResult {
     let start = Instant::now();
+    let progress = progress.map(Arc::new);
 
     // check_url 在建客户端或碰网络之前就拒绝。
     if let UrlVerdict::Refused(reason) = check_url(&input.url, policy) {
@@ -580,9 +812,34 @@ pub async fn execute_with_policy(input: &HttpRequestInput, policy: OutboundPolic
         Ok(b) => b,
         Err(msg) => return HttpResult::err("network", msg),
     };
+    let body_len = body_bytes.as_ref().map(|b| b.len());
+    let body_total = body_len.unwrap_or(0) as u64;
 
-    if let Some(ref bytes) = body_bytes {
-        req = req.body(bytes.clone());
+    match (body_bytes, progress.as_ref()) {
+        (Some(bytes), Some(sink)) if !bytes.is_empty() => {
+            // 流式 body 没有 `size_hint`，`reqwest` 不会自己补 `content-length`；调用方自己
+            // 写过同名头时不再追加第二条（与 `effective_request_headers` 同一条规则）。
+            let caller_set_length = input
+                .headers
+                .iter()
+                .any(|(k, _)| k.eq_ignore_ascii_case("content-length"));
+            if !caller_set_length {
+                req = req.header(reqwest::header::CONTENT_LENGTH, body_total.to_string());
+            }
+            sink(HttpTransferProgress {
+                sent_bytes: 0,
+                total_bytes: body_total,
+                server_received_bytes: None,
+                server_total_bytes: None,
+            });
+            req = req.body(reqwest::Body::wrap_stream(upload_stream(
+                Arc::new(bytes),
+                sink.clone(),
+                body_total,
+            )));
+        }
+        (Some(bytes), _) => req = req.body(bytes),
+        (None, _) => {}
     }
 
     let res = match req.send().await {
@@ -612,7 +869,16 @@ pub async fn execute_with_policy(input: &HttpRequestInput, policy: OutboundPolic
     let max_bytes = input.max_response_size_kb.saturating_mul(1024);
 
     // 读取时的上限：缓冲区上限与响应大小无关，超出的部分直接丢弃。
-    let raw_body = match read_body_capped(res, max_bytes).await {
+    let raw_body = match read_body_capped_with_progress(
+        res,
+        max_bytes,
+        &content_type,
+        body_total,
+        body_total,
+        progress.as_ref(),
+    )
+    .await
+    {
         Ok(t) => t,
         Err(e) => {
             let kind = if e.is_timeout() { "timeout" } else { "network" };
@@ -629,7 +895,7 @@ pub async fn execute_with_policy(input: &HttpRequestInput, policy: OutboundPolic
         duration_ms: elapsed,
         size_bytes: payload.bytes,
         headers: header_pairs,
-        request_headers: effective_request_headers(input, body_bytes.as_ref().map(|b| b.len())),
+        request_headers: effective_request_headers(input, body_len),
         body: payload.text,
         body_base64: payload.base64,
         content_type,

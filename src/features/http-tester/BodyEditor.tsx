@@ -19,6 +19,7 @@ import { gsap, motionSafe, useGSAP } from '@/lib/gsap';
 import { parseSchemaView } from '@/lib/schema-view';
 import { SchemaTable } from './SchemaTable';
 import { changedRange } from './model/changedRange';
+import type { TabUploadProgress } from '@/stores/slices/ui-response';
 import { BinaryBodyEditor, FormFieldsEditor, MultipartPartsEditor } from './BodyTables';
 import {
   rectAnchor,
@@ -46,6 +47,10 @@ interface Props {
   varEntries: VarEntry[];
   /** 当前环境名，显示在候选浮层的标题上。 */
   envName?: string;
+  /** 当前标签 id：文件分片的读取状态按它重置。 */
+  endpointId?: string;
+  /** 当前标签这一次发送的传输进度。 */
+  uploadProgress?: TabUploadProgress | null;
 }
 
 /**
@@ -74,6 +79,8 @@ export function BodyEditor({
   onFormatResult,
   varEntries,
   envName,
+  endpointId,
+  uploadProgress,
 }: Props) {
   const [bodyView, setBodyView] = useState<BodyViewMode>(() =>
     parseJsonTree(value.content).ok ? 'tree' : 'raw',
@@ -117,10 +124,14 @@ export function BodyEditor({
           />
         ) : value.mode === 'multipart' ? (
           <MultipartPartsEditor
+            // 换标签时重置整张表的界面状态（行槽位、在途读取）：分片内容随草稿变，行槽位
+            // 与读取不该跨标签沿用。
+            key={endpointId}
             content={value.content}
             onChange={(content) => onChange({ ...value, content })}
             varEntries={varEntries}
             envName={envName}
+            uploadProgress={uploadProgress}
           />
         ) : value.mode === 'binary' ? (
           <BinaryBodyEditor

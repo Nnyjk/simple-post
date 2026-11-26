@@ -37,7 +37,10 @@ pub use chain::{collect_chain, merge_env};
 pub use engine::{Sandbox, ScriptEffects, ScriptFailure, ScriptRun, TransformRun};
 pub use limits::{ScriptLimits, DEFAULT_SCRIPT_LIMITS};
 pub use run::run_phase;
-pub use send::{send_with_scripts, ScriptOverride, ScriptedSendInput, ScriptedSendOutcome};
+pub use send::{
+    send_with_scripts, send_with_scripts_and_progress, ScriptOverride, ScriptedSendInput,
+    ScriptedSendOutcome,
+};
 pub use transform::{run_transform, TransformOutcome};
 pub use types::{ScriptRequest, ScriptResponse, ScriptSource, ScriptUnit};
 

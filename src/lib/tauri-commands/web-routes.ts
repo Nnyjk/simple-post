@@ -365,6 +365,9 @@ export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
   // 两侧 args 形状相同（camelCase）；Rust 的 `HttpSendBody` 直接从 `args` 反序列化，
   // 这里无需翻译。
   [COMMANDS.httpRequest]: { method: 'POST', path: () => '/api/http/send' },
+  // 同一份体，响应是事件流。`src/lib/http-progress.ts` 直接 fetch 它并逐行读，不经过
+  // `webInvokeCmd`；条目留在这里让路径只有一处来源。
+  [COMMANDS.httpRequestProgress]: { method: 'POST', path: () => '/api/http/send-progress' },
 
   // ----- 流式传输（SSE / WebSocket） -----
   // 这五条不经过 `webInvokeCmd`：响应是 `text/event-stream`，靠 `src/lib/stream-transport/web.ts`

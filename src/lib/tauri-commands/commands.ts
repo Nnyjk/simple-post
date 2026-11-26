@@ -167,6 +167,8 @@ export const COMMANDS = {
 
   // ----- 底层 HTTP 执行器（Tauri 端） -----
   httpRequest: 'http_request',
+  // 与 `httpRequest` 同一份参数，多的是一条进度 Channel。带文件分片的 form-data 用它。
+  httpRequestProgress: 'http_request_progress',
   // 一次性 HTTP 流（SSE）：建连、取消。事件经 `tauri::ipc::Channel` 逐条推回渲染层。
   streamRequest: 'stream_request',
   streamCancel: 'stream_cancel',

@@ -9,6 +9,7 @@ import type {
   TlsSettings,
 } from '@/types/domain';
 import type { EndpointDraft } from '@/stores/store-types';
+import type { TabUploadProgress } from '@/stores/slices/ui-response';
 import type { FormatResult } from '@/lib/utils';
 import { EndpointBreadcrumb } from '../EndpointBreadcrumb';
 import { EndpointHeader } from '../EndpointHeader';
@@ -74,6 +75,8 @@ export function TesterShell({
   varEntries,
   envName,
   vars,
+  endpointId,
+  uploadProgress,
   onProtocolChange,
   wsUrlBar,
   wsSurface,
@@ -140,6 +143,10 @@ export function TesterShell({
   envName: string | undefined;
   /** 变量池：取 OAuth2 token 时送给后端，让它替换配置里那四个字段的 `{{var}}`。 */
   vars: Record<string, string>;
+  /** 当前标签 id。文件分片的读取状态按它重置。 */
+  endpointId: string;
+  /** 当前标签这一次发送的传输进度。 */
+  uploadProgress: TabUploadProgress | null;
   /**
    * WebSocket 的地址栏：协议、地址、子协议与连接动作。它占住 HTTP `RequestUrlBar` 的那个
    * 槽位（页签条之上），故两种协议的纵向次序相同；在场时不再渲染 `RequestUrlBar` —— 同一条
@@ -293,6 +300,8 @@ export function TesterShell({
             varEntries={varEntries}
             envName={envName}
             vars={vars}
+            endpointId={endpointId}
+            uploadProgress={uploadProgress}
             patchDraft={patchDraft}
             onFormatResult={onFormatResult}
           />

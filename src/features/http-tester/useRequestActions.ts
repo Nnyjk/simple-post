@@ -9,6 +9,7 @@ import { copyText } from '@/lib/clipboard';
 import { draftToPatch } from '@/stores/slices/crud-helpers';
 import { useAppStore } from '@/stores/app-store';
 import type { EndpointDraft, RequestSettings } from '@/stores/store-types';
+import type { TabUploadProgress } from '@/stores/slices/ui-response';
 import type {
   ApiResponse,
   AuthConfig,
@@ -56,6 +57,7 @@ export function useRequestActions({
   onPathParamGate,
   onRequestProblems,
   setRequestPending,
+  setUploadProgress,
   setLastResponse,
   setLastScriptOutcome,
   applyEnvWrites,
@@ -113,6 +115,11 @@ export function useRequestActions({
    */
   setRequestPending: (tabId: string, v: boolean) => void;
   /**
+   * 记下某个标签这一次发送的传输进度。与 `setRequestPending` 一样按标签写入；响应落地时
+   * store 自己会清掉它。
+   */
+  setUploadProgress: (tabId: string, progress: TabUploadProgress | null) => void;
+  /**
    * 记下某个标签最近一次的响应与那次请求的快照。响应是挂在标签上的，写到别的标签上
    * 等于把这次调用挂到了另一个接口的工作区上。
    */
@@ -161,6 +168,8 @@ export function useRequestActions({
     const ctrl = new AbortController();
     inFlightRef.current.set(endpointId, ctrl);
     setRequestPending(endpointId, true);
+    // 上一次发送留下的进度不能挂在这一次上：新一次从 0 开始，且没有体时它一直是空。
+    setUploadProgress(endpointId, null);
     try {
       // 动态变量的值必须在**替换之前**到手：替换一旦发生，变量池里就没有同名变量的
       // 概念了，而「动态变量压过同名环境变量」这条规则正是在替换之前生效的。
@@ -209,6 +218,19 @@ export function useRequestActions({
         testScript,
         // 端点自己的 HTTPS 出站设置：`null` = 继承全局默认那份。
         tlsOverride,
+        // 传输进度。分片区间来自**这一次**组装的结果（动态变量可能改写过分片内容），
+        // 故在 `request` 上取而不是从渲染期那份 `prepared` 里取。
+        onProgress: (progress) => {
+          // 被顶替 / 取消的那次发送的最后一帧不能写进新的那一次。
+          if (ctrl.signal.aborted) return;
+          setUploadProgress(endpointId, {
+            sentBytes: progress.sentBytes,
+            totalBytes: progress.totalBytes,
+            serverReceivedBytes: progress.serverReceivedBytes ?? null,
+            serverTotalBytes: progress.serverTotalBytes ?? null,
+            partRanges: request.multipartPartRanges ?? [],
+          });
+        },
       });
       // 这里存的是 `outbound`（发出去的那一份），不是 `prepared`（预览那份）：OAuth2 的
       // token 只在 `outbound` 里，历史行要显示的就是它。请求头取后端报上来的线上那
@@ -230,7 +252,13 @@ export function useRequestActions({
       console.error('[HttpTester] sendRequest threw:', e);
     } finally {
       // `inFlightRef` 只有在仍是当前 controller 时才清空（途中可能被更新的发送顶替）。
-      if (inFlightRef.current.get(endpointId) === ctrl) inFlightRef.current.delete(endpointId);
+      if (inFlightRef.current.get(endpointId) === ctrl) {
+        inFlightRef.current.delete(endpointId);
+        // 这一次结束了——成功、失败、还是被取消（关标签 / 切走时组件卸载会 abort）。
+        // 成功那条路 `setLastResponse` 已经清过一次；取消与意外失败没有响应可落地，
+        // 不在这里清，进度条就会永远停在取消那一刻。
+        setUploadProgress(endpointId, null);
+      }
       setRequestPending(endpointId, false);
     }
   }, [
@@ -252,6 +280,7 @@ export function useRequestActions({
     settings,
     tlsOverride,
     setRequestPending,
+    setUploadProgress,
     setLastResponse,
     setLastScriptOutcome,
     applyEnvWrites,
