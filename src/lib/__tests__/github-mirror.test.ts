@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   GITHUB_MIRROR_IDS,
+  PROJECT_GITHUB_URL,
   mirrorGithubUrl,
+  projectHomeUrl,
   resolveGithubMirror,
   type GithubMirrorId,
 } from '../github-mirror';
@@ -66,6 +68,15 @@ test('非法输入原样返回', () => {
     mirrorGithubUrl('mailto:someone@example.com', 'ghfast'),
     'mailto:someone@example.com',
   );
+});
+
+test('仓库主页只经能呈现网页的镜像，其余直连', () => {
+  // ghfast 对仓库页回 403 `Invalid input.`；moeyy 没有验证过能代理 HTML。
+  assert.equal(projectHomeUrl('direct'), PROJECT_GITHUB_URL);
+  assert.equal(projectHomeUrl('ghfast'), PROJECT_GITHUB_URL);
+  assert.equal(projectHomeUrl('moeyy'), PROJECT_GITHUB_URL);
+  assert.equal(projectHomeUrl('ghproxy'), `https://gh-proxy.com/${PROJECT_GITHUB_URL}`);
+  assert.equal(projectHomeUrl('kkgithub'), 'https://kkgithub.com/Nnyjk/simple-post');
 });
 
 test('resolveGithubMirror 合法值通过、非法值回落 direct', () => {
