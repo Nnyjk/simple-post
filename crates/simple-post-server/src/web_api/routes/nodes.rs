@@ -37,7 +37,7 @@ use crate::dto::{HttpSendProgressEvent, SendOutcomeDto};
 ///
 /// 两条发送路由（`/send` 与 `/send-progress`）共用它：字段映射只写一遍，两个入口对同一份
 /// payload 不会给出不同的请求。
-fn scripted_input(body: HttpSendBody) -> ScriptedSendInput {
+pub(super) fn scripted_input(body: HttpSendBody) -> ScriptedSendInput {
     ScriptedSendInput {
         endpoint_id: body.endpoint_id,
         request: ScriptRequest {
@@ -62,6 +62,9 @@ fn scripted_input(body: HttpSendBody) -> ScriptedSendInput {
             pre_request: body.pre_request_script,
             test: body.test_script,
         }),
+        // 这条路由的请求体是 JSON：文件分片只有本机路径，字节由执行层按路径读。
+        // 浏览器选中的文件走 `/api/http/send-upload`，那边把字节从请求体里接力过来。
+        uploads: None,
     }
 }
 
@@ -96,6 +99,12 @@ pub(crate) async fn http_send_progress(
     State(s): State<Arc<WebState>>,
     Json(body): Json<HttpSendBody>,
 ) -> Result<Response, HttpErrorResponse> {
+    Ok(send_progress_response(s, scripted_input(body)))
+}
+
+/// 带进度的发送 → 事件流响应。`/send-progress` 与 `/send-upload-progress` 共用它：
+/// 两条路由的差别只在请求怎么解出来，进度帧与终局信封必须是同一套。
+pub(super) fn send_progress_response(s: Arc<WebState>, input: ScriptedSendInput) -> Response {
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<HttpSendProgressEvent>();
     let progress_tx = tx.clone();
     let sink: simple_post_core::http_executor::ProgressSink = Box::new(move |progress| {
@@ -105,15 +114,14 @@ pub(crate) async fn http_send_progress(
 
     let pool = s.pool.clone();
     let task = tokio::spawn(async move {
-        let event =
-            match send_with_scripts_and_progress(&pool, scripted_input(body), Some(sink)).await {
-                Ok(outcome) => HttpSendProgressEvent::Done {
-                    outcome: Box::new(SendOutcomeDto::from(outcome)),
-                },
-                Err(e) => HttpSendProgressEvent::Error {
-                    message: e.to_string(),
-                },
-            };
+        let event = match send_with_scripts_and_progress(&pool, input, Some(sink)).await {
+            Ok(outcome) => HttpSendProgressEvent::Done {
+                outcome: Box::new(SendOutcomeDto::from(outcome)),
+            },
+            Err(e) => HttpSendProgressEvent::Error {
+                message: e.to_string(),
+            },
+        };
         let _ = tx.send(event);
     });
 
@@ -137,7 +145,7 @@ pub(crate) async fn http_send_progress(
         HeaderName::from_static("x-accel-buffering"),
         HeaderValue::from_static("no"),
     );
-    Ok(response)
+    response
 }
 
 /// 事件流被丢弃时中止后台任务。

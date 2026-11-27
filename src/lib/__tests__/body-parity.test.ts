@@ -34,11 +34,11 @@ const FIXTURE: ParityFixture = JSON.parse(
 );
 
 describe('resolveBody 与 Rust 的 core::body::resolve_body 产出一致', () => {
-  it('样本恰好 24 条', () => {
+  it('样本恰好 25 条', () => {
     assert.equal(
       FIXTURE.cases.length,
-      24,
-      '样本必须恰好 24 条：条数变了说明夹具动了，两侧读取器都得跟着看',
+      25,
+      '样本必须恰好 25 条：条数变了说明夹具动了，两侧读取器都得跟着看',
     );
   });
 

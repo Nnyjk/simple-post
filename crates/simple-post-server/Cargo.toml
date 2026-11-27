@@ -68,3 +68,8 @@ gui = ["dep:tauri"]
 # NOTE: release profile lives at the workspace root (Cargo.toml) —
 # cargo warns "profiles for the non root package will be ignored"
 # if [profile.*] is declared here.
+
+[dev-dependencies]
+# 上传路线的测试要自己**构造** `multipart/form-data` 请求（模拟浏览器的 FormData）。
+# 只在测试构建里开这个 feature：`serve-web` 的产物不需要多部分编码器。
+reqwest = { workspace = true, features = ["multipart"] }

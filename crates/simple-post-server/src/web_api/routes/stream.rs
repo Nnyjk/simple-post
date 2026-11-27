@@ -24,19 +24,19 @@ use simple_post_core::http_executor::HttpRequestInput;
 use simple_post_core::stream::{self, StreamEvent, StreamSink};
 use simple_post_core::tls;
 
-use crate::web_api::dto::HttpStreamBody;
+use crate::web_api::dto::{HttpSendBody, HttpStreamBody};
 use crate::web_api::error::map_app_error;
 
 /// 下行队列的容量。有界是刻意的：SSE 是单向推送，浏览器慢读时没有任何办法把反压传回
 /// 上游的读取节奏，无界队列只会把整段响应体堆在内存里。
-const DOWNLINK_CAPACITY: usize = 256;
+pub(super) const DOWNLINK_CAPACITY: usize = 256;
 
 /// 把事件投进下行队列的那一端。
 ///
 /// 通道满（浏览器慢读 / 根本不读）或接收端已消失时**直接取消**这条流：这两种状态都
 /// 救不回来，继续读下去只会在内存里堆事件。代价是通道真满时 `end` 自己也可能挤不进去
 /// ——刻意接受：先保证内存有界，再谈事件完整。`end` 在正常路径下（容量 256）总能送达。
-fn sink_into(tx: mpsc::Sender<StreamEvent>, cancel_id: String) -> StreamSink {
+pub(super) fn sink_into(tx: mpsc::Sender<StreamEvent>, cancel_id: String) -> StreamSink {
     Box::new(move |event| match tx.try_send(event) {
         Ok(()) => {}
         Err(TrySendError::Full(_)) | Err(TrySendError::Closed(_)) => {
@@ -57,8 +57,19 @@ pub(crate) async fn http_stream(
         ));
     }
 
-    let request = body.request;
-    let input = HttpRequestInput {
+    let input = stream_input(body.request);
+
+    let (tx, rx) = mpsc::channel::<StreamEvent>(DOWNLINK_CAPACITY);
+    let id = body.stream_id;
+    let cancel_id = id.clone();
+    stream::spawn(id, input, sink_into(tx, cancel_id));
+    Ok(sse_response(rx))
+}
+
+/// 把 REST 的扁平请求体折成流式执行的输入。`/stream` 与 `/stream-upload` 的差别只在
+/// 文件字节从哪来，请求形状必须是同一份。
+pub(super) fn stream_input(request: HttpSendBody) -> HttpRequestInput {
+    HttpRequestInput {
         method: request.method,
         url: request.url,
         headers: request.headers,
@@ -72,13 +83,11 @@ pub(crate) async fn http_stream(
             &request.tls.unwrap_or_default(),
             request.tls_override.as_ref(),
         ),
-    };
+    }
+}
 
-    let (tx, rx) = mpsc::channel::<StreamEvent>(DOWNLINK_CAPACITY);
-    let id = body.stream_id;
-    let cancel_id = id.clone();
-    stream::spawn(id, input, sink_into(tx, cancel_id));
-
+/// 事件流响应：`data: <StreamEvent JSON>`，逐帧推。
+pub(super) fn sse_response(rx: mpsc::Receiver<StreamEvent>) -> Response {
     let events = futures_util::stream::unfold(rx, |mut rx| async move {
         let event = rx.recv().await?;
         // `StreamEvent` 的字段只有 String / u64 / Vec：序列化不可能失败。真失败就是代码
@@ -98,7 +107,7 @@ pub(crate) async fn http_stream(
         HeaderName::from_static("x-accel-buffering"),
         HeaderValue::from_static("no"),
     );
-    Ok(response)
+    response
 }
 
 /// `DELETE /api/http/stream/{id}`：取消一条流。

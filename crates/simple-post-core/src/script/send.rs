@@ -38,6 +38,8 @@ pub struct ScriptedSendInput {
     /// `None` = 用存的那份；`Some` = 用这份（空串 = 没有脚本）。渲染层送的是**界面上此刻生效的
     /// 那份**（草稿优先，回落到已存的那份），否则「所见」与「所发」会分叉。
     pub script_override: Option<ScriptOverride>,
+    /// 这次请求上传的文件字节（Web 形态）。`None` = 文件按本机路径读，或本来就没有文件分片。
+    pub uploads: Option<crate::multipart::UploadReceiver>,
 }
 
 /// 端点自己那两段脚本的覆盖。
@@ -100,11 +102,14 @@ pub async fn send_with_scripts_and_progress(
             _ => Vec::new(),
         },
     };
+    let uploads = input.uploads;
     if chain.is_empty() {
         // 没有脚本：与今天完全同路径。
-        let http = http_executor::execute_with_progress(
+        let http = http_executor::execute_with_uploads(
             &to_http_input(&input.request, &input.settings, &tls),
+            http_executor::OutboundPolicy::from_env(),
             progress,
+            uploads,
         )
         .await;
         return Ok(ScriptedSendOutcome {
@@ -125,9 +130,11 @@ pub async fn send_with_scripts_and_progress(
     .await;
 
     // 发出去的是脚本改写后的请求。
-    let http = http_executor::execute_with_progress(
+    let http = http_executor::execute_with_uploads(
         &to_http_input(&pre.request, &input.settings, &tls),
+        http_executor::OutboundPolicy::from_env(),
         progress,
+        uploads,
     )
     .await;
 

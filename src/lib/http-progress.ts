@@ -12,7 +12,8 @@ import { Channel, invoke } from '@tauri-apps/api/core';
 
 import { COMMANDS, IS_TAURI_SHELL, readApiBase } from './tauri-commands';
 import { readBearerFromStorage } from './tauri-commands/bearer';
-import { WEB_ROUTES } from './tauri-commands/web-routes';
+import { UPLOAD_ROUTES, WEB_ROUTES } from './tauri-commands/web-routes';
+import { uploadForm } from './web-uploads';
 
 /** 传输进度快照。与 Rust 的 `HttpTransferProgress` 逐字段对应。 */
 export interface HttpTransferProgress {
@@ -33,9 +34,14 @@ interface HttpSendProgressEvent {
 /**
  * 发一次请求并沿途报告进度，返回终局信封（与 `invokeCmd(COMMANDS.httpRequest, …)` 同一个
  * 泛型形状）。
+ *
+ * `files` 非空只在浏览器形态发生：那几条文件字节没有服务端可读的路径，必须随请求体一起上来，
+ * 故换成 `multipart/form-data` 打 `/api/http/send-upload-progress`——信封与进度帧完全相同，
+ * 差别只在请求怎么装。桌面形态永远是空数组（文件分片只有路径）。
  */
 export async function sendWithProgress<T>(
   args: Record<string, unknown>,
+  files: File[],
   signal: AbortSignal | undefined,
   onProgress: (progress: HttpTransferProgress) => void,
 ): Promise<T> {
@@ -48,7 +54,19 @@ export async function sendWithProgress<T>(
     // 序列化两次。失败走 reject，与 `http_request` 一致。
     return await invoke<T>(COMMANDS.httpRequestProgress, { ...args, onEvent: channel });
   }
-  return sendViaSse<T>(args, signal, onProgress);
+  if (files.length === 0) return sendViaSse<T>(args, signal, onProgress);
+  const bearer = readBearerFromStorage();
+  return readEnvelope<T>(
+    readApiBase() + UPLOAD_ROUTES.progress,
+    {
+      method: 'POST',
+      // 不写 `content-type`：`FormData` 的 boundary 由浏览器生成，手写那个头会让它失配。
+      headers: { ...(bearer ? { authorization: `Bearer ${bearer}` } : {}) },
+      body: uploadForm(args, files),
+      signal,
+    },
+    onProgress,
+  );
 }
 
 /** 非 2xx 的响应体形如 `{"code","message"}`：把那句话拼进错误里。 */
@@ -125,15 +143,28 @@ async function sendViaSse<T>(
   }
   const url = readApiBase() + spec.path(args);
   const bearer = readBearerFromStorage();
-  const response = await fetch(url, {
-    method: spec.method,
-    headers: {
-      'content-type': 'application/json',
-      ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
+  return readEnvelope<T>(
+    url,
+    {
+      method: spec.method,
+      headers: {
+        'content-type': 'application/json',
+        ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
+      },
+      body: JSON.stringify(args),
+      signal,
     },
-    body: JSON.stringify(args),
-    signal,
-  });
+    onProgress,
+  );
+}
+
+/** 读一条「先若干 `progress`、最后 `done` / `error`」的事件流，返回终局信封。 */
+async function readEnvelope<T>(
+  url: string,
+  init: RequestInit,
+  onProgress: (progress: HttpTransferProgress) => void,
+): Promise<T> {
+  const response = await fetch(url, init);
   if (!response.ok) throw await httpFailure(response, url);
   if (response.body === null) throw new Error('发送进度流没有响应体');
 

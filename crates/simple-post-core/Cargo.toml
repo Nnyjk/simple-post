@@ -21,6 +21,8 @@ base64 = { workspace = true }
 tokio = { workspace = true }
 reqwest = { workspace = true }
 futures-util = { workspace = true }
+# 上传段的字节块：axum 的 multipart 给出的就是 `Bytes`，转成 `Vec` 等于多复制一遍整份文件。
+bytes = "1"
 tokio-tungstenite = { workspace = true }
 rustls = { workspace = true }
 webpki-roots = { workspace = true }

@@ -106,6 +106,12 @@ pub struct MultipartPart {
     /// [`MultipartPart::value`] 不参与发包。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
+    /// 由**这次请求**上传的文件分片有多少字节。Web 形态下浏览器选的文件没有服务端可读的
+    /// 路径，字节随发送请求一起上来；这个数用来写 `Content-Length` 并校验实收字节。
+    ///
+    /// 有 `path` 时不用它：那份长度由执行层 `stat` 得到。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
     /// 说明。界面上那一列写着什么，不上线。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,

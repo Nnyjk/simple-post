@@ -170,6 +170,18 @@
       }
     },
     {
+      "name": "multipart：浏览器上传的分片（空 path + size）是文件分片，不做模板替换",
+      "vars": { "t": "x" },
+      "body": {
+        "mode": "multipart",
+        "content": "[{\"name\":\"{{t}}\",\"value\":\"{{t}}\",\"filename\":\"a.bin\",\"path\":\"\",\"size\":3}]"
+      },
+      "expected": {
+        "text": "[{\"name\":\"{{t}}\",\"value\":\"{{t}}\",\"enabled\":true,\"filename\":\"a.bin\",\"path\":\"\",\"size\":3}]",
+        "missing": []
+      }
+    },
+    {
       "name": "binary：文件描述原样带出去，字节由执行层按路径现读",
       "vars": {},
       "body": {

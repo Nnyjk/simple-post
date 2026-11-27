@@ -95,6 +95,7 @@ async fn a_failed_environment_write_back_does_not_fail_the_send() {
                 variables: BTreeMap::new(),
             },
             settings: settings(),
+            uploads: None,
             tls_override: None,
             // 脚本确实写了变量，才会走到回写那一步。
             script_override: Some(ScriptOverride {
@@ -141,6 +142,7 @@ async fn the_pre_request_writes_are_visible_to_the_test_phase() {
                 variables: BTreeMap::new(),
             },
             settings: settings(),
+            uploads: None,
             tls_override: None,
             script_override: Some(ScriptOverride {
                 pre_request: Some("pm.environment.set('token', 'from-pre');".to_string()),
@@ -178,6 +180,7 @@ async fn the_scripts_rewrite_the_request_that_is_actually_sent() {
             request: request(&format!("{}/x", upstream.url)),
             env: EnvSnapshot::default(),
             settings: settings(),
+            uploads: None,
             tls_override: None,
             script_override: Some(ScriptOverride {
                 pre_request: Some("pm.request.url = pm.request.url + '/rewritten';".to_string()),

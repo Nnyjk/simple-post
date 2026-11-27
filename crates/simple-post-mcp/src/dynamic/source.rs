@@ -286,6 +286,8 @@ async fn send(
             // 数据源端点自带的 HTTPS 出站设置。端点形态带它，内联请求没有端点行可继承，
             // 故传 `None`（回到全局默认那份）。
             tls_override: tls,
+            // 取数是服务端自己的调用：文件分片只有本机路径这一种来源。
+            uploads: None,
         },
     )
     .await

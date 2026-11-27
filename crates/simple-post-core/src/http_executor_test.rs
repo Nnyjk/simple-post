@@ -447,6 +447,42 @@ async fn a_caller_supplied_host_header_is_not_duplicated() {
     );
 }
 
+/// 上传通道没有字节也不关闭（半开客户端）时，发包前的检查不能永久挂住。
+///
+/// 通道的写入方读到请求体结尾才关通道；半开连接永远读不完，故等待按 `timeoutMs` 收尾，
+/// 超时按「带了没人接收的字节」拒绝。
+#[tokio::test]
+async fn a_half_open_upload_channel_does_not_pin_the_sender() {
+    let input = HttpRequestInput {
+        method: "POST".into(),
+        url: "http://127.0.0.1:9/upload".into(),
+        headers: vec![],
+        body: Some("{\"a\":1}".into()),
+        body_mode: BodyMode::Json,
+        timeout_ms: 200,
+        follow_redirects: true,
+        max_response_size_kb: 16,
+        tls: TlsSettings::default(),
+    };
+    let (tx, rx) = tokio::sync::mpsc::channel::<crate::multipart::UploadFrame>(4);
+
+    let out = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        execute_with_uploads(&input, OutboundPolicy::default(), None, Some(rx)),
+    )
+    .await
+    .expect("the check must not wait forever");
+    drop(tx);
+
+    assert!(!out.ok, "a body that declares no file has nothing to send");
+    let error = out.error.expect("an error, not a response");
+    assert!(
+        error.message.contains("the request carries uploaded files"),
+        "{:?}",
+        error.message
+    );
+}
+
 // parse_method
 
 #[test]

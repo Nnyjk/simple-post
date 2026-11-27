@@ -108,6 +108,26 @@ pub fn build_router(state: WebState, spa_dir: PathBuf) -> Router {
         // 从不出站请求，故它和 send 一样不含路径参数里的资源。
         .route("/api/http/stream", post(http_stream))
         .route("/api/http/stream/{id}", delete(http_stream_cancel))
+        // 同一份信封放在 `multipart/form-data` 里：第一个分片是 `request`，其余是浏览器
+        // 选中的文件字节。三条与上面三条一一对应，差别只在文件字节的来源。
+        .route(
+            "/api/http/send-upload",
+            post(http_send_upload).layer(axum::extract::DefaultBodyLimit::max(
+                upload::UPLOAD_BODY_LIMIT_BYTES,
+            )),
+        )
+        .route(
+            "/api/http/send-upload-progress",
+            post(http_send_upload_progress).layer(axum::extract::DefaultBodyLimit::max(
+                upload::UPLOAD_BODY_LIMIT_BYTES,
+            )),
+        )
+        .route(
+            "/api/http/stream-upload",
+            post(http_stream_upload).layer(axum::extract::DefaultBodyLimit::max(
+                upload::UPLOAD_BODY_LIMIT_BYTES,
+            )),
+        )
         // ---- WebSocket sessions ----
         // 建连响应是事件流；`/send` 与关闭是普通请求。三条都不进 `response_history`。
         .route("/api/ws/sessions", post(ws_connect))

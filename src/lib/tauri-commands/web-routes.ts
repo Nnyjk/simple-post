@@ -48,6 +48,24 @@ export function buildQuery(params: Record<string, unknown>): string {
  *   - POST   /api/{resource}/move       排序（放不进名词式 CRUD 的动作动词）。
  *   - POST   /api/{resource}/{id}/…     子资源动作（duplicate、activate 等）。
  */
+/**
+ * 上传路线：信封 + 文件字节的 `multipart/form-data` 版本。
+ *
+ * 它们**不是命令**，故不在 {@link WEB_ROUTES} 里——命令的参数是一份 JSON，而这里的请求体
+ * 是 multipart。浏览器形态选中文件时，`http-progress.ts` 与 `stream-transport/web.ts`
+ * 按这三条打过去；桌面形态永远用不到（文件分片只有路径）。
+ *
+ * 路径对应 `crates/simple-post-server/src/web_api/router.rs` 里那三条 `.route()`。
+ */
+export const UPLOAD_ROUTES = {
+  /** `/api/http/send` 的 multipart 版：响应体是终局信封。 */
+  send: '/api/http/send-upload',
+  /** `/api/http/send-progress` 的 multipart 版：SSE 进度 + 终局信封。 */
+  progress: '/api/http/send-upload-progress',
+  /** `/api/http/stream` 的 multipart 版：SSE 事件流。 */
+  stream: '/api/http/stream-upload',
+} as const;
+
 export const WEB_ROUTES: Partial<Record<TauriCommand, RouteSpec>> = {
   // ----- projects -----
   [COMMANDS.projectsList]: { method: 'GET', path: () => '/api/projects' },

@@ -302,6 +302,7 @@ fn parts_from_example(media: &Value) -> Vec<MultipartPart> {
             filename: None,
             content_type: None,
             path: None,
+            size: None,
             description: None,
         })
         .collect()
@@ -326,6 +327,7 @@ fn parts_from_properties(media: &Value) -> Vec<MultipartPart> {
             filename: None,
             content_type: None,
             path: None,
+            size: None,
             description: None,
         })
         .collect()

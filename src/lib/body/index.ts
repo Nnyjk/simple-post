@@ -113,9 +113,9 @@ function resolveMultipartBody(content: string, vars: Record<string, string>): Re
     // 文件分片只有路径与文件名：路径不是用户填的模板，模板化它会把目录名里的 `{{` 当成变量。
     // 分片名也不模板化——它与文件名一起描述「哪个文件」，不是用户填的值。
     //
-    // 判据是**非空**路径，与 Rust 侧 `core::multipart::assemble` 一致：`path: ""` 执行层发的是
-    // 一个文本分片，这里就得照文本分片模板化。
-    if (part.path) return part;
+    // 判据与执行层同一条（`isFilePart`）：**非空**路径，或声明了字节数（浏览器上传）。`path: ""`
+    // 且没有 `size` 的分片执行层发的是文本，这里就得照文本模板化。
+    if (isFilePart(part)) return part;
     const name = resolveVarsWithMissing(part.name, vars);
     const value = resolveVarsWithMissing(part.value, vars);
     missing.push(...name.missing, ...value.missing);
@@ -214,6 +214,14 @@ export function serializeFormFields(fields: FormField[]): string {
 // -------------------------------------------------------------------------
 
 /**
+ * 文件分片还是文本分片。判据与 Rust `multipart::is_file_part` 同一条：有非空 `path`，或声明了
+ * 字节数（浏览器上传，`size` 在）。**空串路径不算**——那是「切到文件但还没选」，线上按文本分片发。
+ */
+export function isFilePart(part: MultipartPart): boolean {
+  return (part.path ?? '') !== '' || part.size !== undefined;
+}
+
+/**
  * `multipart` 模式的内容 → 分片。**解析不出来时给空数组**，不报错——与 Rust 侧
  * `core::body::parse_multipart_parts` 同一条规则。
  *
@@ -251,6 +259,11 @@ export function parseMultipartParts(content: string): MultipartPart[] {
     const path = optStr(r.path);
     if (path === null) return [];
     if (path !== undefined) part.path = path;
+    // 字节数只在浏览器上传形态里有：服务端据它写 `Content-Length`（通道里没有长度可量）。
+    // 与非文件分片无关，故缺席时什么都不写。
+    const size = r.size === undefined || r.size === null ? undefined : uint(r.size);
+    if (size === null) return [];
+    if (size !== undefined) part.size = size;
     const description = optStr(r.description);
     if (description === null) return [];
     if (description !== undefined) part.description = description;

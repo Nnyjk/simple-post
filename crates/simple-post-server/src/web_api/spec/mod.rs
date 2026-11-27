@@ -67,6 +67,12 @@ pub struct RouteSpec {
 //   POST /api/update/apply             - 执行运维声明的更新命令（口令模式下才开放）
 //   GET  /api/logs/export              - 本次运行期间日志导出的纯文本（`scope=all|errors`）
 //   POST /api/logs/client              - 渲染层上报 console.error / 未捕获异常
+//   POST /api/http/send-upload         - 信封 + 浏览器上传的文件字节（`multipart/form-data`）
+//   POST /api/http/send-upload-progress - 同上，响应是进度事件流
+//   POST /api/http/stream-upload       - 同上，响应是 SSE 事件流
+//
+// 三条上传路由是三条发送路由的**传输变体**（同一份信封，文件字节随请求上来），故与它们一样
+// 属 UI 专用：请求体是 multipart，导出的 OpenAPI 文档读者调不出来。
 //   GET  /healthz                      - 无前缀的健康探针别名（与 `/api/healthz` 共用同一个处理函数）
 //
 // MCP 的 JSON-RPC 端点、它的健康探针与工具清单都在**守护进程自己的监听端口**上，

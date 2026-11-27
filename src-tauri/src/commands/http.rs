@@ -69,6 +69,9 @@ pub async fn http_request_progress(
                 pre_request: pre_request_script,
                 test: test_script,
             }),
+            // 桌面形态的文件分片只有本机路径：执行层按路径读，字节不经过 IPC。
+            // 浏览器选中的文件走 serve-web 的上传路由，那边把字节接力过来。
+            uploads: None,
         },
         Some(sink),
     )

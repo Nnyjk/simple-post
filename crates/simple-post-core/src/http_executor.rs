@@ -296,10 +296,12 @@ pub const MAX_REQUEST_BODY_BYTES: usize = 64 * 1024 * 1024;
 ///
 /// 超过 [`MAX_REQUEST_BODY_BYTES`] 时也在这里拒绝：文本形态的请求体两个传输层都背得动，
 /// 超过它就是用户在 json 里塞了不该塞的东西。
-pub(crate) fn outbound_body(
+pub(crate) async fn outbound_body(
     input: &HttpRequestInput,
+    uploads: Option<crate::multipart::UploadReceiver>,
 ) -> Result<Option<(crate::multipart::OutboundBody, Option<String>)>, String> {
     let Some(body) = input.body.as_ref() else {
+        reject_extra_uploads(uploads, input.timeout_ms).await?;
         return Ok(None);
     };
     check_body_size(body.len())?;
@@ -307,23 +309,78 @@ pub(crate) fn outbound_body(
     match input.body_mode {
         BodyMode::Multipart => {
             let parts = crate::body::parse_multipart_parts(body);
-            let assembled = crate::multipart::assemble(&parts)?;
+            let assembled = match uploads {
+                Some(rx) => {
+                    let assembled = crate::multipart::assemble_with_uploads(&parts, rx)?;
+                    // 上传形态的长度只来自声明值，而声明的文件不算在 `body` 的文本长度里。
+                    // 同一条上限对两种形态都成立，否则网页上传能绕开 `MAX_REQUEST_BODY_BYTES`。
+                    let total = usize::try_from(assembled.body.len()).unwrap_or(usize::MAX);
+                    check_body_size(total)?;
+                    assembled
+                }
+                None => crate::multipart::assemble(&parts)?,
+            };
             Ok(Some((assembled.body, Some(assembled.content_type))))
         }
-        BodyMode::Binary => match crate::body::parse_body_file(body) {
-            Some(file) => Ok(Some((
-                crate::multipart::OutboundBody::from_file(&file)?,
-                None,
-            ))),
+        // `binary` 的文件由这次请求上传时没有服务端可读的路径：长度取调用方声明的
+        // `size`，字节从通道里来。
+        BodyMode::Binary => match (crate::body::parse_body_file(body), uploads) {
+            (Some(file), Some(rx)) if file.path.trim().is_empty() => {
+                // 上传形态的字节数不经过 `body` 的文本长度，故同一条上限要在这里再查一次：
+                // 否则网页上传能发出超过 `MAX_REQUEST_BODY_BYTES` 的请求体。
+                check_body_size(usize::try_from(file.size).unwrap_or(usize::MAX))?;
+                Ok(Some((
+                    crate::multipart::OutboundBody::from_upload(file.size, rx),
+                    None,
+                )))
+            }
+            // 带路径的文件由执行层读盘，上传通道里不该再有任何字节。
+            (Some(file), uploads) => {
+                reject_extra_uploads(uploads, input.timeout_ms).await?;
+                Ok(Some((
+                    crate::multipart::OutboundBody::from_file(&file)?,
+                    None,
+                )))
+            }
             // 文件描述读不出来：没有 body，与解析侧「读不出来就没有 body」同一条规则。
-            None => Ok(None),
+            (None, uploads) => {
+                reject_extra_uploads(uploads, input.timeout_ms).await?;
+                Ok(None)
+            }
         },
         // 空内容按「没有 body」处理：与 `resolve_body` 的判空同一条规则。
-        _ if body.is_empty() => Ok(None),
-        _ => Ok(Some((
-            crate::multipart::OutboundBody::inline(body.as_bytes().to_vec()),
-            None,
-        ))),
+        _ if body.is_empty() => {
+            reject_extra_uploads(uploads, input.timeout_ms).await?;
+            Ok(None)
+        }
+        _ => {
+            reject_extra_uploads(uploads, input.timeout_ms).await?;
+            Ok(Some((
+                crate::multipart::OutboundBody::inline(body.as_bytes().to_vec()),
+                None,
+            )))
+        }
+    }
+}
+
+/// 这个请求体不消费上传字节，那上传通道就必须是空的。
+///
+/// 浏览器只在请求体带「没有路径的文件分片」时才把字节塞进来；反之（纯文本 body、按路径读的
+/// binary）通道里有字节就是客户端发错了请求，静默丢掉会让两边的字节数对不上。
+///
+/// 等待有期限：通道的写入方是读请求体的那个任务，它读完才关通道。半开连接永远读不完，
+/// 故这里按这次请求的 `timeoutMs` 收尾，超时同样算「带了没人接收的字节」。
+async fn reject_extra_uploads(
+    mut uploads: Option<crate::multipart::UploadReceiver>,
+    timeout_ms: u64,
+) -> Result<(), String> {
+    let Some(rx) = uploads.as_mut() else {
+        return Ok(());
+    };
+    let mismatch = || "the request carries uploaded files, but its body declares none".to_string();
+    match tokio::time::timeout(Duration::from_millis(timeout_ms), rx.recv()).await {
+        Ok(None) => Ok(()),
+        Ok(Some(_)) | Err(_) => Err(mismatch()),
     }
 }
 
@@ -826,6 +883,39 @@ pub async fn execute_with_policy_and_progress(
     policy: OutboundPolicy,
     progress: Option<ProgressSink>,
 ) -> HttpResult {
+    execute_with_uploads(input, policy, progress, None).await
+}
+
+/// 同 [`execute_with_policy_and_progress`]，另收这次请求上传的文件字节。
+///
+/// Web 形态的文件分片没有服务端可读的路径：字节随发送请求一起上来，这里边收边发，服务端
+/// 不落盘。`uploads` 缺席时与上一条逐字节同路。
+/// reqwest 的 `Display` 只说「error sending request for url」，真正的原因在 `source()` 链上。
+///
+/// 请求体是流时，链上那句就是用户要知道的：文件在装配之后被改小、上传的字节比声明的短、
+/// 路径读不出来。只回 `Display` 的话这些都变成同一句「network」。
+pub(crate) fn describe_reqwest_error(error: &reqwest::Error) -> String {
+    use std::error::Error as _;
+
+    let mut text = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        let cause_text = cause.to_string();
+        if !cause_text.is_empty() && !text.contains(&cause_text) {
+            text.push_str(": ");
+            text.push_str(&cause_text);
+        }
+        source = cause.source();
+    }
+    text
+}
+
+pub async fn execute_with_uploads(
+    input: &HttpRequestInput,
+    policy: OutboundPolicy,
+    progress: Option<ProgressSink>,
+    uploads: Option<crate::multipart::UploadReceiver>,
+) -> HttpResult {
     let start = Instant::now();
     let progress = progress.map(Arc::new);
 
@@ -850,7 +940,7 @@ pub async fn execute_with_policy_and_progress(
     // 请求体的字节在**建客户端之前**解出来：`content-length` 要的是字节数，而 multipart 的
     // boundary 也要在请求头确定之前生成。读不出文件时报错而不是发一个空 body——那会让服务端
     // 收到一个内容被静默丢掉的请求。
-    let (outbound, multipart_ct) = match outbound_body(input) {
+    let (outbound, multipart_ct) = match outbound_body(input, uploads).await {
         Ok(Some((body, ct))) => (Some(body), ct),
         Ok(None) => (None, None),
         Err(msg) => return HttpResult::err("network", msg),
@@ -908,7 +998,7 @@ pub async fn execute_with_policy_and_progress(
         Ok(r) => r,
         Err(e) => {
             let kind = if e.is_timeout() { "timeout" } else { "network" };
-            return HttpResult::err(kind, e.to_string());
+            return HttpResult::err(kind, describe_reqwest_error(&e));
         }
     };
 

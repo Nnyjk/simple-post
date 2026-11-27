@@ -385,6 +385,11 @@ fn rest_only() -> BTreeSet<Route> {
         // 健康探针：探测方是 supervisor / 运维，不是 SPA。
         ("GET", "/api/healthz"),
         ("GET", "/healthz"),
+        // 发送路由的 multipart 变体：请求体是 `FormData`，不是一份能让命令表描述的 JSON，
+        // 故它们只由 `http-progress.ts` / `stream-transport/web.ts` 直接 fetch。
+        ("POST", "/api/http/send-upload"),
+        ("POST", "/api/http/send-upload-progress"),
+        ("POST", "/api/http/stream-upload"),
     ]
     .into_iter()
     .map(|(method, path)| (method.to_string(), path.to_string()))

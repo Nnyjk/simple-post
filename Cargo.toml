@@ -154,7 +154,7 @@ rustls-pemfile = "2"
 dirs = "7"
 
 # HTTP server (serve-web)
-axum = "0.8"
+axum = { version = "0.8", features = ["multipart"] }
 # 0.6, not 0.7: `reqwest` 0.12 already compiles `tower-http 0.6.11` for its own
 # middleware, so staying on 0.6 shares that build instead of adding a second copy.
 # The only API we touch is `tower_http::services::ServeDir` (same path in both
