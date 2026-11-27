@@ -100,7 +100,7 @@ src/
 
 导入器对无法映射的外来构造一律产出诊断并丢弃，绝不基于猜测进行静默兼容或降级。
 
-- Postman `formdata` 中 `type: file` 的分片：Postman 导出仅提供文件路径而无字节内容，无法载入（分片结构仅承载预读入的实体字节）。
+- Postman `formdata` 中 `type: file` 的分片：导入器仅保留文本分片，遇到 `type: file` 时出诊断并跳过（`import/postman/body.rs`）。
 - Postman `auth` 中的 oauth2 与 digest：导入器仅支持 noauth、basic、bearer 与 apikey，其余认证出诊断并按无认证回退（`import/postman/auth.rs`）。
 - OpenAPI `apiKey` 的 `in: cookie`：`ApiKeyLocation` 仅支持 `Header | Query`，遇到 cookie 出诊断（详见 [§已核实的陷阱](#已核实的陷阱)）。
 - OpenAPI `paths` 包含标准动词外的自定义操作：导出规范不支持，导入时遇到集合外动词出诊断（详见 [§已核实的陷阱](#已核实的陷阱)）。
@@ -144,7 +144,7 @@ Postman 的环境只变成一个新建的 `Environment` 及其 `variables` 键�
 新增 body 变体必须前置落实端到端支持，防止出现「存储有效但发送异常」的隐式缺陷：
 
 - `src/lib/body/` —— 覆盖七种 body 类型的结构定义与装配逻辑（与 Rust `core::body` 逻辑统一，由 `fixtures/body-parity.json` 约束）。
-- `src/lib/multipart.ts` —— 实现 multipart 请求体组装（与 Rust `mcp/http_ops/multipart.rs` 逻辑统一）。
+- `crates/simple-post-core/src/multipart.rs` —— 实现 `multipart/form-data` 装配与按路径流式读盘（桌面端、`serve-web` 与 MCP 共用这一份实现）。
 - 请求体编辑器 —— 支持新模式的渲染与交互编辑。
 - `variable_fill` —— `ResolvedEndpoint.body_mode`（`variable_fill/types.rs`）携带应用 `overrides` 后的 mode；`auto_content_type`（`variable_fill/request.rs`）针对 `Multipart` 返回 `None`，统一在发送执行前补全 boundary。
 

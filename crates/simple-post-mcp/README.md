@@ -64,7 +64,6 @@ crates/simple-post-mcp/
         │   ├── dynamic.rs     #   动态变量提取
         │   ├── envelope.rs    #   响应包装结构 Envelope
         │   ├── input.rs       #   入参扁平化与校验
-        │   ├── multipart.rs   #   multipart/form-data 报文构建
         │   ├── project.rs     #   临时请求所属项目补齐
         │   ├── send.rs        #   请求发送路径与脚本执行环境快照
         │   └── table.rs       #   分发映射表与三种工具 schema

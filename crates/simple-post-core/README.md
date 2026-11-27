@@ -8,7 +8,7 @@ Simple Post 的共享底层核心库，提供跨 crate 复用的领域模型、S
 - **领域模型（`domain`）**：定义项目、环境、节点、端点、认证配置、OAuth2 结构、动态变量等核心数据类型。
 - **数据库持久化与迁移（`db`）**：管理 SQLite 连接池（`DbPool`）、表结构版本迁移（`schema.rs`）、CRUD 增删改查以及事务辅助函数（`with_tx`）。
 - **请求脚本沙箱（`script`）**：基于 QuickJS 的前后置脚本运行时（`send_with_scripts`），有执行时长与内存上限；脚本输出不许进 stdout（MCP 的 JSON-RPC 帧只走 stdout），release 下 panic 即中止进程。
-- **HTTP 执行与变量插值（`http_executor`、`body`、`path_params`、`template`、`tls`、`url`、`oauth2`）**：执行出站 HTTP 请求、按不同模式装配请求体、解析路径参数与 `{{name}}` 模板变量、处理 OAuth2 令牌生命周期与出站 TLS 设置。
+- **HTTP 执行与变量插值（`http_executor`、`body`、`multipart`、`path_params`、`template`、`tls`、`url`、`oauth2`）**：执行出站 HTTP 请求、按不同模式装配请求体（含 `multipart/form-data` 装配与按路径流式读盘）、解析路径参数与 `{{name}}` 模板变量、处理 OAuth2 令牌生命周期与出站 TLS 设置。
 - **权限策略与单接口规范写入（`permissions`、`spec::upsert`）**：管理项目级权限枚举、全局能力策略（`CapabilityPolicy`）以及单接口规范的原子解析与事务性落库。
 - **端口文件契约（`port_file`）**：定义 `mcp.port` 文件的存储路径与数据结构规范（多实例端口竞争、探针探测与生命周期接管由 `simple-post-server` 负责，见 [crates/simple-post-server/README.md](../simple-post-server/README.md)）。
 
@@ -26,7 +26,7 @@ crates/simple-post-core/
 ├── README.md
 └── src/
     ├── lib.rs                 # 导出 body / db / domain / dynamic / error /
-    │                          # http_executor / oauth2 / path_params /
+    │                          # http_executor / multipart / oauth2 / path_params /
     │                          # permissions / script / spec / template / tls / url
     ├── body.rs                # 请求体装配规则：各请求体形态的解析、插值与序列化
     ├── db/                    # SQLite 存储与 CRUD 模块
@@ -82,6 +82,7 @@ crates/simple-post-core/
     │                          # flight / fetcher / resolve / transform）
     ├── error.rs               # 统一错误枚举 AppError
     ├── http_executor.rs       # 基于 reqwest 的 HTTP 发送执行器（供桌面端与无头端调用）
+    ├── multipart.rs           # multipart/form-data 装配与按路径流式读盘
     ├── oauth2.rs              # oauth2/ 的门面
     ├── oauth2/                # OAuth2 令牌生命周期流转
     │   ├── api.rs             #   双传输通道共享的统一入口
