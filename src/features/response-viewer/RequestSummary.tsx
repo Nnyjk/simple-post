@@ -53,6 +53,14 @@ export function RequestSummary({
   );
 }
 
+/** 请求头里那条 `content-length`。它不是数字时当作没有这一条。 */
+function contentLengthOf(headers: Array<[string, string]>): number | null {
+  const hit = headers.find(([name]) => name.toLowerCase() === 'content-length');
+  if (!hit) return null;
+  const value = Number(hit[1]);
+  return Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
 /** 从请求头里找出 `content-type`。请求体按它决定怎么展示。 */
 function contentTypeOf(headers: Array<[string, string]>): string {
   const hit = headers.find(([name]) => name.toLowerCase() === 'content-type');
@@ -71,7 +79,10 @@ function GeneralSection({
   request: StoredRequestSnapshot;
   response: ApiResponse | null;
 }) {
-  const bodyBytes = request.body ? utf8Bytes(request.body).length : 0;
+  // 线上那一份的字节数：`content-length` 由执行层按装配结果写好（文件按盘上大小算），故它才是
+  // 这次发出的体积。`body` 是前端交出去的描述——带文件时那只是一段 JSON，不是要发的字节。
+  const bodyBytes =
+    contentLengthOf(request.headers) ?? (request.body ? utf8Bytes(request.body).length : 0);
   return (
     <Section title="常规">
       <div className="flex flex-col gap-0.5">

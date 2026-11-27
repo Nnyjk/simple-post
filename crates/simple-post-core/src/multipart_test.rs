@@ -227,6 +227,21 @@ fn a_file_that_shrank_after_assembly_fails_instead_of_sending_less() {
 }
 
 #[test]
+fn a_file_that_grew_after_assembly_fails_instead_of_sending_a_prefix() {
+    let file = TempFile::with("grow.bin", b"0123456789");
+    let assembled =
+        assemble_with_boundary(&[file_part("p", &file.path_string())], "XYZ").expect("assemble");
+    std::fs::write(&file.path, b"0123456789ABCDEF").expect("append");
+
+    let err = read_all(assembled.body, 4).expect_err("must fail");
+    assert_eq!(
+        err.kind(),
+        std::io::ErrorKind::InvalidData,
+        "a longer file must be an error, not a silently truncated body"
+    );
+}
+
+#[test]
 fn a_missing_file_is_reported_at_assembly_time() {
     let err = assemble_with_boundary(&[file_part("p", "definitely/not/here.bin")], "XYZ")
         .expect_err("assemble must fail");
@@ -303,6 +318,27 @@ fn set_content_type_replaces_in_place_and_appends_when_absent() {
             "Content-Type".to_string(),
             "multipart/form-data; boundary=B".to_string()
         )
+    );
+}
+
+#[test]
+fn duplicate_content_types_collapse_to_the_one_with_the_boundary() {
+    let mut headers = vec![
+        ("Content-Type".to_string(), "application/json".to_string()),
+        ("Accept".to_string(), "*/*".to_string()),
+        ("content-type".to_string(), "text/plain".to_string()),
+    ];
+    set_content_type(&mut headers, "multipart/form-data; boundary=A");
+    assert_eq!(
+        headers,
+        vec![
+            (
+                "Content-Type".to_string(),
+                "multipart/form-data; boundary=A".to_string()
+            ),
+            ("Accept".to_string(), "*/*".to_string()),
+        ],
+        "only one Content-Type survives, and it carries the boundary"
     );
 }
 

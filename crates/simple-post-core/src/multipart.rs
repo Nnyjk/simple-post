@@ -57,13 +57,24 @@ pub fn content_type(boundary: &str) -> String {
 /// **multipart 是「用户值优先」的唯一例外。** 其余模式的 body 是用户手写的，用户自设的
 /// Content-Type 有机会描述它；multipart 的 body 是这里用 boundary 框出来的，boundary 是
 /// 生成物的一部分，用户那条值在结构上描述不了它 —— 留着就是「存得对、发得错」。
+///
+/// 重名的 Content-Type 只留第一条（改成 `value`），其余丢弃：请求头是允许重名的列表，
+/// 而两条不同的 Content-Type 里只有一条带 boundary，保留了第二条等于让服务端可能解析失败。
 pub fn set_content_type(headers: &mut Vec<(String, String)>, value: &str) {
-    match headers
-        .iter_mut()
-        .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
-    {
-        Some((_, current)) => *current = value.to_string(),
-        None => headers.push(("Content-Type".to_string(), value.to_string())),
+    let mut seen = false;
+    headers.retain_mut(|(name, current)| {
+        if !name.eq_ignore_ascii_case("content-type") {
+            return true;
+        }
+        if seen {
+            return false;
+        }
+        seen = true;
+        *current = value.to_string();
+        true
+    });
+    if !seen {
+        headers.push(("Content-Type".to_string(), value.to_string()));
     }
 }
 
@@ -212,6 +223,21 @@ impl OutboundBody {
                                 buf.truncate(n);
                                 st.pending_file = Some((file, left - n as u64));
                                 return Some((Ok(buf), st));
+                            }
+                            Err(e) => return Some((Err(e), st)),
+                        }
+                    } else {
+                        // 装配时锁定的字节已经发完：再读一个字节，读到了说明文件在装配之后
+                        // 长过。静默少发一半文件与少发整个文件一样是数据完整性问题，故报错。
+                        let mut probe = [0u8; 1];
+                        match tokio::io::AsyncReadExt::read(&mut file, &mut probe).await {
+                            Ok(0) => {}
+                            Ok(_) => {
+                                let err = std::io::Error::new(
+                                    std::io::ErrorKind::InvalidData,
+                                    "the file grew after the request was assembled",
+                                );
+                                return Some((Err(err), st));
                             }
                             Err(e) => return Some((Err(e), st)),
                         }

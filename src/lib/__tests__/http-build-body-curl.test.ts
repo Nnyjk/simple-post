@@ -128,6 +128,23 @@ describe('http-build: cURL parity with fetch', () => {
     assert.ok(curl.includes(`--data-raw 'it'\\''s a '\\''test'\\'''`));
   });
 
+  it('multipart 的文本分片走 --form-string，`@` 开头的值不会被当成文件', () => {
+    const content = JSON.stringify([{ name: 'k', value: '@not-a-file', enabled: true }]);
+    const i = input({ method: 'POST', body: { mode: 'multipart', content } });
+    const curl = buildCurlCommand(i);
+    assert.ok(curl.includes(`--form-string 'k=@not-a-file'`), curl);
+    assert.ok(!curl.includes("-F 'k="), curl);
+  });
+
+  it('multipart 的文件分片给带引号的路径，`;` 不会被当成分片属性分隔符', () => {
+    const content = JSON.stringify([
+      { name: 'f', value: '', enabled: true, filename: 'a.bin', path: 'C:\\tmp\\a;b.bin' },
+    ]);
+    const i = input({ method: 'POST', body: { mode: 'multipart', content } });
+    const curl = buildCurlCommand(i);
+    assert.ok(curl.includes('@"C:\\tmp\\a;b.bin";filename=a.bin'), curl);
+  });
+
   it('uses uppercase method verb', () => {
     const i = input({ method: 'POST', body: { mode: 'json', content: '{}' } });
     const curl = buildCurlCommand(i);
