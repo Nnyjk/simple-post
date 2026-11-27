@@ -195,11 +195,10 @@ pub fn resolve_endpoint_with(
     // method；URL、headers、auth 仍由上文的 HTTP 规则产出。它不是一种 body mode，
     // 故 `core::body` 不参与这里的组装。
     let graphql = detail.protocol == simple_post_core::domain::RequestProtocol::GraphQl;
-    let (body, body_base64, body_mode) = if graphql {
+    let (body, body_mode) = if graphql {
         let payload = graphql_payload(detail.graphql.as_ref(), &vars, &mut missing, &mut seen)?;
         (
             Some(payload),
-            None,
             // 装配用的模式按 json 记：multipart 的装配分支不该拿到 SQL 里存的那个模式。
             simple_post_core::domain::BodyMode::Json,
         )
@@ -208,11 +207,7 @@ pub fn resolve_endpoint_with(
         for m in resolved_body.missing {
             record_missing(&mut missing, &mut seen, m);
         }
-        (
-            resolved_body.text,
-            resolved_body.base64,
-            eff_body.mode.clone(),
-        )
+        (resolved_body.text, eff_body.mode)
     };
     if graphql {
         eff_method = simple_post_core::domain::HttpMethod::Post;
@@ -253,7 +248,6 @@ pub fn resolve_endpoint_with(
         headers,
         params: params_subst,
         body,
-        body_base64,
         body_mode,
         auth: resolved_auth,
         // 变量池随结果一起走：取 OAuth2 的 token 时要用的正是这一份。

@@ -20,7 +20,7 @@ const REQUEST: PreparedRequest = {
   url: 'wss://example.test/stream',
   headers: [['Accept', '*/*']],
   body: null,
-  bodyBase64: null,
+  bodyMode: 'none',
   missingVars: [],
   vars: { tenant: 'acme' },
   missingPathParams: [],

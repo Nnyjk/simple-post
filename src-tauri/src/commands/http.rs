@@ -25,7 +25,7 @@ pub async fn http_request_progress(
     url: String,
     headers: Vec<(String, String)>,
     body: Option<String>,
-    body_base64: Option<String>,
+    body_mode: crate::domain::BodyMode,
     timeout_ms: u64,
     follow_redirects: bool,
     max_response_size_kb: u64,
@@ -52,7 +52,7 @@ pub async fn http_request_progress(
                 url,
                 headers,
                 body,
-                body_base64,
+                body_mode,
             },
             env: env.unwrap_or_default(),
             settings: RequestSettings {

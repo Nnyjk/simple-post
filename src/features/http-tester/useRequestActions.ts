@@ -228,7 +228,6 @@ export function useRequestActions({
             totalBytes: progress.totalBytes,
             serverReceivedBytes: progress.serverReceivedBytes ?? null,
             serverTotalBytes: progress.serverTotalBytes ?? null,
-            partRanges: request.multipartPartRanges ?? [],
           });
         },
       });

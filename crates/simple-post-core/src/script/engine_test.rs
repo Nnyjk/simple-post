@@ -7,13 +7,15 @@ use std::time::{Duration, Instant};
 
 use super::*;
 
+use crate::domain::BodyMode;
+
 /// 一个最小的请求。
 fn request() -> ScriptRequest {
     ScriptRequest {
         method: "GET".to_string(),
         url: "http://example.test/api".to_string(),
         headers: vec![("X-Token".to_string(), "old".to_string())],
-        body_base64: None,
+        body_mode: BodyMode::None,
         body: None,
     }
 }
@@ -288,7 +290,7 @@ fn headers_the_script_did_not_touch_keep_their_order_and_duplicates() {
             ("X-B".to_string(), "2".to_string()),
             ("X-A".to_string(), "3".to_string()),
         ],
-        body_base64: None,
+        body_mode: BodyMode::None,
         body: None,
     };
     let sandbox = sandbox(&limits, &request);
@@ -306,7 +308,7 @@ fn a_script_can_clear_the_request_body() {
         method: "POST".to_string(),
         url: "http://example.test/".to_string(),
         headers: vec![],
-        body_base64: None,
+        body_mode: BodyMode::None,
         body: Some("{\"a\":1}".to_string()),
     };
     let sandbox = sandbox(&limits, &request);

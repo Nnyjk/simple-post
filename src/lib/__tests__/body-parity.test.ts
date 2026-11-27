@@ -19,7 +19,6 @@ interface ParityCase {
   body: RequestBody;
   expected: {
     text: string | null;
-    base64: string | null;
     missing: string[];
   };
   /** `binary` 模式的 Content-Type。缺席即不检查这一项。 */
@@ -47,7 +46,6 @@ describe('resolveBody 与 Rust 的 core::body::resolve_body 产出一致', () =>
     it(testCase.name, () => {
       const resolved = resolveBody(testCase.body, testCase.vars);
       assert.equal(resolved.text, testCase.expected.text, '文本形态');
-      assert.equal(resolved.base64, testCase.expected.base64, '二进制形态');
       assert.deepEqual(resolved.missing, testCase.expected.missing, '未解析的变量');
     });
   }

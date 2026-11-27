@@ -278,7 +278,8 @@ export async function sendRequest(input: SendInput): Promise<ApiResponse> {
   const built = buildFetchInit(input);
   // 请求头转成元组列表——Rust 反序列化 `Vec<(String, String)>`，web 桥对元组列表原样 JSON 编码，这是两侧唯一都能用的形状
   const headers = initHeadersToTuples(built.init.headers);
-  // body 有两种形态：文本直接给字符串；二进制给 base64。后端的 `HttpRequestInput` 两个字段都收，`body_base64` 优先——它才是能被还原成文件的那份。
+  // 请求体只有文本形态：`multipart` / `binary` 交出去的是描述（分片数组 / 文件引用），
+  // 文件字节由执行层按 `path` 现读。
   const body =
     typeof built.init.body === 'string' && built.init.body.length > 0 ? built.init.body : null;
   const options: CallApiOptions = input.signal ? { signal: input.signal } : {};
@@ -289,7 +290,8 @@ export async function sendRequest(input: SendInput): Promise<ApiResponse> {
       url: built.url,
       headers,
       body,
-      bodyBase64: built.bodyBase64,
+      // 模式决定执行层怎么解释 `body`：`multipart` 现生成 boundary，`binary` 按路径读文件。
+      bodyMode: input.body.mode,
       timeoutMs: input.settings.timeoutMs,
       followRedirects: input.settings.followRedirects,
       maxResponseSizeKb: input.settings.maxResponseSizeKb,
@@ -434,8 +436,8 @@ export async function sendPreparedRequest(input: SendPreparedInput): Promise<Sen
       // `outbound.headers` 已是 `[name, value][]`，原样传
       headers: outbound.headers,
       body: outbound.body,
-      // 二进制请求体（`binary` 模式，或带文件分片的 multipart）走这一条通道。
-      bodyBase64: outbound.bodyBase64,
+      // 模式决定执行层怎么解释 `body`：`multipart` 现生成 boundary，`binary` 按路径读文件。
+      bodyMode: outbound.bodyMode,
       timeoutMs: input.settings.timeoutMs,
       followRedirects: input.settings.followRedirects,
       maxResponseSizeKb: input.settings.maxResponseSizeKb,
@@ -453,7 +455,7 @@ export async function sendPreparedRequest(input: SendPreparedInput): Promise<Sen
     // 响应里的 `url` 报**注入前**的那份：它会随响应落进历史表，而 query 档的 token 就写在这个 URL 里。
     request.url,
     options,
-    // 只有带文件分片的 multipart 才有可映射的行，但通道本身与模式无关：后端有体就报进度。
+    // 传输进度与模式无关：后端有体就报进度（分母是装配后的精确长度）。
     input.onProgress,
   );
   return { response, script, outbound };

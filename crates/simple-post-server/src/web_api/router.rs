@@ -56,10 +56,14 @@ fn body_limit() -> axum::extract::DefaultBodyLimit {
     axum::extract::DefaultBodyLimit::max(crate::interchange_api::TRANSFER_BODY_LIMIT_BYTES)
 }
 
-/// `POST /api/http/send-progress` 的请求体上限。
+/// `POST /api/http/send-progress` 的外层 JSON 上限。
 ///
 /// 带文件分片的 form-data 把字节以 base64 放在 JSON 里（比原字节大三分之一），2 MB 的默认
-/// 上限会把几十 KB 的文件也拦在门外。128 MB 与桌面侧一次发送的合理体积同一量级。
+/// 上限会把几十 KB 的文件也拦在门外。
+///
+/// 这条只管信封：真正的语义线是 `simple_post_core::http_executor::MAX_REQUEST_BODY_BYTES`
+/// （解码后 64 MiB），桌面与 REST 都经过它。128 MiB 的信封留足了 64 MiB body 的 base64
+/// 膨胀与其余字段的余量，故两侧拒绝的是同一件事，而不是各自一个数。
 const SEND_PROGRESS_BODY_LIMIT_BYTES: usize = 128 * 1024 * 1024;
 
 /// 组装 axum router。`spa_dir` 是 `dist/` 的**绝对**路径，由调用方解析一次传入。

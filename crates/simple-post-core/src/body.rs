@@ -9,11 +9,11 @@
 //! | `none` | 空 | 没有 body |
 //! | `json` / `xml` / `raw` | 原文 | 文本 |
 //! | `form` | 行数组的 JSON 文本 | 文本（urlencoded） |
-//! | `multipart` | 分片数组的 JSON 文本 | 字节 |
-//! | `binary` | 文件描述的 JSON 文本 | 字节（文件本身） |
+//! | `multipart` | 分片数组的 JSON 文本 | 分片 JSON（执行层按路径读文件装配） |
+//! | `binary` | 文件描述的 JSON 文本 | 文件描述（执行层按路径读盘） |
 //!
 //! `form` 与 `multipart` 是**结构化**的：它们的 `content` 是一段 JSON 文本，描述的是一行一行 /
-//! 一个一个分片，而不是拼好的正文。故界面上的表格有地方放说明，文件分片有地方放字节。
+//! 一个一个分片，而不是拼好的正文。故界面上的表格有地方放说明，文件分片有地方放引用。
 //!
 //! ## 模板化按字段做，不按整段做
 //!
@@ -21,10 +21,11 @@
 //! 形态上是错的：替换出来的值里带一个引号就会把那段 JSON 文本弄坏，于是整份内容解析不出来，
 //! 请求发出去的是一个空 body。
 //!
-//! ## 产物的两种形态
+//! ## 产物只是文本
 //!
-//! 产物是**文本**还是**二进制**，由字节决定：字节是合法 UTF-8 就走文本形态，否则走 base64 形态。
-//! `binary` 模式一律走二进制形态——用户选的是文件，发的是它的字节。
+//! 解析不碰文件：文件分片记路径、`binary` 记一份文件描述，字节由执行层
+//! （[`crate::multipart`]）在发请求时按路径现读。故大文件不会进解析结果、不进历史快照、
+//! 也不进线上 JSON。
 //!
 //! 渲染进程侧有同一套规则（`src/lib/body/`），两边由 `fixtures/body-parity.json` 钉住。
 
@@ -40,14 +41,12 @@ use crate::url::percent_encode;
 
 /// 解析后的请求体。
 ///
-/// 文本形态与二进制形态**互斥**：有文本形态就没有二进制形态，反之亦然。两者都缺席 = 没有
-/// 请求体。
+/// 只有文本形态：文件字节不在解析结果里，执行层按 `path` 现读（见
+/// [`crate::multipart`]）。`None` = 没有请求体。
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ResolvedBody {
-    /// 文本形态。
+    /// 文本形态。`binary` 模式是那份文件描述（JSON），执行层据它读盘。
     pub text: Option<String>,
-    /// 二进制形态（base64）。
-    pub base64: Option<String>,
     /// 没解析出来的变量名（去重，按首次出现排序）。
     pub missing: Vec<String>,
 }
@@ -78,7 +77,6 @@ pub fn resolve_body(body: &RequestBody, vars: &HashMap<String, String>) -> Resol
             let r = resolve_template(&body.content, vars);
             ResolvedBody {
                 text: Some(r.resolved),
-                base64: None,
                 missing: r.missing,
             }
         }
@@ -114,7 +112,6 @@ fn resolve_form_body(content: &str, vars: &HashMap<String, String>) -> ResolvedB
 
     ResolvedBody {
         text: Some(pairs.join("&")),
-        base64: None,
         missing: dedup(missing),
     }
 }
@@ -128,9 +125,10 @@ fn resolve_multipart_body(content: &str, vars: &HashMap<String, String>) -> Reso
     let mut missing: Vec<String> = Vec::new();
 
     for part in parts.iter_mut() {
-        // 文件分片的字节不模板化：base64 里没有 `{{`，模板化它只会平白多扫一遍。
+        // 文件分片只有路径与文件名：路径不是用户填的模板，模板化它只会平白多扫一遍，
+        // 还会让一个含 `{{` 的目录名被当成变量。
         // 分片名也不模板化——它与文件名一起描述「哪个文件」，不是用户填的值。
-        if part.base64.is_some() {
+        if part.path.is_some() {
             continue;
         }
         let name = resolve_template(&part.name, vars);
@@ -143,20 +141,18 @@ fn resolve_multipart_body(content: &str, vars: &HashMap<String, String>) -> Reso
 
     ResolvedBody {
         text: Some(serde_json::to_string(&parts).unwrap_or_default()),
-        base64: None,
         missing: dedup(missing),
     }
 }
 
-/// `binary` 模式：文件描述里的字节原样带出去。
+/// `binary` 模式：文件描述原样带出去，执行层据 `path` 读盘。
 ///
 /// 文件描述读不出来（内容不是那份 JSON）时没有 body：发一个空 body 好过发一段被改写
 /// 过的文本。
 fn resolve_binary_body(content: &str) -> ResolvedBody {
     match parse_body_file(content) {
-        Some(file) => ResolvedBody {
-            text: None,
-            base64: Some(file.base64),
+        Some(_) => ResolvedBody {
+            text: Some(content.to_string()),
             missing: Vec::new(),
         },
         None => ResolvedBody::empty(),

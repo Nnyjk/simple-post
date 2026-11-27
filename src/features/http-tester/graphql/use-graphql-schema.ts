@@ -99,7 +99,7 @@ export function useGraphQlSchema({
         method: 'POST',
         headers: withJsonContentType(request.headers),
         body: payload,
-        bodyBase64: null,
+        bodyMode: 'json',
       },
       auth,
       settings,

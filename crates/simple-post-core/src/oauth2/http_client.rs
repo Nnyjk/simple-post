@@ -21,7 +21,7 @@ use std::pin::Pin;
 
 use oauth2::{AsyncHttpClient, HttpRequest, HttpResponse};
 
-use crate::domain::TlsSettings;
+use crate::domain::{BodyMode, TlsSettings};
 use crate::error::AppError;
 use crate::http_executor::{self, HttpRequestInput};
 
@@ -65,7 +65,8 @@ async fn exchange(request: HttpRequest, tls: TlsSettings) -> Result<HttpResponse
             })
             .collect(),
         body: Some(body),
-        body_base64: None,
+        // token 端点收的就是 urlencoded 正文，`form` 模式下执行层原样发它。
+        body_mode: BodyMode::Form,
         timeout_ms: TOKEN_TIMEOUT_MS,
         // 这次请求带着 `client_secret` / 用户密码 / 授权码，跟随重定向等于把它们再寄给
         // 一个未校验的目标——`OutboundPolicy` 只挡私有网段，挡不住 302 到另一个公网主机。

@@ -2,6 +2,8 @@
 
 use super::*;
 
+use crate::domain::BodyMode;
+
 fn collection(id: &str, name: &str, pre: Option<&str>, test: Option<&str>) -> ScriptUnit {
     ScriptUnit {
         source: ScriptSource::Collection {
@@ -41,7 +43,7 @@ fn request() -> ScriptRequest {
         method: "GET".to_string(),
         url: "http://example.test/".to_string(),
         headers: vec![],
-        body_base64: None,
+        body_mode: BodyMode::None,
         body: None,
     }
 }

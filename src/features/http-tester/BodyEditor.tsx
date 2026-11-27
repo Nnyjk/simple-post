@@ -82,22 +82,28 @@ export function BodyEditor({
   endpointId,
   uploadProgress,
 }: Props) {
+  // 只有 JSON 模式有「树 / Raw」两副面孔。别的模式（尤其是带文件的 multipart）里 `content`
+  // 是另一套结构的 JSON 文本，体积可达几十 MB，为它解一次树只为决定一个用不上的视图不值。
   const [bodyView, setBodyView] = useState<BodyViewMode>(() =>
-    parseJsonTree(value.content).ok ? 'tree' : 'raw',
+    value.mode === 'json' && parseJsonTree(value.content).ok ? 'tree' : 'raw',
   );
   // 用户是否自己选过视图。选过之后视图不再由内容的解析状态决定，否则用户刚在 Raw 里
   // 把 JSON 改到合法就被拽去树视图，编辑器会从眼皮底下消失。
   const userPickedBodyView = useRef(false);
 
   // 内容改动后重新决定视图：解析不出来时只有 Raw 能改，视图落回 Raw。
+  //
+  // 判据只在 JSON 模式跑：`content` 在别的模式里不是这段视图的输入（multipart 的 content 是
+  // 几十 MB 的分片表，解析树只是又一次全量扫描）。
   useEffect(() => {
+    if (value.mode !== 'json') return;
     if (!parseJsonTree(value.content).ok) {
       setBodyView('raw');
       return;
     }
     if (userPickedBodyView.current) return;
     setBodyView('tree');
-  }, [value.content]);
+  }, [value.content, value.mode]);
 
   return (
     <div className="flex h-full min-h-0 max-h-[70vh] gap-4 px-4 py-3">

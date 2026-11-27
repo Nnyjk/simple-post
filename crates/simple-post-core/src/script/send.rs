@@ -271,7 +271,7 @@ fn to_http_input(
         url: request.url.clone(),
         headers: request.headers.clone(),
         body: request.body.clone(),
-        body_base64: request.body_base64.clone(),
+        body_mode: request.body_mode,
         timeout_ms: settings.timeout_ms,
         follow_redirects: settings.follow_redirects,
         max_response_size_kb: settings.max_response_size_kb,

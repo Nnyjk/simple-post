@@ -403,7 +403,6 @@ fn request_json(request: &ScriptRequest) -> Json {
         "url": request.url,
         "headers": headers_map(&request.headers),
         "body": request.body,
-        "bodyBase64": request.body_base64,
     })
 }
 
@@ -467,8 +466,9 @@ fn merge_request(before: &ScriptRequest, after: Option<Json>) -> ScriptRequest {
             Some(Json::Null) => None,
             _ => before.body.clone(),
         },
-        // 二进制形态原样保留：脚本改的是文本形态的 body，二进制请求体不是脚本该动的东西。
-        body_base64: before.body_base64.clone(),
+        // 模式原样保留：脚本改的是文本形态的 body，`multipart` / `binary` 的文件引用
+        // 不是脚本该动的东西。
+        body_mode: before.body_mode,
     }
 }
 

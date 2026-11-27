@@ -5,7 +5,6 @@ import type {
   ScriptOutcome,
   StoredRequestSnapshot,
 } from '@/types/domain';
-import type { MultipartPartByteRange } from '@/lib/multipart';
 import { uid } from '@/lib/utils';
 import { COMMANDS, invokeCmd } from '@/lib/tauri-commands';
 import type { AppState } from '../app-store';
@@ -83,12 +82,8 @@ export interface TabUploadProgress {
   totalBytes: number;
   /** 服务器自报已接收的字节数；它不回传标准化进度时为 `null`。 */
   serverReceivedBytes: number | null;
+  /** 服务器自报的总字节数；它不回传标准化进度时为 `null`。 */
   serverTotalBytes: number | null;
-  /**
-   * 每个分片在装配后请求体里的字节区间，来自那一次发送的 `PreparedRequest`。界面按它把整体
-   * 字节数折算到具体的文件行。
-   */
-  partRanges: MultipartPartByteRange[];
 }
 
 /**

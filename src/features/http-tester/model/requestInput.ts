@@ -50,9 +50,8 @@ export function toRequestSnapshot(
     method: request.method,
     url: request.url,
     headers: headers.map(([name, value]) => [name, value] as [string, string]),
+    // 文件类请求体（`binary` / 带文件分片的 `multipart`）存的就是那份描述：文件只记路径，
+    // 字节在发请求时按路径现读，故历史里留得下、也读得回去的都是文本。
     body: request.body,
-    // 二进制请求体的字节（`binary` 模式，或带文件分片的 multipart）走这一条通道：
-    // 没有它，历史行里的请求侧栏会显示成一个没有 body 的请求，而那次调用明明带着文件。
-    bodyBase64: request.bodyBase64,
   };
 }

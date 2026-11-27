@@ -117,7 +117,6 @@ fn request(url: &str) -> StoredRequestSnapshot {
         url: url.into(),
         headers: vec![("content-type".into(), "application/json".into())],
         body: Some("{\"a\":1}".into()),
-        body_base64: None,
     }
 }
 

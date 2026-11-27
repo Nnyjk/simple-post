@@ -1,5 +1,6 @@
 import type {
   AuthConfig,
+  BodyMode,
   Environment,
   GraphQlRequest,
   HttpMethod,
@@ -8,7 +9,6 @@ import type {
   RequestProtocol,
   RewriteRule,
 } from '@/types/domain';
-import type { MultipartPartByteRange } from '../multipart';
 import type { RequestProblem } from '../request-validation';
 
 /**
@@ -47,8 +47,6 @@ export interface BuiltFetch {
   init: Omit<RequestInit, 'headers'> & { headers: Record<string, string> };
   /** body 的字符串回显（form 模式已 URL/form 安全）。`sendRequest` 目前不用它。 */
   bodyForLog: string;
-  /** 请求体的**字节**（base64）。与 `init.body` 是同一份东西的两种形态：后端收的是 JSON，故字节走 base64 这个字段。 */
-  bodyBase64: string | null;
 }
 
 /**
@@ -124,19 +122,16 @@ export interface PreparedRequest {
    * 判空跑在**用户写的原文**上、模板化之前，与 Rust 的 `resolve_endpoint` 同序；故内容只有
    * 一个变量且解析为 `""` 的 body 照样发空串而不被丢掉。
    *
-   * `multipart` 下这里已是**装配好的** body（`content` 里的分片数组变成了带 boundary 的
-   * multipart 文本），与 `headers` 里那条 Content-Type 同源。
+   * 语义随 {@link PreparedRequest.bodyMode} 变：`json` / `xml` / `raw` 是原文，`form` 是
+   * urlencoded 正文，`multipart` 是分片数组的 JSON 文本，`binary` 是文件描述的 JSON 文本。
+   * 后两种的字节由执行层按 `path` 现读——渲染进程不装配、不编码文件。
    */
   body: string | null;
   /**
-   * 请求体的**字节**（base64）。与 `body` 互斥：字节是合法 UTF-8 时走 `body`，否则走这里。
-   * `binary` 模式一律走这里——用户选的是文件，发的是它的字节。multipart 里带了文件分片时也是
-   * 这里。
-   *
-   * 两个字段而不是一个「文本或字节」的联合类型：传输层收的是 JSON，两种形态各有自己的字段名
-   * 才不会互相覆盖；Rust 侧的 `HttpRequestInput` 与 `ScriptRequest` 用的是同一对字段名。
+   * 请求体的模式。执行层据它决定是否装配 multipart、是否按路径读文件，也据它补
+   * Content-Type（`multipart` 的那条带 boundary，只有执行层生成得出）。
    */
-  bodyBase64: string | null;
+  bodyMode: BodyMode;
   /**
    * URL / 参数值 / header / body / auth 里全部未解析的 `{{name}}`，去重且按首次出现排序。
    * 集合与 Rust `resolve_endpoint` 的 `missing_vars` 对齐；*顺序*是渲染器本地的，只有本应用的
@@ -153,13 +148,6 @@ export interface PreparedRequest {
    * 它不进 cURL 预览，也不进落库的请求快照。
    */
   vars: Record<string, string>;
-  /**
-   * `multipart` 模式下每个分片在请求体里的字节区间。**只有带上文件分片时才非空**：
-   * 上传进度按它折算到具体那一行，其它模式没有可映射的行。
-   *
-   * 区间与 `body` / `bodyBase64` 是同一趟装配的产物，故分母与真正发出去的字节数一致。
-   */
-  multipartPartRanges?: MultipartPartByteRange[];
   /**
    * URL 路径里没取到值的占位符名（`/users/{id}` 的 `id`）。
    *

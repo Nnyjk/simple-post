@@ -19,7 +19,7 @@ pub struct KeyValue {
 
 // body
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum BodyMode {
     #[default]
@@ -32,9 +32,9 @@ pub enum BodyMode {
     Form,
     /// `multipart/form-data`。线上是 `multipart`。
     ///
-    /// Content-Type 必须带 boundary，而 boundary 每次请求现生成，故 Content-Type 不是静态返回值。
-    /// 分片结构存在 [`RequestBody::content`] 里（JSON 数组），装配逻辑见前端 `src/lib/multipart.ts`
-    /// 与 MCP 服务端 `mcp/http_ops/multipart.rs`。
+    /// Content-Type 必须带 boundary，而 boundary 每次请求现生成，故 Content-Type 不是静态返回值：
+    /// 装配由执行层 `crate::multipart` 在发请求时做，它同时改写请求头里那条 Content-Type。
+    /// 分片结构存在 [`RequestBody::content`] 里（JSON 数组）。
     Multipart,
     /// `application/xml`。内容是 XML 原文。
     Xml,
@@ -42,9 +42,8 @@ pub enum BodyMode {
     Raw,
     /// `application/octet-stream`。整个请求体是一个文件。
     ///
-    /// 内容是 [`RequestBody::content`] 里那份文件描述（JSON 对象文本），带着文件名、字节数与
-    /// base64 的字节。库里不存路径——路径由**运行请求的那台机器**解析，桌面端与服务端容器
-    /// 不共用文件系统。
+    /// 内容是 [`RequestBody::content`] 里那份文件描述（JSON 对象文本），指向**运行请求的那台机器**
+    /// 上的一个路径。执行层按路径现读文件并流式发出，库里从不存文件字节。
     Binary,
 }
 
@@ -82,8 +81,7 @@ fn enabled_by_default() -> bool {
 
 /// `multipart` 模式里的一个分片，与 [`crate::domain::RequestBody::content`] 里那份 JSON 数组一一对应。
 ///
-/// 文件分片的字节放在 [`MultipartPart::base64`] 里：分片数组存在 JSON 文本中，字节只能以
-/// base64 的形态进去。
+/// 文件分片只记**路径**：字节由执行层在发请求时按路径现读，库里从不携带文件内容。
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct MultipartPart {
@@ -98,15 +96,16 @@ pub struct MultipartPart {
     /// 与 `FormField::enabled` 同一条规则：停用的分片不进 body，但还留在表格里。
     #[serde(default = "enabled_by_default")]
     pub enabled: bool,
-    /// 文件分片的文件名。有它即文件分片。
+    /// 文件分片的文件名。有路径而没有它时取路径的文件名部分。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub filename: Option<String>,
     /// 分片自己的 Content-Type。文件分片缺省为 `application/octet-stream`。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content_type: Option<String>,
-    /// 文件分片的字节（base64）。有它时 [`MultipartPart::value`] 不参与发包。
+    /// 文件分片的字节所在的路径（运行请求那台机器上的绝对路径）。有它即文件分片，
+    /// [`MultipartPart::value`] 不参与发包。
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub base64: Option<String>,
+    pub path: Option<String>,
     /// 说明。界面上那一列写着什么，不上线。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -114,7 +113,8 @@ pub struct MultipartPart {
 
 /// `binary` 模式选中的那个文件。
 ///
-/// 存在 [`RequestBody::content`] 里，是一个 JSON 对象文本。`base64` 是文件的字节。
+/// 存在 [`RequestBody::content`] 里，是一个 JSON 对象文本。它是**文件引用**：执行层按
+/// [`BodyFile::path`] 现读字节，库里不存内容。
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct BodyFile {
@@ -126,9 +126,9 @@ pub struct BodyFile {
     /// 文件自己的 MIME 类型。缺省 `application/octet-stream`。
     #[serde(default)]
     pub content_type: String,
-    /// 文件的字节（base64）。
+    /// 文件的字节所在的路径（运行请求那台机器上的绝对路径）。
     #[serde(default)]
-    pub base64: String,
+    pub path: String,
 }
 
 impl RequestBody {

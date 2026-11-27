@@ -33,7 +33,7 @@ use serde::Serialize;
 use tokio::sync::oneshot;
 
 use crate::http_executor::{
-    base_client_builder, check_url, effective_request_headers, parse_method, request_body_bytes,
+    base_client_builder, check_url, effective_request_headers, outbound_body, parse_method,
     HttpRequestInput, OutboundPolicy, UrlVerdict,
 };
 
@@ -190,8 +190,9 @@ pub async fn run_with_cancel(
         }
     };
 
-    let body_bytes = match request_body_bytes(&input) {
-        Ok(b) => b,
+    let (outbound, multipart_ct) = match outbound_body(&input) {
+        Ok(Some((body, ct))) => (Some(body), ct),
+        Ok(None) => (None, None),
         Err(message) => {
             sink(StreamEvent::Error {
                 kind: "network".into(),
@@ -201,14 +202,33 @@ pub async fn run_with_cancel(
         }
     };
 
+    let mut headers = input.headers.clone();
+    if let Some(ct) = multipart_ct.as_deref() {
+        crate::multipart::set_content_type(&mut headers, ct);
+    }
+
     let mut request = client.request(parse_method(&input.method), &input.url);
-    for (k, v) in &input.headers {
+    for (k, v) in &headers {
         if !k.is_empty() {
             request = request.header(k, v);
         }
     }
-    if let Some(bytes) = &body_bytes {
-        request = request.body(bytes.clone());
+    let body_len = outbound.as_ref().map(|b| b.len());
+    if let Some(body) = outbound {
+        // 文件段边读边发：流式 body 没有 `size_hint`，长度要自己写；调用方写过同名头时
+        // 不再追加第二条。
+        if !headers
+            .iter()
+            .any(|(k, _)| k.eq_ignore_ascii_case("content-length"))
+        {
+            request = request.header(reqwest::header::CONTENT_LENGTH, body.len().to_string());
+        }
+        request = match body.as_inline() {
+            Some(bytes) => request.body(bytes.to_vec()),
+            None => request.body(reqwest::Body::wrap_stream(
+                body.chunks(crate::multipart::CHUNK_BYTES),
+            )),
+        };
     }
 
     let response = tokio::select! {
@@ -260,7 +280,7 @@ pub async fn run_with_cancel(
         status: status.as_u16(),
         status_text: status.canonical_reason().unwrap_or("").to_string(),
         headers: header_pairs,
-        request_headers: effective_request_headers(&input, body_bytes.as_ref().map(|b| b.len())),
+        request_headers: effective_request_headers(&input.url, &headers, body_len),
         content_type,
         url: response.url().to_string(),
     });

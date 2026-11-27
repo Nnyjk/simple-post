@@ -138,7 +138,6 @@ describe('传输进度也挂在标签上', () => {
     totalBytes: 1024,
     serverReceivedBytes: null,
     serverTotalBytes: null,
-    partRanges: [{ index: 1, start: 0, end: 1024 }],
   };
 
   it('每个标签各存各的，写一个不影响另一个', () => {

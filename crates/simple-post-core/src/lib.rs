@@ -13,6 +13,8 @@ pub mod http_executor;
 /// 本次运行期间的日志环形缓冲。tracing 层、panic hook 与前端上报都写它，「导出日志」
 /// 从这里读。
 pub mod logbuf;
+/// `multipart/form-data` 的装配：boundary、分片头与按路径现读的文件字节。
+pub mod multipart;
 pub mod oauth2;
 pub mod path_params;
 pub mod permissions;

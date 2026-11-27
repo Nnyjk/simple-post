@@ -4,7 +4,7 @@
  *
  * 这些类型是前后端唯一的契约：字段名、枚举值一旦改动，Rust 侧的事件序列化与这里必须同一提交。
  */
-import type { HttpMethod, TlsSettings } from '@/types/domain';
+import type { BodyMode, HttpMethod, TlsSettings } from '@/types/domain';
 
 /** 一条 header 的线上形状：后端与 `http_request` 一样用元组列表（保留重名与顺序）。 */
 export type HeaderTuples = Array<[string, string]>;
@@ -21,9 +21,12 @@ export interface HttpStreamArgs {
   method: HttpMethod;
   url: string;
   headers: HeaderTuples;
-  /** 文本 body；二进制走 `bodyBase64`。 */
+  /**
+   * 请求体文本。语义随 `bodyMode` 变：`multipart` 是分片数组的 JSON 文本，`binary` 是文件
+   * 描述的 JSON 文本（含 `path`），其余是原文。文件字节由执行层按路径现读。
+   */
   body: string | null;
-  bodyBase64: string | null;
+  bodyMode: BodyMode;
   timeoutMs: number;
   followRedirects: boolean;
   maxResponseSizeKb: number;

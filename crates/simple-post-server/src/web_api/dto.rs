@@ -22,10 +22,12 @@ pub struct HttpSendBody {
     pub url: String,
     #[serde(default)]
     pub headers: Vec<(String, String)>,
+    /// 请求体的文本形态。语义随 `body_mode` 变：`multipart` 是分片数组的 JSON 文本，
+    /// `binary` 是文件描述的 JSON 文本（含 `path`），其余是原文。
     pub body: Option<String>,
-    /// 请求体的二进制形态（base64）。有它时 `body` 缺席，线上发出去的是解码后的字节。
+    /// 请求体的模式。`multipart` / `binary` 的字节由执行层按 `path` 现读，故这里没有 base64 通道。
     #[serde(default)]
-    pub body_base64: Option<String>,
+    pub body_mode: simple_post_core::domain::BodyMode,
     pub timeout_ms: u64,
     pub follow_redirects: bool,
     pub max_response_size_kb: u64,

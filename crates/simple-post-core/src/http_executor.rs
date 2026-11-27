@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use base64::Engine as _;
 use serde::Serialize;
 
-use crate::domain::TlsSettings;
+use crate::domain::{BodyMode, TlsSettings};
 
 // 线类型——镜像 TS 侧的 `ApiResponse` / `HttpError`。
 
@@ -133,15 +133,14 @@ pub struct HttpRequestInput {
     pub method: String,
     pub url: String,
     pub headers: Vec<(String, String)>,
-    /// 请求体的**文本形态**。
+    /// 请求体的文本形态。
+    ///
+    /// 语义随 [`HttpRequestInput::body_mode`] 变：`json` / `xml` / `raw` 是原文，`form` 是
+    /// urlencoded 正文，`multipart` 是分片数组的 JSON 文本，`binary` 是文件描述的 JSON 文本。
+    /// 后两种的字节由执行层按 `path` 现读（见 [`crate::multipart`]），故大文件不进这里。
     pub body: Option<String>,
-    /// 请求体的**二进制形态**：原始字节的 base64。
-    ///
-    /// 有它时 `body` 缺席，线上发出去的是解码后的字节。multipart 带文件分片时整个请求体是字节，
-    /// 故走这条通道；纯文本的请求体仍走 `body`。
-    ///
-    /// 两者都有时以本字段为准——字节那份才是能被还原成文件的那份。
-    pub body_base64: Option<String>,
+    /// 请求体的模式。执行层用它决定是否装配 multipart、是否按路径读文件。
+    pub body_mode: BodyMode,
     pub timeout_ms: u64,
     pub follow_redirects: bool,
     pub max_response_size_kb: u64,
@@ -281,18 +280,61 @@ fn is_textual_content_type(content_type: &str) -> bool {
         )
 }
 
-/// 请求体的字节。
+/// 一次请求体的字节上限。管的是**文本形态**（`body` 那一段 JSON 或原文），文件字节按路径
+/// 现读、不受它约束。
 ///
-/// `body_base64` 优先于 `body`：两者都有时以字节那份为准——它才是能被还原成文件的那份。
-/// base64 解不开时返回一条说明问题的消息，而不是把空 body 发出去。
-pub(crate) fn request_body_bytes(input: &HttpRequestInput) -> Result<Option<Vec<u8>>, String> {
-    if let Some(b64) = &input.body_base64 {
-        return base64::engine::general_purpose::STANDARD
-            .decode(b64.as_bytes())
-            .map(Some)
-            .map_err(|e| format!("the request body is not valid base64: {e}"));
+/// 桌面与 `serve-web` 走的是同一段装配代码，但它们的**入口**各有各的上限：REST 限制的是
+/// 外层 JSON（128 MiB，见 `web_api::router`），Tauri 侧一条都没有。这里给请求体的文本定一条
+/// 与入口无关的线，两个传输层才说同一句话。
+pub const MAX_REQUEST_BODY_BYTES: usize = 64 * 1024 * 1024;
+
+/// 这一次要发出去的请求体。
+///
+/// `multipart` 由 [`crate::multipart::assemble`] 现生成 boundary 并按路径读文件；`binary` 按文件
+/// 描述里的 `path` 读盘；其余模式就是 `body` 的字节。文件读不出来时返回一条说明问题的消息，
+/// 而不是把空 body 发出去。
+///
+/// 超过 [`MAX_REQUEST_BODY_BYTES`] 时也在这里拒绝：文本形态的请求体两个传输层都背得动，
+/// 超过它就是用户在 json 里塞了不该塞的东西。
+pub(crate) fn outbound_body(
+    input: &HttpRequestInput,
+) -> Result<Option<(crate::multipart::OutboundBody, Option<String>)>, String> {
+    let Some(body) = input.body.as_ref() else {
+        return Ok(None);
+    };
+    check_body_size(body.len())?;
+
+    match input.body_mode {
+        BodyMode::Multipart => {
+            let parts = crate::body::parse_multipart_parts(body);
+            let assembled = crate::multipart::assemble(&parts)?;
+            Ok(Some((assembled.body, Some(assembled.content_type))))
+        }
+        BodyMode::Binary => match crate::body::parse_body_file(body) {
+            Some(file) => Ok(Some((
+                crate::multipart::OutboundBody::from_file(&file)?,
+                None,
+            ))),
+            // 文件描述读不出来：没有 body，与解析侧「读不出来就没有 body」同一条规则。
+            None => Ok(None),
+        },
+        // 空内容按「没有 body」处理：与 `resolve_body` 的判空同一条规则。
+        _ if body.is_empty() => Ok(None),
+        _ => Ok(Some((
+            crate::multipart::OutboundBody::inline(body.as_bytes().to_vec()),
+            None,
+        ))),
     }
-    Ok(input.body.as_ref().map(|s| s.as_bytes().to_vec()))
+}
+
+/// 字节数是否在上限之内。判据只此一处，故两个传输层不会各说各话。
+fn check_body_size(bytes: usize) -> Result<(), String> {
+    if bytes <= MAX_REQUEST_BODY_BYTES {
+        return Ok(());
+    }
+    Err(format!(
+        "the request body is {bytes} bytes, over the {MAX_REQUEST_BODY_BYTES} bytes limit"
+    ))
 }
 
 /// 上限之上多读 4 字节：保证起始于上限之前的 rune 完整，[`truncate_body`] 的字符边界
@@ -480,33 +522,40 @@ fn pick_u64(object: &serde_json::Map<String, serde_json::Value>, keys: &[&str]) 
 
 /// 把请求体切成 32 KiB 的块交给 `reqwest`，并沿途报告发送进度。
 ///
-/// 首帧在切第一块时发出，末帧在切最后一块时发出；中间帧受 [`PROGRESS_INTERVAL`] 节流。
+/// 首帧在发第一个块之前发出，末帧在最后一块发出；中间帧受 [`PROGRESS_INTERVAL`] 节流。
+/// 文件段是边读边发（见 [`crate::multipart::OutboundBody::chunks`]），故内存占用与文件大小无关。
 fn upload_stream(
-    bytes: Arc<Vec<u8>>,
+    body: crate::multipart::OutboundBody,
     sink: Arc<ProgressSink>,
     total: u64,
 ) -> impl futures_util::Stream<Item = Result<Vec<u8>, std::io::Error>> {
-    let mut offset = 0usize;
+    use futures_util::StreamExt;
+
+    let mut sent: u64 = 0;
     let mut last_emit: Option<Instant> = None;
-    futures_util::stream::poll_fn(move |_| {
-        if offset >= bytes.len() {
-            return std::task::Poll::Ready(None);
+    sink(HttpTransferProgress {
+        sent_bytes: 0,
+        total_bytes: total,
+        server_received_bytes: None,
+        server_total_bytes: None,
+    });
+
+    body.chunks(UPLOAD_CHUNK_BYTES).map(move |item| {
+        if let Ok(chunk) = &item {
+            sent += chunk.len() as u64;
+            let now = Instant::now();
+            let due = last_emit.is_none_or(|at| now.duration_since(at) >= PROGRESS_INTERVAL);
+            if due || sent >= total {
+                last_emit = Some(now);
+                sink(HttpTransferProgress {
+                    sent_bytes: sent,
+                    total_bytes: total,
+                    server_received_bytes: None,
+                    server_total_bytes: None,
+                });
+            }
         }
-        let end = (offset + UPLOAD_CHUNK_BYTES).min(bytes.len());
-        let chunk = bytes[offset..end].to_vec();
-        offset = end;
-        let now = Instant::now();
-        let due = last_emit.is_none_or(|at| now.duration_since(at) >= PROGRESS_INTERVAL);
-        if due || offset == bytes.len() {
-            last_emit = Some(now);
-            sink(HttpTransferProgress {
-                sent_bytes: offset as u64,
-                total_bytes: total,
-                server_received_bytes: None,
-                server_total_bytes: None,
-            });
-        }
-        std::task::Poll::Ready(Some(Ok(chunk)))
+        item
     })
 }
 
@@ -529,17 +578,17 @@ const TRANSPORT_ACCEPT_ENCODING: &str = "gzip,deflate,br";
 
 /// 这一次真正发出去的请求头。
 ///
-/// 调用方交下来的那些按原样保留（名字转小写），传输层补的几条追加在后面。调用方自己写过的同名头
-/// 不补第二条：线路上发出去的是调用方那一份。
+/// 收的是**执行层最后用到的那份**（含 multipart 装配时改写的 Content-Type），按原样保留名字的
+/// 小写形式，传输层补的几条追加在后面。调用方自己写过的同名头不补第二条：线路上发出去的是
+/// 调用方那一份。
 ///
-/// `body_len` 是**请求体的字节数**。它不能从 `input.body` 的字符串长度取：请求体也可能是
-/// base64 形态的二进制，那时字符串长度是字节数的四分之三，而线路上写的是字节数。
+/// `body_len` 是**请求体的字节数**，由装配算出（文件按路径现读，字符串长度不是字节数）。
 pub(crate) fn effective_request_headers(
-    input: &HttpRequestInput,
-    body_len: Option<usize>,
+    url: &str,
+    headers: &[(String, String)],
+    body_len: Option<u64>,
 ) -> Vec<[String; 2]> {
-    let mut out: Vec<[String; 2]> = input
-        .headers
+    let mut out: Vec<[String; 2]> = headers
         .iter()
         .filter(|(k, _)| !k.is_empty())
         .map(|(k, v)| [k.to_ascii_lowercase(), v.clone()])
@@ -560,7 +609,7 @@ pub(crate) fn effective_request_headers(
         ]);
     }
 
-    if let Ok(url) = reqwest::Url::parse(&input.url) {
+    if let Ok(url) = reqwest::Url::parse(url) {
         if !has("host") {
             let host = url.host_str().unwrap_or_default().to_string();
             // `Url::port()` 在端口是该 scheme 的默认端口时给 `None`，正好对应
@@ -798,47 +847,60 @@ pub async fn execute_with_policy_and_progress(
         Err(e) => return HttpResult::err("network", e),
     };
 
+    // 请求体的字节在**建客户端之前**解出来：`content-length` 要的是字节数，而 multipart 的
+    // boundary 也要在请求头确定之前生成。读不出文件时报错而不是发一个空 body——那会让服务端
+    // 收到一个内容被静默丢掉的请求。
+    let (outbound, multipart_ct) = match outbound_body(input) {
+        Ok(Some((body, ct))) => (Some(body), ct),
+        Ok(None) => (None, None),
+        Err(msg) => return HttpResult::err("network", msg),
+    };
+
+    let mut headers = input.headers.clone();
+    // multipart 的 Content-Type 带 boundary，而 boundary 是装配的产物：它必须在这一步改写，
+    // 用户自己写过的那条则就地换值。
+    if let Some(ct) = multipart_ct.as_deref() {
+        crate::multipart::set_content_type(&mut headers, ct);
+    }
+    let caller_set_length = headers
+        .iter()
+        .any(|(k, _)| k.eq_ignore_ascii_case("content-length"));
+
     let mut req = client.request(parse_method(&input.method), &input.url);
-    for (k, v) in &input.headers {
+    for (k, v) in &headers {
         if !k.is_empty() {
             req = req.header(k, v);
         }
     }
 
-    // 请求体的字节在**建客户端之前**解出来：`content-length` 要的是字节数，而 base64
-    // 形态的字符串长度不是字节数。解不开时报错而不是发一个空 body——那会让服务端收到
-    // 一个内容被静默丢掉的请求。
-    let body_bytes = match request_body_bytes(input) {
-        Ok(b) => b,
-        Err(msg) => return HttpResult::err("network", msg),
-    };
-    let body_len = body_bytes.as_ref().map(|b| b.len());
-    let body_total = body_len.unwrap_or(0) as u64;
+    let body_len = outbound.as_ref().map(|b| b.len());
+    let body_total = body_len.unwrap_or(0);
 
-    match (body_bytes, progress.as_ref()) {
-        (Some(bytes), Some(sink)) if !bytes.is_empty() => {
+    match (outbound, progress.as_ref()) {
+        (Some(body), Some(sink)) if !body.is_empty() => {
             // 流式 body 没有 `size_hint`，`reqwest` 不会自己补 `content-length`；调用方自己
             // 写过同名头时不再追加第二条（与 `effective_request_headers` 同一条规则）。
-            let caller_set_length = input
-                .headers
-                .iter()
-                .any(|(k, _)| k.eq_ignore_ascii_case("content-length"));
             if !caller_set_length {
                 req = req.header(reqwest::header::CONTENT_LENGTH, body_total.to_string());
             }
-            sink(HttpTransferProgress {
-                sent_bytes: 0,
-                total_bytes: body_total,
-                server_received_bytes: None,
-                server_total_bytes: None,
-            });
             req = req.body(reqwest::Body::wrap_stream(upload_stream(
-                Arc::new(bytes),
+                body,
                 sink.clone(),
                 body_total,
             )));
         }
-        (Some(bytes), _) => req = req.body(bytes),
+        // 没有进度要报时，整段在内存里的请求体一次性交出：`reqwest` 自己会补长度。
+        (Some(body), _) => match body.as_inline() {
+            Some(bytes) => req = req.body(bytes.to_vec()),
+            None => {
+                if !caller_set_length {
+                    req = req.header(reqwest::header::CONTENT_LENGTH, body_total.to_string());
+                }
+                req = req.body(reqwest::Body::wrap_stream(
+                    body.chunks(crate::multipart::CHUNK_BYTES),
+                ));
+            }
+        },
         (None, _) => {}
     }
 
@@ -895,7 +957,7 @@ pub async fn execute_with_policy_and_progress(
         duration_ms: elapsed,
         size_bytes: payload.bytes,
         headers: header_pairs,
-        request_headers: effective_request_headers(input, body_len),
+        request_headers: effective_request_headers(&input.url, &headers, body_len),
         body: payload.text,
         body_base64: payload.base64,
         content_type,

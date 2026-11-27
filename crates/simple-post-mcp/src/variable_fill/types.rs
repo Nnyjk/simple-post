@@ -77,17 +77,15 @@ pub struct ResolvedEndpoint {
     pub headers: Vec<(String, String)>,
     pub params: Vec<(String, String)>,
     pub body: Option<String>,
-    /// 请求体的**二进制形态**（base64）。
-    ///
-    /// 有它时 `body` 缺席，线上发出去的是解码后的字节。`binary` 模式与带文件分片的
-    /// `multipart` 走这条通道。
-    pub body_base64: Option<String>,
     /// **套用过 `overrides` 之后**的请求体模式，不是端点行里存的那个。
     ///
-    /// multipart 的装配要靠它：`auto_content_type` 对 `Multipart` 返回 `None`
-    /// （boundary 只能现生成），由发送方在 execute 之前补上。而调用方给 `overrides.body`
-    /// 就能换掉 mode，所以发送方若回头读库里的 `endpoint.body.mode`，同一个请求里
-    /// Content-Type 依据的 mode 与装配依据的 mode 就可能不是同一个。
+    /// 语义随它变：`multipart` 是分片数组的 JSON 文本，`binary` 是文件描述的 JSON 文本，
+    /// 其余是原文。字节由执行层按 `path` 现读，故这里没有 base64 通道。
+    ///
+    /// Content-Type 也读它：`auto_content_type` 对 `Multipart` 返回 `None`（boundary 只能
+    /// 现生成），由执行层补上。而调用方给 `overrides.body` 就能换掉 mode，所以发送方若回头
+    /// 读库里的 `endpoint.body.mode`，同一个请求里 Content-Type 依据的 mode 与装配依据的
+    /// mode 就可能不是同一个。
     pub body_mode: BodyMode,
     pub auth: AuthConfig,
     /// 这次解析用的变量池（环境变量 + 动态变量的值）。

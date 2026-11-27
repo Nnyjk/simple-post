@@ -20,11 +20,13 @@
 //!     project.rs       ← 临时请求的项目行
 //!     input.rs         ← 入参压平与解析
 //!     envelope.rs      ← 结果信封
-//!     multipart.rs     ← multipart 装配
 //! ```
 //!
+//! multipart 的装配不在这里：分隔轴是「谁碰字节」，而本 crate 一次字节都不碰。分片结构
+//! 随 `body` 与 `body_mode` 一起交给 `http_executor`，由 `simple-post-core::multipart`
+//! 在发请求时现生成 boundary 并按路径读文件。
+//!
 //! 对应测试：包含 `http_ops_test.rs`、`dynamic_test.rs`、`oauth2_test.rs`，
-//! 以及 multipart 相关的 `multipart_mode_test.rs`、`multipart_parity_test.rs`、`multipart_wire_test.rs`，
 //! 执行验证相关的 `run_request_test.rs`、`overrides_test.rs`、`env_fallback_test.rs`，
 //! 和扩展测试 `script_test.rs`、`tls_test.rs`、`batch_test.rs`、`history_record_test.rs`。
 
@@ -38,8 +40,6 @@ mod project;
 mod run_request;
 mod send;
 mod table;
-// `crate::dynamic::source` 取数时也要用 multipart 装配，故这个模块是 crate 可见。
-pub(crate) mod multipart;
 
 // `input.rs` 与本目录下的单元断言都要用 `RunRequestArgs`，故名字提到本模块。
 use args::RunRequestArgs;
@@ -72,10 +72,6 @@ use call_endpoint::tool_api_call_endpoint;
 #[cfg(test)]
 use run_request::tool_api_run_request;
 
-// `multipart_wire_test.rs` 同样按 `super::apply` 取 multipart 装配。
-#[cfg(test)]
-use multipart::apply;
-
 // =========================================================================
 // 测试
 // =========================================================================
@@ -94,21 +90,6 @@ mod dynamic_tests;
 #[cfg(test)]
 #[path = "oauth2_test.rs"]
 mod oauth2_tests;
-
-#[cfg(test)]
-#[path = "multipart_mode_test.rs"]
-mod multipart_mode_tests;
-
-#[cfg(test)]
-#[path = "multipart_parity_test.rs"]
-mod multipart_parity_tests;
-
-// 真实抓包：起一个 TCP 监听器，用产品自己的 `http_executor` 发一次 multipart，
-// 把服务端收到的原始字节读回来解析。同目录其它用例断言的是「我们拼出的字符串长
-// 什么样」，这一组断言「socket 上真的过去的是这个」。
-#[cfg(test)]
-#[path = "multipart_wire_test.rs"]
-mod multipart_wire_tests;
 
 #[cfg(test)]
 #[path = "run_request_test.rs"]

@@ -15,14 +15,15 @@
  *
  * `form` 与 `multipart` 是**结构化**的：它们的 `content` 是一段 JSON 文本，描述的是一行一行
  * / 一个一个分片，而不是拼好的正文。结构化带来两样东西：界面上的表格有地方放说明，文件分片
- * 有地方放字节。
+ * 有地方放路径。
  *
  * **模板化按字段做，不按整段做。** `json` / `xml` / `raw` 整段替换；`form` 与 `multipart`
  * **逐个字段**替换。整段替换在结构化形态上是错的：替换出来的值里带一个引号就会把那段 JSON
  * 文本弄坏，于是整份内容解析不出来，请求发出去的是一个空 body。
  *
- * **产物的两种形态。** 产物是**文本**还是**二进制**，由字节决定：字节是合法 UTF-8 就走文本
- * 形态，否则走 base64 形态。`binary` 模式一律走二进制形态——用户选的是文件，发的是它的字节。
+ * **产物只是文本。** 解析不碰文件：文件分片记路径、`binary` 记一份文件描述，字节由执行层
+ * （`simple-post-core::multipart`）在发请求时按路径现读。故大文件不进解析结果、不进历史快照、
+ * 也不进线上 JSON。
  *
  * **百分号编码前先归一。** 渲染进程把落单的代理项换成 U+FFFD 再编码
  * （`src/lib/well-formed.ts`），故编码这一步不抛异常；Rust 侧收不到这种值——serde_json
@@ -35,17 +36,18 @@ import { wellFormed } from '../well-formed';
 
 /** 解析后的请求体。 */
 export interface ResolvedBody {
-  /** 文本形态。 */
+  /**
+   * 文本形态。`binary` 模式是那份文件描述（JSON），执行层据它读盘；`multipart` 是分片数组
+   * 的 JSON 文本。文件字节不在解析结果里——它们由执行层按 `path` 现读。
+   */
   text: string | null;
-  /** 二进制形态（base64）。 */
-  base64: string | null;
   /** 没解析出来的变量名（去重，按首次出现排序）。 */
   missing: string[];
 }
 
 /** 没有请求体。 */
 function emptyBody(): ResolvedBody {
-  return { text: null, base64: null, missing: [] };
+  return { text: null, missing: [] };
 }
 
 // -------------------------------------------------------------------------
@@ -66,7 +68,7 @@ export function resolveBody(body: RequestBody, vars: Record<string, string>): Re
     case 'xml':
     case 'raw': {
       const r = resolveVarsWithMissing(body.content, vars);
-      return { text: r.value, base64: null, missing: r.missing };
+      return { text: r.value, missing: r.missing };
     }
     case 'form':
       return resolveFormBody(body.content, vars);
@@ -96,38 +98,38 @@ function resolveFormBody(content: string, vars: Record<string, string>): Resolve
     pairs.push(`${percentEncode(key.value)}=${percentEncode(value.value)}`);
   }
 
-  return { text: pairs.join('&'), base64: null, missing: dedup(missing) };
+  return { text: pairs.join('&'), missing: dedup(missing) };
 }
 
 /**
  * `multipart` 模式：逐个分片模板化，然后重新序列化成分片数组。装配（boundary、分片头、字节）
- * 在发送侧做：boundary 每次现生成，装配与 Content-Type 必须用同一个值。
+ * 在执行层做：boundary 每次现生成，装配与 Content-Type 必须用同一个值，而文件字节按路径现读。
  */
 function resolveMultipartBody(content: string, vars: Record<string, string>): ResolvedBody {
   const parts = parseMultipartParts(content);
   const missing: string[] = [];
 
   const resolved = parts.map((part) => {
-    // 文件分片的字节不模板化：base64 里没有 `{{`，模板化它只会平白多扫一遍。分片名也不模板化
-    // ——它与文件名一起描述「哪个文件」，不是用户填的值。
-    if (part.base64 !== undefined) return part;
+    // 文件分片只有路径与文件名：路径不是用户填的模板，模板化它会把目录名里的 `{{` 当成变量。
+    // 分片名也不模板化——它与文件名一起描述「哪个文件」，不是用户填的值。
+    if (part.path !== undefined) return part;
     const name = resolveVarsWithMissing(part.name, vars);
     const value = resolveVarsWithMissing(part.value, vars);
     missing.push(...name.missing, ...value.missing);
     return { ...part, name: name.value, value: value.value };
   });
 
-  return { text: JSON.stringify(resolved), base64: null, missing: dedup(missing) };
+  return { text: JSON.stringify(resolved), missing: dedup(missing) };
 }
 
 /**
- * `binary` 模式：文件描述里的字节原样带出去。文件描述读不出来（内容不是那份 JSON）时没有
- * body：发一个空 body 好过发一段被改写过的文本。
+ * `binary` 模式：文件描述原样带出去，执行层据 `path` 读盘。文件描述读不出来（内容不是那份
+ * JSON）时没有 body：发一个空 body 好过发一段被改写过的文本。
  */
 function resolveBinaryBody(content: string): ResolvedBody {
   const file = parseBodyFile(content);
   if (!file) return emptyBody();
-  return { text: null, base64: file.base64, missing: [] };
+  return { text: JSON.stringify(file), missing: [] };
 }
 
 // -------------------------------------------------------------------------
@@ -243,9 +245,9 @@ export function parseMultipartParts(content: string): MultipartPart[] {
     const contentType = optStr(r.contentType);
     if (contentType === null) return [];
     if (contentType !== undefined) part.contentType = contentType;
-    const base64 = optStr(r.base64);
-    if (base64 === null) return [];
-    if (base64 !== undefined) part.base64 = base64;
+    const path = optStr(r.path);
+    if (path === null) return [];
+    if (path !== undefined) part.path = path;
     const description = optStr(r.description);
     if (description === null) return [];
     if (description !== undefined) part.description = description;
@@ -261,8 +263,8 @@ export function parseMultipartParts(content: string): MultipartPart[] {
 /**
  * `binary` 模式的内容 → 文件描述。读不出来时给 `null`：那个内容不是文件描述，就没有文件。
  *
- * 名字与 Content-Type 归一成良构字符串（它们会作为请求头发出去）；base64 是文件字节，
- * 按构造只有 ASCII 字符，不归一。
+ * 名字、Content-Type 与路径都归一成良构字符串：它们会进线上 JSON，落单代理项在那里没有
+ * 对应的字节。
  */
 export function parseBodyFile(content: string): BodyFile | null {
   let parsed: unknown;
@@ -278,13 +280,18 @@ export function parseBodyFile(content: string): BodyFile | null {
   if (name === null) return null;
   const contentType = r.contentType === undefined ? '' : str(r.contentType);
   if (contentType === null) return null;
-  const base64 = r.base64 === undefined ? '' : str(r.base64);
-  if (base64 === null) return null;
+  const path = r.path === undefined ? '' : str(r.path);
+  if (path === null) return null;
   // 字节数是非负整数：`-1` 与 `1.5` 都不是「文件有多少字节」。
   const size = r.size === undefined ? 0 : uint(r.size);
   if (size === null) return null;
 
-  return { name: wellFormed(name), size, contentType: wellFormed(contentType), base64 };
+  return {
+    name: wellFormed(name),
+    size,
+    contentType: wellFormed(contentType),
+    path: wellFormed(path),
+  };
 }
 
 /**

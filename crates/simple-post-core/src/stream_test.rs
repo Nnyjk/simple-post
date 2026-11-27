@@ -70,7 +70,7 @@ fn input(port: u16, timeout_ms: u64, max_kb: u64) -> HttpRequestInput {
         url: format!("http://127.0.0.1:{port}/events"),
         headers: vec![("Accept".into(), "text/event-stream".into())],
         body: None,
-        body_base64: None,
+        body_mode: crate::domain::BodyMode::None,
         timeout_ms,
         follow_redirects: true,
         max_response_size_kb: max_kb,

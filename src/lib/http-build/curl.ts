@@ -1,9 +1,50 @@
 import { fromBuildInput, prepareRequest } from './prepare';
+import { parseBodyFile, parseMultipartParts } from '../body';
+import type { BodyFile, MultipartPart } from '@/types/domain';
 import type { BuildInput, PreparedRequest } from './types';
 
 /** POSIX shell 单引号转义：`it's` → `'it'\''s'`。 */
 function shellQuote(s: string): string {
   return `'${s.replace(/'/g, "'\\''")}'`;
+}
+
+/**
+ * cURL 的 `-F` 参数值里的一个子参数（`filename=…` / `type=…`）。
+ *
+ * cURL 自己那套规则：值里有 `;` 或空白时用双引号包起来，而 `"` 与 `\` 要反斜杠转义。
+ * CR/LF 整个去掉——留着就是把一个 `-F` 拆成两条参数。
+ */
+function formParamValue(value: string): string {
+  const clean = value
+    .replace(/[\r\n]/g, '')
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"');
+  return /[;\s]/.test(clean) ? `"${clean}"` : clean;
+}
+
+/**
+ * 一个分片 → 一条 `-F`。
+ *
+ * 文件分片用 `@路径`：**cURL 自己读那个文件**，故命令不会随文件变大，复现的仍是线上那份
+ * 字节。文本分片给原文。
+ */
+function multipartField(part: MultipartPart): string {
+  if (!part.path) return `  -F ${shellQuote(`${part.name}=${part.value}`)}`;
+
+  const params = [
+    `filename=${formParamValue(part.filename || part.path.replace(/^.*[\\/]/, ''))}`,
+    `type=${formParamValue(part.contentType || 'application/octet-stream')}`,
+  ];
+  return `  -F ${shellQuote(`${part.name}=@${part.path};${params.join(';')}`)}`;
+}
+
+/**
+ * binary 模式的文件路径。内容读不出文件描述时返回 `null`：那时请求体本来就是空的，
+ * cURL 里也不该出现一条指向不存在文件的 `--data-binary`。
+ */
+function binaryPath(body: string): string | null {
+  const file: BodyFile | null = parseBodyFile(body);
+  return file && file.path ? file.path : null;
 }
 
 /**
@@ -13,24 +54,39 @@ function shellQuote(s: string): string {
  * 预览若自己重新推导 URL、header 与 body，就是在描述一个没人发过的请求。
  *
  * 这里读到的一切都已是终态：`url` 已 join 且已解析 `{{var}}`，`headers` 是含 auth 派生
- * `Authorization` 的有序线上列表，`body` 是真正会写进 socket 的那个字符串。
+ * `Authorization` 的有序线上列表。
  *
- * **二进制 body 走 `--data-binary`**：命令行里塞的是 base64 的文本，而 cURL 会把
- * `--data-raw` 的内容原样发出去。`@<(…)` 是 bash 的进程替换：管道先把 base64 解成字节，再交给
- * cURL 发出去，故这条命令复现的就是线上那一份字节。
+ * **文件按路径引用，不把字节塞进命令行**：`binary` 用 `--data-binary @路径`，`multipart` 的
+ * 文件分片用 `-F 名字=@路径`。cURL 自己读盘，故这条命令复现的就是线上那一份字节，而命令
+ * 本身不会随文件变大。
+ *
+ * `multipart` 的 Content-Type 不在这里出现：boundary 由 cURL 自己生成，用户写过的 Content-Type
+ * 在执行层会被装配时生成的那条替换，故 `-H 'Content-Type: …'` 只会让命令与真实请求不一致。
  */
 export function preparedToCurl(prepared: PreparedRequest): string {
   const lines: string[] = [`curl -X ${prepared.method.toUpperCase()} ${shellQuote(prepared.url)}`];
   // `preparedToCurl` 用列表而非 record：`prepared.headers` 保留重名，线上合法，且每行一个
-  // `-H` 正好复现
+  // `-H` 正好复现。
   for (const [k, v] of prepared.headers) {
+    if (prepared.bodyMode === 'multipart' && k.toLowerCase() === 'content-type') continue;
     lines.push(`  -H ${shellQuote(`${k}: ${v}`)}`);
   }
-  if (prepared.bodyBase64 !== null) {
-    lines.push(`  --data-binary @<(printf '%s' ${shellQuote(prepared.bodyBase64)} | base64 -d)`);
-  } else if (prepared.body !== null) {
-    lines.push(`  --data-raw ${shellQuote(prepared.body)}`);
+
+  if (prepared.bodyMode === 'multipart') {
+    for (const part of parseMultipartParts(prepared.body ?? '')) {
+      if (!part.enabled) continue;
+      lines.push(multipartField(part));
+    }
+    return lines.join(' \\\n');
   }
+
+  if (prepared.bodyMode === 'binary') {
+    const path = binaryPath(prepared.body ?? '');
+    if (path !== null) lines.push(`  --data-binary @${shellQuote(path)}`);
+    return lines.join(' \\\n');
+  }
+
+  if (prepared.body !== null) lines.push(`  --data-raw ${shellQuote(prepared.body)}`);
   return lines.join(' \\\n');
 }
 
