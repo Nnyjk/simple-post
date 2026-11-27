@@ -98,6 +98,16 @@ fn registry_lock() -> std::sync::MutexGuard<'static, HashMap<String, Session>> {
 /// 起一个流式会话。`id` 已存在时通知旧任务收尾（旧任务会发自己的 `end{stopped}`）——调用方
 /// 铸造 id，重复即意味着上一段会话作废。
 pub fn spawn(id: String, input: HttpRequestInput, sink: StreamSink) {
+    spawn_with_uploads(id, input, sink, None)
+}
+
+/// 同 [`spawn`]，另收这次请求上传的文件字节（Web 形态）。`uploads` 缺席时与上一条同路。
+pub fn spawn_with_uploads(
+    id: String,
+    input: HttpRequestInput,
+    sink: StreamSink,
+    uploads: Option<crate::multipart::UploadReceiver>,
+) {
     let token = NEXT_TOKEN.fetch_add(1, Ordering::Relaxed);
     let task_id = id.clone();
     let (cancel_tx, cancel_rx) = oneshot::channel();
@@ -110,7 +120,7 @@ pub fn spawn(id: String, input: HttpRequestInput, sink: StreamSink) {
         },
     );
     tokio::spawn(async move {
-        run_with_cancel(input, sink, Some(cancel_rx)).await;
+        run_with_cancel_and_uploads(input, sink, Some(cancel_rx), uploads).await;
         let mut sessions = registry_lock();
         if sessions.get(&task_id).is_some_and(|s| s.token == token) {
             sessions.remove(&task_id);
@@ -140,8 +150,19 @@ pub async fn run(input: HttpRequestInput, sink: StreamSink) {
 /// 与 [`run`] 相同，另收一个取消信号：收到后发 `end{reason:"stopped"}` 再返回。
 pub async fn run_with_cancel(
     input: HttpRequestInput,
+    sink: StreamSink,
+    cancel: Option<oneshot::Receiver<()>>,
+) {
+    run_with_cancel_and_uploads(input, sink, cancel, None).await
+}
+
+/// 同 [`run_with_cancel`]，另收这次请求上传的文件字节（Web 形态）。`uploads` 缺席时与
+/// 上一条逐字节同路。
+pub async fn run_with_cancel_and_uploads(
+    input: HttpRequestInput,
     mut sink: StreamSink,
     mut cancel: Option<oneshot::Receiver<()>>,
+    uploads: Option<crate::multipart::UploadReceiver>,
 ) {
     let start = Instant::now();
 
@@ -190,7 +211,7 @@ pub async fn run_with_cancel(
         }
     };
 
-    let (outbound, multipart_ct) = match outbound_body(&input) {
+    let (outbound, multipart_ct) = match outbound_body(&input, uploads).await {
         Ok(Some((body, ct))) => (Some(body), ct),
         Ok(None) => (None, None),
         Err(message) => {
@@ -252,7 +273,7 @@ pub async fn run_with_cancel(
             Some(Err(e)) => {
                 sink(StreamEvent::Error {
                     kind: "network".into(),
-                    message: e.to_string(),
+                    message: crate::http_executor::describe_reqwest_error(&e),
                 });
                 return;
             }

@@ -133,6 +133,8 @@ pub(super) async fn execute_resolved(
             // HTTPS 出站设置：全局默认（`settings.tls`）与端点以上的那一份
             // （`tls_override`）由 core 的 `send_with_scripts` 合成，MCP 侧不合成。
             tls_override,
+            // MCP 调用方本身就是服务端上的进程：文件分片只有本机路径这一种来源。
+            uploads: None,
         },
     )
     .await?;

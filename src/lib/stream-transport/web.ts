@@ -10,6 +10,8 @@
  */
 import { readBearerFromStorage } from '../tauri-commands/bearer';
 import { readApiBase } from '../tauri-commands';
+import { UPLOAD_ROUTES } from '../tauri-commands/web-routes';
+import { uploadFiles, uploadForm } from '../web-uploads';
 import { dispatchSseEvent, dispatchWsEvent } from './dispatch';
 import type {
   HttpStreamArgs,
@@ -201,12 +203,24 @@ function wsClosedFallback(): WsClosedEvent {
 
 export function openHttpStream(args: HttpStreamArgs, handlers: SseHandlers): HttpStreamHandle {
   const controller = new AbortController();
+  // 浏览器选中的文件没有服务端可读的路径：字节随这次请求一起上来，故换成 multipart 路线。
+  // 那几条路由的响应同样是事件流，`connect` 之后的一切不变。
+  let files: File[];
+  try {
+    files = uploadFiles(args.bodyMode, args.body);
+  } catch (error) {
+    handlers.onError?.(asStreamError(error));
+    return { cancel(): void {} };
+  }
   const running = connect(
-    apiUrl('/api/http/stream'),
+    apiUrl(files.length > 0 ? UPLOAD_ROUTES.stream : '/api/http/stream'),
     {
       method: 'POST',
-      headers: webHeaders({ 'content-type': 'application/json', accept: 'text/event-stream' }),
-      body: JSON.stringify(args),
+      headers: webHeaders({
+        ...(files.length > 0 ? {} : { 'content-type': 'application/json' }),
+        accept: 'text/event-stream',
+      }),
+      body: files.length > 0 ? uploadForm(args, files) : JSON.stringify(args),
       signal: controller.signal,
     },
     (raw) => dispatchSseEvent(raw, handlers),

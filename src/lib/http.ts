@@ -21,6 +21,7 @@
 import type {
   ApiResponse,
   AuthConfig,
+  BodyMode,
   Environment,
   EnvSnapshot,
   HttpMethod,
@@ -34,6 +35,8 @@ import { COMMANDS, invokeCmd, type CallApiOptions } from './tauri-commands';
 import { sendWithProgress, type HttpTransferProgress } from './http-progress';
 import { buildFetchInit, type PreparedRequest } from './http-build';
 import { applyOAuth2Token, fetchOAuth2Token } from './oauth2';
+import { uploadFiles } from './web-uploads';
+import { IS_TAURI_SHELL } from './tauri-commands';
 
 export type { HttpTransferProgress } from './http-progress';
 
@@ -239,10 +242,24 @@ async function invokeAndMap(
   onProgress?: (progress: HttpTransferProgress) => void,
 ): Promise<{ response: ApiResponse; script: ScriptOutcome | null }> {
   try {
+    // 浏览器形态下，请求体里带「没有路径、只有字节数」的文件分片时，字节必须随请求一起上来：
+    // 换成 multipart 路线（进度流是它的载体），信封与终局形状不变。
+    const files = IS_TAURI_SHELL
+      ? []
+      : uploadFiles(
+          (args.bodyMode ?? 'none') as BodyMode,
+          typeof args.body === 'string' ? args.body : null,
+        );
     // 有回调时走进度通道：两条命令指向同一个发送序列，差别只在多一条事件流。
-    const r = onProgress
-      ? await sendWithProgress<RustSendOutcome>(args, options.signal, onProgress)
-      : await invokeCmd<RustSendOutcome>(COMMANDS.httpRequest, args, options);
+    const r =
+      onProgress || files.length > 0
+        ? await sendWithProgress<RustSendOutcome>(
+            args,
+            files,
+            options.signal,
+            onProgress ?? (() => {}),
+          )
+        : await invokeCmd<RustSendOutcome>(COMMANDS.httpRequest, args, options);
     return { response: envelopeToApiResponse(r.http, input, url), script: r.script ?? null };
   } catch (err) {
     // `invokeCmd` 会 reject 的情形：

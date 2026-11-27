@@ -92,6 +92,11 @@ export interface MultipartPart {
    * 库里不存文件内容：字节由执行层在发请求时按路径现读，故大文件不进 JSON、不进历史。
    */
   path?: string;
+  /**
+   * 这次请求要上传的文件有多少字节（浏览器形态）；服务端据它写 `Content-Length`。
+   * 有 `path` 时不用它。
+   */
+  size?: number;
   /** 说明。界面上那一列写着什么，不上线。 */
   description?: string;
 }

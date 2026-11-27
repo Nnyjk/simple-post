@@ -291,6 +291,133 @@ fn an_inline_body_hands_its_bytes_back_untouched() {
     assert!(OutboundBody::inline(Vec::new()).is_empty());
 }
 
+/// 一次 Web 形态的上传：`request` 里声明了长度的分片按顺序从上传来。
+fn upload_part(name: &str, size: u64) -> MultipartPart {
+    MultipartPart {
+        name: name.to_string(),
+        enabled: true,
+        // 浏览器知道选中的文件名，它随请求一起上来；缺了它分片只剩名字。
+        filename: Some(format!("{name}.bin")),
+        size: Some(size),
+        ..Default::default()
+    }
+}
+
+/// 一个按顺序吐帧的上传端：`Part` → 逐块 `Data` → `End`。
+fn upload_channel(
+    chunks: &'static [&'static [u8]],
+) -> (UploadReceiver, tokio::task::JoinHandle<()>) {
+    let (tx, rx) = tokio::sync::mpsc::channel::<UploadFrame>(8);
+    let pump = tokio::spawn(async move {
+        let _ = tx.send(UploadFrame::Part).await;
+        for chunk in chunks {
+            let _ = tx.send(UploadFrame::Data(Bytes::from_static(chunk))).await;
+        }
+        let _ = tx.send(UploadFrame::End).await;
+    });
+    (rx, pump)
+}
+
+/// 把 `chunks` 读到底：成功给整段字节，失败给错误。
+async fn drain(body: OutboundBody) -> Result<Vec<u8>, std::io::Error> {
+    let mut stream = Box::pin(body.chunks(4));
+    let mut out: Vec<u8> = Vec::new();
+    while let Some(item) = stream.next().await {
+        out.extend_from_slice(&item?);
+    }
+    Ok(out)
+}
+
+#[tokio::test]
+async fn an_uploaded_file_is_framed_like_a_file_from_disk() {
+    let (rx, pump) = upload_channel(&[b"012", b"3456"]);
+    let assembled = assemble_with_uploads(&[upload_part("f", 7)], rx).expect("assemble");
+    let declared = assembled.body.len();
+    let bytes = drain(assembled.body).await.expect("read");
+    pump.await.expect("pump");
+
+    let text = String::from_utf8(bytes).expect("utf-8");
+    assert!(
+        text.contains("Content-Disposition: form-data; name=\"f\"; filename=\"f.bin\""),
+        "{text}"
+    );
+    assert!(
+        text.contains("Content-Type: application/octet-stream"),
+        "{text}"
+    );
+    assert!(text.contains("\r\n0123456\r\n"), "{text}");
+    assert_eq!(
+        declared as usize,
+        text.len(),
+        "the declared size must be what actually goes out"
+    );
+}
+
+#[tokio::test]
+async fn an_upload_shorter_than_its_declared_size_fails() {
+    let (rx, pump) = upload_channel(&[b"012"]);
+    let assembled = assemble_with_uploads(&[upload_part("f", 7)], rx).expect("assemble");
+    let err = drain(assembled.body).await.expect_err("must fail");
+    pump.await.expect("pump");
+    assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof);
+}
+
+#[tokio::test]
+async fn an_upload_longer_than_its_declared_size_fails() {
+    let (rx, pump) = upload_channel(&[b"0123456789"]);
+    let assembled = assemble_with_uploads(&[upload_part("f", 4)], rx).expect("assemble");
+    let err = drain(assembled.body).await.expect_err("must fail");
+    pump.await.expect("pump");
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+}
+
+#[tokio::test]
+async fn two_uploaded_files_take_their_bytes_in_declaration_order() {
+    let (tx, rx) = tokio::sync::mpsc::channel::<UploadFrame>(8);
+    let pump = tokio::spawn(async move {
+        for (chunk, size) in [(&b"aaa"[..], 3u64), (&b"bbb"[..], 3u64)] {
+            let _ = tx.send(UploadFrame::Part).await;
+            let _ = tx
+                .send(UploadFrame::Data(Bytes::copy_from_slice(chunk)))
+                .await;
+            let _ = tx.send(UploadFrame::End).await;
+            assert_eq!(chunk.len() as u64, size);
+        }
+    });
+    let assembled =
+        assemble_with_uploads(&[upload_part("a", 3), upload_part("b", 3)], rx).expect("assemble");
+    let text = String::from_utf8(drain(assembled.body).await.expect("read")).expect("utf-8");
+    pump.await.expect("pump");
+    assert!(
+        text.find("name=\"a\"").expect("a") < text.find("name=\"b\"").expect("b"),
+        "{text}"
+    );
+    assert!(text.contains("\r\naaa\r\n"), "{text}");
+    assert!(text.contains("\r\nbbb\r\n"), "{text}");
+}
+
+#[test]
+fn uploaded_bytes_without_a_file_part_are_rejected() {
+    // 信封里没有任何声明长度的分片，通道里却有字节：这些字节没有分片接收，
+    // 装出来的请求体会把它们静默丢掉。
+    let (tx, rx) = tokio::sync::mpsc::channel::<UploadFrame>(8);
+    drop(tx);
+    let parts = [MultipartPart {
+        name: "t".into(),
+        value: "v".into(),
+        enabled: true,
+        ..Default::default()
+    }];
+    let err = assemble_with_uploads(&parts, rx).expect_err("must fail");
+    assert!(err.contains("declares none"), "{err}");
+}
+
+#[test]
+fn a_file_part_with_a_declared_size_needs_uploaded_bytes() {
+    let err = assemble(&[upload_part("f", 4)]).expect_err("assemble must fail");
+    assert!(err.contains("no uploaded bytes"), "{err}");
+}
+
 #[test]
 fn set_content_type_replaces_in_place_and_appends_when_absent() {
     let mut headers = vec![

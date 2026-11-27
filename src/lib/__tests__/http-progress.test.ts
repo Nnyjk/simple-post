@@ -59,7 +59,7 @@ describe('sendWithProgress（Web / SSE）', () => {
     ]);
 
     const seen: HttpTransferProgress[] = [];
-    const result = await sendWithProgress<typeof OUTCOME>({}, undefined, (p) => seen.push(p));
+    const result = await sendWithProgress<typeof OUTCOME>({}, [], undefined, (p) => seen.push(p));
 
     assert.deepEqual(seen, [
       {
@@ -79,7 +79,7 @@ describe('sendWithProgress（Web / SSE）', () => {
       `${JSON.stringify({ type: 'done', outcome: OUTCOME })}\n`,
     ]);
     const seen: number[] = [];
-    await sendWithProgress({}, undefined, (p) => seen.push(p.sentBytes));
+    await sendWithProgress({}, [], undefined, (p) => seen.push(p.sentBytes));
     assert.deepEqual(seen, [1]);
   });
 
@@ -93,7 +93,7 @@ describe('sendWithProgress（Web / SSE）', () => {
       `data: ${JSON.stringify({ type: 'done', outcome: OUTCOME })}\n`,
     ]);
     const seen: number[] = [];
-    await sendWithProgress({}, undefined, (p) => seen.push(p.sentBytes));
+    await sendWithProgress({}, [], undefined, (p) => seen.push(p.sentBytes));
     assert.deepEqual(seen, [7]);
   });
 
@@ -102,7 +102,7 @@ describe('sendWithProgress（Web / SSE）', () => {
       progressFrame(1, 1),
       `data: ${JSON.stringify({ type: 'done', outcome: OUTCOME })}`,
     ]);
-    assert.deepEqual(await sendWithProgress({}, undefined, () => {}), OUTCOME);
+    assert.deepEqual(await sendWithProgress({}, [], undefined, () => {}), OUTCOME);
   });
 
   it('done 之前的 error 帧变成 reject，且带上原因', async () => {
@@ -111,7 +111,7 @@ describe('sendWithProgress（Web / SSE）', () => {
       `data: ${JSON.stringify({ type: 'error', message: '上游拒绝连接' })}\n`,
     ]);
     await assert.rejects(
-      sendWithProgress({}, undefined, () => {}),
+      sendWithProgress({}, [], undefined, () => {}),
       /上游拒绝连接/,
     );
   });
@@ -119,7 +119,7 @@ describe('sendWithProgress（Web / SSE）', () => {
   it('流在终局之前结束 → reject', async () => {
     stubStream([progressFrame(10, 100)]);
     await assert.rejects(
-      sendWithProgress({}, undefined, () => {}),
+      sendWithProgress({}, [], undefined, () => {}),
       /终局事件之前结束/,
     );
   });
@@ -131,14 +131,46 @@ describe('sendWithProgress（Web / SSE）', () => {
         headers: { 'content-type': 'application/json' },
       })) as unknown as typeof fetch;
     await assert.rejects(
-      sendWithProgress({}, undefined, () => {}),
+      sendWithProgress({}, [], undefined, () => {}),
       /请求体超限/,
     );
   });
 
   it('打到 send-progress 路由，而不是普通 send', async () => {
     const calls = stubStream([`data: ${JSON.stringify({ type: 'done', outcome: OUTCOME })}\n`]);
-    await sendWithProgress({}, undefined, () => {});
+    await sendWithProgress({}, [], undefined, () => {});
     assert.deepEqual(calls, ['/api/http/send-progress']);
+  });
+
+  it('带文件时换成上传路线，请求体是 FormData', async () => {
+    const seen: Array<{ url: string; init?: RequestInit }> = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      seen.push({
+        url:
+          typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url,
+        init,
+      });
+      return streamOf([`data: ${JSON.stringify({ type: 'done', outcome: OUTCOME })}\n`]);
+    }) as typeof fetch;
+
+    const blob = new File(['AAAAA'], 'a.txt');
+    const result = await sendWithProgress<typeof OUTCOME>(
+      { method: 'POST', url: 'http://x/y' },
+      [blob],
+      undefined,
+      () => {},
+    );
+
+    assert.deepEqual(result, OUTCOME);
+    assert.deepEqual(
+      seen.map((call) => call.url),
+      ['/api/http/send-upload-progress'],
+    );
+    const body = seen[0]?.init?.body;
+    assert.ok(body instanceof FormData, 'multipart 路线交出的是 FormData');
+    const envelope = body.get('request');
+    assert.ok(envelope instanceof Blob);
+    assert.equal(await envelope.text(), JSON.stringify({ method: 'POST', url: 'http://x/y' }));
+    assert.ok(body.get('a.txt') instanceof File);
   });
 });

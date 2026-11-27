@@ -5,8 +5,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { DualProgressBar } from '@/components/ui/progress';
-import { uid } from '@/lib/utils';
+import { formatBytes, uid } from '@/lib/utils';
 import {
+  isFilePart,
   parseBodyFile,
   parseFormFields,
   parseMultipartParts,
@@ -14,6 +15,7 @@ import {
 } from '@/lib/body';
 import { VarHintInput, type VarEntry } from './var-hint';
 import { baseName, pickLocalFile } from '@/lib/pick-file';
+import { rememberUpload } from '@/lib/web-uploads';
 import type { TabUploadProgress } from '@/stores/slices/ui-response';
 
 /**
@@ -188,6 +190,13 @@ export function MultipartPartsEditor({
   const [slots, setSlots] = useState<string[]>([]);
   /** 选文件失败的理由，键是槽位 token。 */
   const [errors, setErrors] = useState<Record<string, string>>({});
+  /**
+   * 切到「文件」但还没选到文件的行，键是槽位 token。
+   *
+   * 它不能写进 `content`：那份 JSON 同时被后端与 MCP 解析，一个假的 `size` 会让执行层去等一段
+   * 永远不会到来的字节。故「这一行现在该显示文件格」只存在界面状态里。
+   */
+  const [pendingFiles, setPendingFiles] = useState<string[]>([]);
 
   // 处理器在异步完成时要用到**最新**的分片与槽位：闭包捕获的是发起那一刻的那一份。
   const partsRef = useRef(parts);
@@ -231,6 +240,7 @@ export function MultipartPartsEditor({
     slotsRef.current = [];
     setSlots([]);
     setErrors({});
+    setPendingFiles([]);
   }, [content]);
 
   const update = (index: number, patch: Partial<MultipartPart>) =>
@@ -257,15 +267,21 @@ export function MultipartPartsEditor({
     commitSlots([...tokens, `row-${uid()}`]);
   };
 
-  /** 文本 ↔ 文件。另一侧的内容清掉；切到文件时已有的路径留着。 */
+  /** 文本 ↔ 文件。另一侧的内容清掉；切到文件时已有的文件留着。 */
   const switchType = (index: number, file: boolean) => {
     const token = slotsFor()[index];
     const part = partsRef.current[index];
     if (!part) return;
-    if (file) {
-      update(index, { filename: part.filename ?? '' });
-    } else {
-      update(index, { filename: undefined, path: undefined, contentType: undefined });
+    setPendingFiles((prev) =>
+      file ? (prev.includes(token) ? prev : [...prev, token]) : prev.filter((t) => t !== token),
+    );
+    if (!file) {
+      update(index, {
+        filename: undefined,
+        path: undefined,
+        contentType: undefined,
+        size: undefined,
+      });
     }
     setErrors((prev) => {
       if (!(token in prev)) return prev;
@@ -276,19 +292,29 @@ export function MultipartPartsEditor({
   };
 
   /**
-   * 选文件：拿到路径就写回分片；用户取消什么也不做；失败（浏览器形态拿不到路径）把
-   * 理由挂在那一行上。
+   * 选文件：写回「怎么引用它」。桌面形态是路径；浏览器形态是文件名 + 字节数，字节本体先交给
+   * `rememberUpload` 暂存，发送时随 `multipart/form-data` 一起上去。
+   *
+   * 用户取消什么也不做；失败把理由挂在那一行上。
    */
   const pickFile = async (index: number) => {
     const token = slotsFor()[index];
     try {
       const picked = await pickLocalFile();
       if (!picked) return;
+      if (picked.file) rememberUpload(picked.file);
       // 选择框是异步的：期间可能删了行，按 token 重新找它现在的位置。
       const at = slotsRef.current.indexOf(token);
       const part = at === -1 ? undefined : partsRef.current[at];
       if (!part) return;
-      update(at, { path: picked.path, filename: part.filename || picked.name });
+      update(at, {
+        path: picked.path === '' ? undefined : picked.path,
+        // 换文件时文件名跟着换：它是 Content-Disposition 里那份，留着旧名字就会把新字节
+        // 标成旧文件。
+        filename: picked.name,
+        size: picked.size,
+      });
+      setPendingFiles((prev) => prev.filter((t) => t !== token));
       setErrors((prev) => {
         if (!(token in prev)) return prev;
         const next = { ...prev };
@@ -302,7 +328,14 @@ export function MultipartPartsEditor({
 
   /** 清掉这个文件：路径与类型都没了，这一行回到文本形态。 */
   const clearFile = (index: number) => {
-    update(index, { path: undefined, contentType: undefined, filename: undefined });
+    const token = slotsFor()[index];
+    update(index, {
+      path: undefined,
+      contentType: undefined,
+      filename: undefined,
+      size: undefined,
+    });
+    setPendingFiles((prev) => prev.filter((t) => t !== token));
   };
 
   // 传输进度是整表一根：报上来的是整体字节数，分不到具体某个文件上。
@@ -338,6 +371,7 @@ export function MultipartPartsEditor({
               varEntries={varEntries}
               envName={envName}
               error={errors[slots[index] ?? '']}
+              fileMode={pendingFiles.includes(slots[index] ?? '')}
               onUpdate={update}
               onRemove={remove}
               onSwitchType={switchType}
@@ -380,6 +414,7 @@ function MultipartRow({
   varEntries,
   envName,
   error,
+  fileMode,
   onUpdate,
   onRemove,
   onSwitchType,
@@ -392,15 +427,17 @@ function MultipartRow({
   envName?: string;
   /** 选文件失败的理由；`undefined` = 没出错。 */
   error?: string;
+  /** 用户把这一行切到了「文件」、还没选到文件。 */
+  fileMode: boolean;
   onUpdate: (index: number, patch: Partial<MultipartPart>) => void;
   onRemove: (index: number) => void;
   onSwitchType: (index: number, file: boolean) => void;
   onPick: (index: number) => void;
   onClearFile: (index: number) => void;
 }) {
-  // 有路径即文件分片（字节只从路径来）；只写了文件名的行也是文件分片，那多半是从文本
-  // 切过来的，还等着选文件。
-  const isFile = part.path !== undefined || part.filename !== undefined;
+  // 文件格的条件：已经是文件分片（执行层的判据 `isFilePart`），或者用户刚把它切到「文件」。
+  // 只有前一条成立才算线上是文件分片——切过来还没选文件时，线上仍是一段文本。
+  const isFile = fileMode || isFilePart(part);
 
   return (
     <tr className="group">
@@ -551,8 +588,9 @@ function FileCell({
 // ============================================================
 
 /**
- * binary 模式：整个请求体就是一个文件。`content` 里存的是文件描述（文件名与路径）；字节由
- * 执行层在发请求时按路径现读，故渲染进程不碰文件内容。
+ * binary 模式：整个请求体就是一个文件。`content` 里存的是文件描述：桌面形态带路径，字节由
+ * 执行层按路径现读；浏览器形态只有文件名与字节数，字节存在 `web-uploads`，发送时随
+ * `multipart/form-data` 一起上去。
  */
 export function BinaryBodyEditor({
   content,
@@ -569,9 +607,10 @@ export function BinaryBodyEditor({
     try {
       const picked = await pickLocalFile();
       if (!picked) return;
+      if (picked.file) rememberUpload(picked.file);
       const description: BodyFile = {
         name: picked.name,
-        size: 0,
+        size: picked.size ?? 0,
         contentType: '',
         path: picked.path,
       };
@@ -595,7 +634,7 @@ export function BinaryBodyEditor({
               className="min-w-0 truncate font-mono text-micro text-muted-foreground"
               title={file.path}
             >
-              {file.path}
+              {file.path !== '' ? file.path : `浏览器上传 · ${formatBytes(file.size)}`}
             </span>
           </div>
           <Button variant="outline" size="sm" className="h-7" onClick={() => void pick()}>

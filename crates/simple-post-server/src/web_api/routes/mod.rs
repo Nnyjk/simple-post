@@ -17,6 +17,7 @@ pub(crate) mod response_history;
 pub(crate) mod spec;
 pub(crate) mod stream;
 pub(crate) mod update;
+pub(crate) mod upload;
 pub(crate) mod ws;
 
 pub(crate) use dynamic_variables::{
@@ -60,4 +61,5 @@ pub(crate) use response_history::{
 pub(crate) use spec::spec_upsert;
 pub(crate) use stream::{http_stream, http_stream_cancel};
 pub(crate) use update::{update_apply, update_check, update_deployment};
+pub(crate) use upload::{http_send_upload, http_send_upload_progress, http_stream_upload};
 pub(crate) use ws::{ws_close, ws_connect, ws_send};
