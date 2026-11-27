@@ -146,6 +146,30 @@
       }
     },
     {
+      "name": "multipart：文件分片的路径与名字都不参与模板化",
+      "vars": { "t": "x" },
+      "body": {
+        "mode": "multipart",
+        "content": "[{\"name\":\"{{t}}\",\"value\":\"{{t}}\"},{\"name\":\"f{{t}}\",\"filename\":\"a{{t}}.bin\",\"path\":\"C:\\\\tmp\\\\{{t}}.png\"}]"
+      },
+      "expected": {
+        "text": "[{\"name\":\"x\",\"value\":\"x\",\"enabled\":true},{\"name\":\"f{{t}}\",\"value\":\"\",\"enabled\":true,\"filename\":\"a{{t}}.bin\",\"path\":\"C:\\\\tmp\\\\{{t}}.png\"}]",
+        "missing": []
+      }
+    },
+    {
+      "name": "multipart：空路径当文本分片，照常模板化",
+      "vars": { "t": "x" },
+      "body": {
+        "mode": "multipart",
+        "content": "[{\"name\":\"{{t}}\",\"value\":\"{{t}}\",\"path\":\"\"}]"
+      },
+      "expected": {
+        "text": "[{\"name\":\"x\",\"value\":\"x\",\"enabled\":true,\"path\":\"\"}]",
+        "missing": []
+      }
+    },
+    {
       "name": "binary：文件描述原样带出去，字节由执行层按路径现读",
       "vars": {},
       "body": {
@@ -170,6 +194,19 @@
         "missing": []
       },
       "expectedContentType": "image/png"
+    },
+    {
+      "name": "binary：文件路径不参与模板化",
+      "vars": { "t": "x" },
+      "body": {
+        "mode": "binary",
+        "content": "{\"name\":\"a.bin\",\"size\":3,\"contentType\":\"application/octet-stream\",\"path\":\"C:\\\\tmp\\\\{{t}}.bin\"}"
+      },
+      "expected": {
+        "text": "{\"name\":\"a.bin\",\"size\":3,\"contentType\":\"application/octet-stream\",\"path\":\"C:\\\\tmp\\\\{{t}}.bin\"}",
+        "missing": []
+      },
+      "expectedContentType": "application/octet-stream"
     },
     {
       "name": "binary：内容读不出文件描述时没有 body",

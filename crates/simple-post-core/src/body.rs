@@ -128,7 +128,10 @@ fn resolve_multipart_body(content: &str, vars: &HashMap<String, String>) -> Reso
         // 文件分片只有路径与文件名：路径不是用户填的模板，模板化它只会平白多扫一遍，
         // 还会让一个含 `{{` 的目录名被当成变量。
         // 分片名也不模板化——它与文件名一起描述「哪个文件」，不是用户填的值。
-        if part.path.is_some() {
+        //
+        // 判据是**非空**路径，与 `multipart::assemble` 一致：`path: ""` 在执行层发的是一个
+        // 文本分片，这里就必须照文本分片模板化，否则 `value` 里的变量会原样发出去。
+        if part.path.as_deref().is_some_and(|p| !p.is_empty()) {
             continue;
         }
         let name = resolve_template(&part.name, vars);

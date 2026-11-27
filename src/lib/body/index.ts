@@ -112,7 +112,10 @@ function resolveMultipartBody(content: string, vars: Record<string, string>): Re
   const resolved = parts.map((part) => {
     // 文件分片只有路径与文件名：路径不是用户填的模板，模板化它会把目录名里的 `{{` 当成变量。
     // 分片名也不模板化——它与文件名一起描述「哪个文件」，不是用户填的值。
-    if (part.path !== undefined) return part;
+    //
+    // 判据是**非空**路径，与 Rust 侧 `core::multipart::assemble` 一致：`path: ""` 执行层发的是
+    // 一个文本分片，这里就得照文本分片模板化。
+    if (part.path) return part;
     const name = resolveVarsWithMissing(part.name, vars);
     const value = resolveVarsWithMissing(part.value, vars);
     missing.push(...name.missing, ...value.missing);

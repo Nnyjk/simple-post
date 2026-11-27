@@ -23,19 +23,36 @@ function formParamValue(value: string): string {
 }
 
 /**
- * 一个分片 → 一条 `-F`。
+ * `-F 名字=@路径` 里的路径。
  *
- * 文件分片用 `@路径`：**cURL 自己读那个文件**，故命令不会随文件变大，复现的仍是线上那份
- * 字节。文本分片给原文。
+ * `-F` 把 `;` 与 `,` 当分片属性的分隔符，路径里有它们就得整个加双引号；`"` 是引号本身的
+ * 转义符。反斜杠不动：Windows 路径里它是目录分隔符，`-F` 里只有紧跟引号的 `\"`
+ * 才有转义含义。CR/LF 整个去掉，留着就是把一条参数拆成两条。
+ */
+function formFilePath(path: string): string {
+  const clean = path.replace(/[\r\n]/g, '');
+  return /[;,\s"]/.test(clean) ? `"${clean.replace(/"/g, '\\"')}"` : clean;
+}
+
+/**
+ * 一个分片 → 一条 curl 参数。
+ *
+ * 文件分片用 `-F 名字=@路径`：**cURL 自己读那个文件**，故命令不会随文件变大，复现的仍是
+ * 线上那份字节。路径连同文件名参数一起加引号：`-F` 把 `;` 与 `,` 当参数分隔符，未加引号的
+ * 路径会被截成两段。
+ *
+ * 文本分片用 `--form-string`：`-F` 会把以 `@` 或 `<` 开头的值当成文件名读，而这里要发的
+ * 是字面值。分片名里的 CR/LF 整个去掉——它与 `core::multipart` 的分片头转义同一条规则。
  */
 function multipartField(part: MultipartPart): string {
-  if (!part.path) return `  -F ${shellQuote(`${part.name}=${part.value}`)}`;
+  const name = part.name.replace(/[\r\n]/g, '');
+  if (!part.path) return `  --form-string ${shellQuote(`${name}=${part.value}`)}`;
 
   const params = [
     `filename=${formParamValue(part.filename || part.path.replace(/^.*[\\/]/, ''))}`,
     `type=${formParamValue(part.contentType || 'application/octet-stream')}`,
   ];
-  return `  -F ${shellQuote(`${part.name}=@${part.path};${params.join(';')}`)}`;
+  return `  -F ${shellQuote(`${name}=@${formFilePath(part.path)};${params.join(';')}`)}`;
 }
 
 /**
