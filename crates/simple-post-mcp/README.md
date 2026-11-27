@@ -142,11 +142,13 @@ cargo run -p simple-post-mcp -- --transport=http --port=4333
   "mcpServers": {
     "simple-post": {
       "type": "http",
-      "url": "http://<host>:4173/mcp"
+      "url": "http://<host>:<mcp 端口>/mcp"
     }
   }
 }
 ```
+
+这个端口来自数据目录里 `mcp.port` 记录的 `port`（绑定地址、挂载路径与白名单也在同一份 `mcp.http_config` 里），由部署侧发布出来；主端口 `4173` 只服务 REST API 与 SPA。
 
 ### 历史代理二进制迁移
 原位于 `src-tauri/src/bin/mcp_proxy.rs` 的 `simple-post-mcp-proxy` 已废弃移除，客户端配置迁移方式如下：
