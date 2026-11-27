@@ -5,6 +5,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::domain::BodyMode;
+
 /// 环境快照是线上类型，住在 `domain`（要与渲染层的 TS 镜像放在一起），这里转出一次。
 pub use crate::domain::EnvSnapshot;
 
@@ -18,12 +20,10 @@ pub struct ScriptRequest {
     pub url: String,
     pub headers: Vec<(String, String)>,
     pub body: Option<String>,
-    /// 请求体的**二进制形态**（base64）。
-    ///
-    /// 有它时 `body` 缺席，线上发出去的是解码后的字节。multipart 带文件分片时整个请求体是
-    /// 字节，故走这条通道。脚本改不动它：脚本改的是 `body`（文本形态）。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub body_base64: Option<String>,
+    /// 请求体的模式。与 [`crate::domain::RequestBody::mode`] 同一个枚举：`multipart` / `binary`
+    /// 的字节由发送端按 `path` 现读，故脚本只可能改文本形态的 `body`。
+    #[serde(default)]
+    pub body_mode: BodyMode,
 }
 
 /// 一份已收到的响应。test 脚本看它。

@@ -31,13 +31,12 @@ fn stored_response(status: u16, body: &str) -> StoredResponse {
     }
 }
 
-/// 一条二进制调用的历史行：body 是空串，原始字节在 base64 那一列里。
+/// 一条二进制响应的历史行：body 是空串，原始字节在 base64 那一列里。
 fn append_binary_row(st: &AppState, endpoint_id: &str) {
     let mut response = stored_response(200, "");
     response.body_base64 = Some("AAEC".to_string());
     let mut request = stored_request();
     request.body = None;
-    request.body_base64 = Some("AAEC".to_string());
     simple_post_core::db::with_tx(&st.pool, |c| {
         response_history::append(c, endpoint_id, &response, Some(&request))
     })
@@ -51,7 +50,6 @@ fn stored_request() -> StoredRequestSnapshot {
         url: "http://127.0.0.1:9/x".to_string(),
         headers: vec![("accept".to_string(), "*/*".to_string())],
         body: None,
-        body_base64: None,
     }
 }
 
@@ -125,14 +123,15 @@ async fn endpoint_history_returns_the_recorded_calls_newest_first() {
     assert_eq!(rows[1]["method"], "GET");
     // 文本响应不是二进制：要显式说清楚，否则调用方分不出「没给」与「是二进制」。
     assert_eq!(rows[1]["hasBinaryBody"], false);
-    assert_eq!(rows[1]["request"]["hasBinaryBody"], false);
     assert_eq!(rows[1]["url"], "http://127.0.0.1:9/x");
     // 那次发出去的请求也回来了：前端接入要知道请求长什么样。
     assert_eq!(rows[1]["request"]["method"], "GET");
     assert_eq!(rows[1]["request"]["url"], "http://127.0.0.1:9/x");
 }
 
-/// 二进制请求体与响应体都不在此返回，故要说清楚「没给」与「是二进制」的区别。
+/// 二进制响应体不在此返回，故要说清楚「没给」与「是二进制」的区别。
+///
+/// 请求侧没有这一档：文件类请求体只有路径与描述，历史里存的就是那份描述。
 #[tokio::test]
 async fn endpoint_history_marks_a_binary_body_instead_of_silently_dropping_it() {
     let (st, endpoint_id) = fixture();
@@ -146,13 +145,9 @@ async fn endpoint_history_marks_a_binary_body_instead_of_silently_dropping_it() 
     assert_eq!(rows[0]["hasBinaryBody"], true, "响应体是二进制，要说清楚");
     assert_eq!(rows[0]["body"], "", "二进制响应体的文本形态是空串");
     assert_eq!(
-        rows[0]["request"]["hasBinaryBody"], true,
-        "请求体是二进制，要说清楚"
-    );
-    assert_eq!(
         rows[0]["request"]["body"],
         serde_json::Value::Null,
-        "二进制请求体的文本形态缺席"
+        "那次请求没有 body，文本形态缺席"
     );
 }
 

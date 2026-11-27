@@ -1,7 +1,8 @@
 //! 发送路径 —— 一份已解析好的请求 → 发出 → 结果信封。
 //!
 //! 三个发送工具共用 `execute_resolved`，故「解析之后发生什么」只有一份实现：oauth2 的 token 注入、
-//! multipart 的装配、脚本链、发送、结果封装，以及调用历史的写入。
+//! 脚本链、发送、结果封装，以及调用历史的写入。multipart 的装配不在这一层 —— body 与
+//! `body_mode` 原样交给执行层，由 core 在发请求时现生成 boundary 并按路径读文件。
 
 use std::collections::BTreeMap;
 
@@ -18,11 +19,10 @@ use simple_post_core::http_executor::HttpResult;
 use simple_post_core::script::{ScriptRequest, ScriptedSendOutcome};
 
 use super::envelope::build_result_envelope;
-use super::multipart;
 
 /// 解析之后、结果封装之前的一次执行。
 ///
-/// 「解析之后发生什么」只有一份实现：OAuth2 的 token 注入、multipart 的装配、脚本链、发送。
+/// 「解析之后发生什么」只有一份实现：OAuth2 的 token 注入、脚本链、发送。
 /// 单条发送与批量运行都走它，故两者不会长出两套 —— 两者只是**结果封装**不同：单条把结果封成
 /// 一次调用的信封，批量把每一条的结论收进一份报告。
 pub(super) struct ExecutedRequest {
@@ -60,7 +60,6 @@ pub(super) async fn execute_resolved(
         method,
         headers,
         body,
-        body_base64,
         body_mode,
         auth,
         vars,
@@ -110,24 +109,6 @@ pub(super) async fn execute_resolved(
         simple_post_core::oauth2::inject(cfg, &token, &mut headers, &mut url);
     }
 
-    // multipart 在这里才装配成形：boundary 必须现生成，Content-Type 与 body 用同一个
-    // 值。`resolve_endpoint` 只做变量替换，故它给不出带 boundary 的 Content-Type。
-    //
-    // 判据读 `resolved.body_mode`（**套过 overrides 的那个 mode**），不读端点行里存的那个：
-    // 调用方给 `overrides.body` 就能换掉 mode，而 Content-Type 那边读的是
-    // `resolve_endpoint` 内部同一个 eff_body.mode。两边读不同的值会出两种坏结果——
-    // 存 json / 覆盖 multipart 时整条请求没有 Content-Type 且分片原样发出；存 multipart /
-    // 覆盖 json 时 body 被换成只有收尾分隔符的壳，调用方传的内容静默消失。
-    let mut body = body;
-    let mut body_base64 = body_base64;
-    if body_mode == simple_post_core::domain::BodyMode::Multipart {
-        if let Some(content) = body.take() {
-            let assembled = multipart::apply(&mut headers, &content);
-            body = assembled.text;
-            body_base64 = assembled.base64;
-        }
-    }
-
     // 历史行要记「哪一个接口」，故先留一份副本：下面 `endpoint_id` 要移进
     // `ScriptedSendInput`。
     let history_endpoint_id = endpoint_id.clone();
@@ -143,7 +124,7 @@ pub(super) async fn execute_resolved(
                 url: url.clone(),
                 headers: headers.clone(),
                 body,
-                body_base64,
+                body_mode,
             },
             env: env_snapshot(env),
             settings,
@@ -363,6 +344,5 @@ fn stored_request(http: &HttpResult, request: &ScriptRequest) -> Option<StoredRe
         url: request.url.clone(),
         headers,
         body: request.body.clone(),
-        body_base64: request.body_base64.clone(),
     })
 }

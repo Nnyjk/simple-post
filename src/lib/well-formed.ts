@@ -1,3 +1,6 @@
+/** 只看有没有代理项码元，不做配对判断——配对的那一对不需要改写。 */
+const SURROGATE_CODE_UNIT = /[\uD800-\uDFFF]/;
+
 /**
  * 良构字符串：里面没有落单的代理项（UTF-16 的 D800–DFFF 里没有配对的那一个）。
  *
@@ -5,8 +8,12 @@
  * 异常一路到 React 根节点，整棵工作区树被卸载。故这里把落单的代理项换成 U+FFFD
  * （WHATWG 的 UTF-8 编码也是这么处理的）。
  */
+
 export function wellFormed(value: string): string {
-  // `/u` 模式下正则按码元匹配：配成一对的代理项是一个增补平面字符，不落在代理项区，
+  // 常见的一趟全是普通字符（16 MB 的 body 也走这条），而下面那趟 `/u` 扫描要慢一个数量级：
+  // 先按码元快速否定，只有真的含代理项时才做逐码点替换。
+  if (!SURROGATE_CODE_UNIT.test(value)) return value;
+  // `/u` 模式下正则按码点匹配：配成一对的代理项是一个增补平面字符，不落在代理项区，
   // 故这个模式只命中落单的那一个。
   return value.replace(/\p{Surrogate}/gu, '\uFFFD');
 }

@@ -1,5 +1,4 @@
 import { fromBuildInput, prepareRequest } from './prepare';
-import { base64ToBytes } from '../base64';
 import type { BuildInput, BuiltFetch } from './types';
 
 /**
@@ -9,8 +8,9 @@ import type { BuildInput, BuiltFetch } from './types';
  * header 只留最后一个值——该入口的既有局限，也是保留 tuple 形态的 `sendPreparedRequest` 走后台
  * 传输的原因。
  *
- * **body 有两种形态**：文本直接给字符串；二进制（`binary` 模式，或带文件分片的 multipart）解成
- * 字节给 `fetch`。字节形态不能退成字符串——那会把文件按 UTF-8 解一遍，字节已经不是原来那些了。
+ * **body 只有文本形态**：`multipart` 与 `binary` 交给 `fetch` 的是一份描述（分片数组 / 文件
+ * 引用），文件字节由服务端执行层按 `path` 现读。浏览器形态读不到本机路径，这条通道留给桌面
+ * 与 `serve-web` 的后端执行，故 `fetch` 适配器只用于没有文件的请求。
  */
 export function buildFetchInit(input: BuildInput): BuiltFetch {
   const prepared = prepareRequest(fromBuildInput(input));
@@ -22,17 +22,11 @@ export function buildFetchInit(input: BuildInput): BuiltFetch {
     method: input.method,
     headers: headersRecord,
   };
-  if (prepared.bodyBase64 !== null) {
-    init.body = base64ToBytes(prepared.bodyBase64);
-  } else if (prepared.body !== null) {
-    init.body = prepared.body;
-  }
+  if (prepared.body !== null) init.body = prepared.body;
 
   return {
     url: prepared.url,
     init,
-    // 二进制 body 没有字符串形态，回显写成一行说明，读者知道它不是空的。
-    bodyForLog: prepared.body ?? (prepared.bodyBase64 === null ? '' : '[二进制请求体]'),
-    bodyBase64: prepared.bodyBase64,
+    bodyForLog: prepared.body ?? '',
   };
 }

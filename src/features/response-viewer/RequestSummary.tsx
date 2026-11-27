@@ -3,7 +3,7 @@ import { Globe } from 'lucide-react';
 import type { ApiResponse, StoredRequestSnapshot } from '@/types/domain';
 import { MethodPill } from '@/components/ui/method-pill';
 import { cn, formatBytes, formatDuration, tryFormatJson } from '@/lib/utils';
-import { base64ToBytes, utf8Bytes } from '@/lib/base64';
+import { utf8Bytes } from '@/lib/base64';
 
 /**
  * 请求详情 —— 响应区左栏那份「这一次实际发出去的请求」。
@@ -48,11 +48,7 @@ export function RequestSummary({
       <GeneralSection request={request} response={response ?? null} />
       <QuerySection url={request.url} />
       <HeadersSection headers={request.headers} />
-      <BodySection
-        body={request.body}
-        bodyBase64={request.bodyBase64 ?? null}
-        contentType={contentTypeOf(request.headers)}
-      />
+      <BodySection body={request.body} contentType={contentTypeOf(request.headers)} />
     </div>
   );
 }
@@ -75,10 +71,7 @@ function GeneralSection({
   request: StoredRequestSnapshot;
   response: ApiResponse | null;
 }) {
-  const bodyBytes = useMemo(() => {
-    if (request.bodyBase64) return base64ToBytes(request.bodyBase64).length;
-    return request.body ? utf8Bytes(request.body).length : 0;
-  }, [request.body, request.bodyBase64]);
+  const bodyBytes = request.body ? utf8Bytes(request.body).length : 0;
   return (
     <Section title="常规">
       <div className="flex flex-col gap-0.5">
@@ -110,13 +103,6 @@ function GeneralSection({
           </>
         )}
         {request.body !== null && (
-          <Pair label="请求体大小">
-            <span className="font-mono text-micro text-foreground/90">
-              {formatBytes(bodyBytes)}
-            </span>
-          </Pair>
-        )}
-        {request.body === null && request.bodyBase64 && (
           <Pair label="请求体大小">
             <span className="font-mono text-micro text-foreground/90">
               {formatBytes(bodyBytes)}
@@ -172,17 +158,10 @@ function HeadersSection({ headers }: { headers: Array<[string, string]> }) {
  * 请求体。JSON 体格式化后读：调试时要看的通常是字段与取值，不是缩进。表单编码的体拆成表格，
  * 与开发者工具展示表单字段的方式一致。
  *
- * **二进制请求体不按文本显示**：它的字节按 UTF-8 解出来是一串乱码，这里写明它有多少字节。
+ * 请求侧没有二进制形态：文件类的请求体存的是**描述**（`multipart` 是分片 JSON、`binary` 是
+ * 文件描述 JSON），故按文本显示即可。
  */
-function BodySection({
-  body,
-  bodyBase64,
-  contentType,
-}: {
-  body: string | null;
-  bodyBase64: string | null;
-  contentType: string;
-}) {
+function BodySection({ body, contentType }: { body: string | null; contentType: string }) {
   const isForm = contentType.toLowerCase().includes('application/x-www-form-urlencoded');
 
   const formRows = useMemo(() => {
@@ -198,16 +177,6 @@ function BodySection({
     const parsed = tryFormatJson(body);
     return parsed.ok ? parsed.formatted : body;
   }, [body]);
-
-  if (bodyBase64) {
-    return (
-      <Section title="请求体">
-        <div className="rounded bg-muted/30 px-2 py-1.5 text-micro text-muted-foreground">
-          二进制请求体，共 {formatBytes(base64ToBytes(bodyBase64).length)}，不按文本显示
-        </div>
-      </Section>
-    );
-  }
 
   if (text === null) return null;
 

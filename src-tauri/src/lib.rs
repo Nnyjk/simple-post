@@ -65,9 +65,11 @@ async fn http_request(
     method: String,
     url: String,
     headers: Vec<(String, String)>,
+    // 请求体的文本形态。语义随 `body_mode` 变：`multipart` 是分片数组的 JSON 文本，
+    // `binary` 是文件描述的 JSON 文本（含 `path`），其余是原文。
     body: Option<String>,
-    // 请求体的二进制形态（base64）。有它时 `body` 缺席，线上发出去的是解码后的字节。
-    body_base64: Option<String>,
+    // 请求体的模式。`multipart` / `binary` 的字节由执行层按 `path` 现读。
+    body_mode: crate::domain::BodyMode,
     timeout_ms: u64,
     follow_redirects: bool,
     max_response_size_kb: u64,
@@ -90,7 +92,7 @@ async fn http_request(
                 url,
                 headers,
                 body,
-                body_base64,
+                body_mode,
             },
             env: env.unwrap_or_default(),
             settings: crate::domain::RequestSettings {

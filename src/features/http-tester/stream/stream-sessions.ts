@@ -148,7 +148,7 @@ export async function startSse(
     url: request.url,
     headers: request.headers,
     body: request.body,
-    bodyBase64: request.bodyBase64,
+    bodyMode: request.bodyMode,
     timeoutMs: input.settings.timeoutMs,
     followRedirects: input.settings.followRedirects,
     maxResponseSizeKb: input.settings.maxResponseSizeKb,

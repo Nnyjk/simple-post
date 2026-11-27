@@ -180,7 +180,7 @@ async fn execute_refuses_before_dialing() {
         url: "file:///C:/Windows/win.ini".into(),
         headers: vec![],
         body: None,
-        body_base64: None,
+        body_mode: BodyMode::None,
         timeout_ms: 5_000,
         follow_redirects: true,
         max_response_size_kb: 16,
@@ -226,7 +226,7 @@ async fn redirect_hop_is_re_checked_against_the_policy() {
         url: format!("http://localhost:{port}/bounce"),
         headers: vec![],
         body: None,
-        body_base64: None,
+        body_mode: BodyMode::None,
         timeout_ms: 5_000,
         follow_redirects: true,
         max_response_size_kb: 16,
@@ -355,7 +355,7 @@ async fn the_reported_request_headers_are_the_ones_on_the_wire() {
             ("Content-Type".into(), "application/json".into()),
         ],
         body: Some("{\"orderId\":\"42\"}".into()),
-        body_base64: None,
+        body_mode: BodyMode::None,
         timeout_ms: 5_000,
         follow_redirects: true,
         max_response_size_kb: 16,
@@ -389,7 +389,7 @@ async fn a_request_without_a_body_reports_no_content_length() {
         url: format!("http://127.0.0.1:{port}/health"),
         headers: vec![],
         body: None,
-        body_base64: None,
+        body_mode: BodyMode::None,
         timeout_ms: 5_000,
         follow_redirects: true,
         max_response_size_kb: 16,
@@ -422,7 +422,7 @@ async fn a_caller_supplied_host_header_is_not_duplicated() {
         url: format!("http://127.0.0.1:{port}/health"),
         headers: vec![("Host".into(), "example.test".into())],
         body: None,
-        body_base64: None,
+        body_mode: BodyMode::None,
         timeout_ms: 5_000,
         follow_redirects: true,
         max_response_size_kb: 16,
@@ -939,7 +939,7 @@ async fn streamed_body_matches_legacy_truncation_byte_for_byte() {
             url: url.clone(),
             headers: vec![],
             body: None,
-            body_base64: None,
+            body_mode: BodyMode::None,
             timeout_ms: 10_000,
             follow_redirects: true,
             max_response_size_kb: 1,
@@ -983,7 +983,7 @@ async fn cut_at_the_limit_backs_off_to_the_rune_boundary() {
         url: format!("http://127.0.0.1:{port}/rune"),
         headers: vec![],
         body: None,
-        body_base64: None,
+        body_mode: BodyMode::None,
         timeout_ms: 10_000,
         follow_redirects: true,
         max_response_size_kb: 1,
@@ -1026,7 +1026,7 @@ async fn body_exactly_at_the_limit_is_not_truncated() {
         url: format!("http://127.0.0.1:{port}/exact"),
         headers: vec![],
         body: None,
-        body_base64: None,
+        body_mode: BodyMode::None,
         timeout_ms: 10_000,
         follow_redirects: true,
         max_response_size_kb: 1,
@@ -1059,7 +1059,7 @@ async fn oversized_content_length_response_stops_reading_at_the_limit() {
         url: format!("http://127.0.0.1:{port}/big"),
         headers: vec![],
         body: None,
-        body_base64: None,
+        body_mode: BodyMode::None,
         timeout_ms: 3_000,
         follow_redirects: true,
         max_response_size_kb: 1,
@@ -1104,7 +1104,7 @@ async fn oversized_chunked_response_stops_reading_at_the_limit() {
         url: format!("http://127.0.0.1:{port}/chunked"),
         headers: vec![],
         body: None,
-        body_base64: None,
+        body_mode: BodyMode::None,
         timeout_ms: 3_000,
         follow_redirects: true,
         max_response_size_kb: 1,
@@ -1211,7 +1211,7 @@ async fn upload_progress_runs_from_zero_to_the_body_length() {
         url: format!("http://127.0.0.1:{port}/upload"),
         headers: vec![("Content-Type".into(), "text/plain".into())],
         body: Some(payload),
-        body_base64: None,
+        body_mode: BodyMode::None,
         timeout_ms: 5_000,
         follow_redirects: true,
         max_response_size_kb: 16,
@@ -1256,7 +1256,7 @@ async fn a_request_without_a_body_emits_no_progress() {
         url: format!("http://127.0.0.1:{port}/health"),
         headers: vec![],
         body: None,
-        body_base64: None,
+        body_mode: BodyMode::None,
         timeout_ms: 5_000,
         follow_redirects: true,
         max_response_size_kb: 16,
@@ -1285,7 +1285,7 @@ async fn receive_progress_is_read_from_ndjson_events() {
         url: format!("http://127.0.0.1:{port}/upload"),
         headers: vec![],
         body: Some("payload".into()),
-        body_base64: None,
+        body_mode: BodyMode::None,
         timeout_ms: 5_000,
         follow_redirects: true,
         max_response_size_kb: 16,
@@ -1356,7 +1356,7 @@ async fn receive_progress_is_read_from_a_response_header() {
         url: format!("http://127.0.0.1:{port}/upload"),
         headers: vec![],
         body: Some("payload".into()),
-        body_base64: None,
+        body_mode: BodyMode::None,
         timeout_ms: 5_000,
         follow_redirects: true,
         max_response_size_kb: 16,
@@ -1392,7 +1392,7 @@ async fn a_plain_json_body_is_not_mistaken_for_progress() {
         url: format!("http://127.0.0.1:{port}/x"),
         headers: vec![],
         body: None,
-        body_base64: None,
+        body_mode: BodyMode::None,
         timeout_ms: 5_000,
         follow_redirects: true,
         max_response_size_kb: 16,
@@ -1405,5 +1405,16 @@ async fn a_plain_json_body_is_not_mistaken_for_progress() {
             .iter()
             .all(|f| f.server_received_bytes.is_none()),
         "普通的 JSON 响应不是进度通道"
+    );
+}
+
+/// 请求体的上限在桌面与 REST 两侧是同一条线：判的是解码后的字节，边界正好等于上限时放行。
+#[test]
+fn body_size_limit_is_inclusive_and_named_in_the_message() {
+    assert!(check_body_size(MAX_REQUEST_BODY_BYTES).is_ok());
+    let err = check_body_size(MAX_REQUEST_BODY_BYTES + 1).expect_err("超出上限要拒绝");
+    assert!(
+        err.contains(&MAX_REQUEST_BODY_BYTES.to_string()),
+        "消息里要写出上限，调用方才知道该缩到多少：{err}"
     );
 }

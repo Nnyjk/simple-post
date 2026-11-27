@@ -93,7 +93,7 @@ pub(super) fn parse_body(req: &Map<String, Value>, ptr: &str, ctx: &mut Ctx) -> 
                         enabled: true,
                         filename: None,
                         content_type: None,
-                        base64: None,
+                        path: None,
                         description: None,
                     });
                 }

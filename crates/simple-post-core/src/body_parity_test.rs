@@ -2,7 +2,7 @@
 //!
 //! 同一份样本也被 TS 侧的 `src/lib/__tests__/body-parity.test.ts` 读。两份实现各写
 //! 一遍规则（逐字段还是逐段模板化、空键与停用行算不算、百分号编码用哪套字符集、
-//! 产物是文本还是字节），只有一份共享样本才能钉住它们没分叉。
+//! 产物是文本还是没有请求体），只有一份共享样本才能钉住它们没分叉。
 
 use std::collections::HashMap;
 
@@ -35,7 +35,6 @@ struct Case {
 #[derive(Debug, Deserialize)]
 struct Expected {
     text: Option<String>,
-    base64: Option<String>,
     #[serde(default)]
     missing: Vec<String>,
 }
@@ -52,11 +51,6 @@ fn every_body_parity_case_resolves_the_same_way() {
         let resolved = resolve_body(&case.body, &case.vars);
 
         assert_eq!(resolved.text, case.expected.text, "{}: 文本形态", case.name);
-        assert_eq!(
-            resolved.base64, case.expected.base64,
-            "{}: 二进制形态",
-            case.name
-        );
         assert_eq!(
             resolved.missing, case.expected.missing,
             "{}: 未解析的变量",
@@ -87,7 +81,7 @@ fn every_body_parity_case_has_the_same_binary_content_type() {
 #[test]
 fn the_fixture_uses_the_real_body_modes() {
     let fixture: Fixture = serde_json::from_str(FIXTURE).expect("body parity fixture");
-    let modes: Vec<BodyMode> = fixture.cases.iter().map(|c| c.body.mode.clone()).collect();
+    let modes: Vec<BodyMode> = fixture.cases.iter().map(|c| c.body.mode).collect();
     assert!(
         modes.contains(&BodyMode::Binary),
         "样本里必须有一个 binary 用例"

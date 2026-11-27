@@ -45,7 +45,7 @@ fn scripted_input(body: HttpSendBody) -> ScriptedSendInput {
             url: body.url,
             headers: body.headers,
             body: body.body,
-            body_base64: body.body_base64,
+            body_mode: body.body_mode,
         },
         env: body.env.unwrap_or_default(),
         settings: RequestSettings {

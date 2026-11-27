@@ -39,7 +39,7 @@ function prepared(c: ParityCase): PreparedRequest {
     url: c.url,
     headers: c.headers.map(([k, v]) => [k, v] as [string, string]),
     body: null,
-    bodyBase64: null,
+    bodyMode: 'none',
     missingVars: [],
     missingPathParams: [],
     // 变量池：取 OAuth2 的 token 时由后端用它替换配置里的 `{{var}}`。

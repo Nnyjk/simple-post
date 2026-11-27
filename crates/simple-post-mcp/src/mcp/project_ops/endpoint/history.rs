@@ -139,8 +139,6 @@ struct RequestSnapshot {
     body: Option<String>,
     /// 请求体是片段：为 true 时 `body` 不是完整的那一份。
     body_truncated: bool,
-    /// 请求体是二进制字节，未在此返回：`body` 缺席，原始字节在库里是 base64。
-    has_binary_body: bool,
 }
 
 impl RequestSnapshot {
@@ -158,7 +156,6 @@ impl RequestSnapshot {
             headers: r.headers.clone(),
             body,
             body_truncated,
-            has_binary_body: r.body_base64.is_some(),
         }
     }
 }

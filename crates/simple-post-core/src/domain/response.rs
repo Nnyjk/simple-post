@@ -103,11 +103,11 @@ pub struct StoredRequestSnapshot {
     /// 这一列存界面上拼出来的那几条。
     pub headers: Vec<(String, String)>,
     /// body 内容。没有 body 时为 `None`。
+    ///
+    /// 请求侧没有二进制形态：`binary` 与 `multipart` 的文件只记路径，字节在发请求时
+    /// 按路径现读，故历史里留得下、也读得回去的都是文本（`multipart` 是分片 JSON，
+    /// `binary` 是文件描述的 JSON）。
     pub body: Option<String>,
-    /// body 的字节（base64）。与 `body` 互斥：二进制请求体（`binary` 模式，或带文件
-    /// 分片的 multipart）走这里。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub body_base64: Option<String>,
 }
 
 /// `response_history` 的一行。

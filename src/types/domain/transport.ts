@@ -46,10 +46,13 @@ export interface StoredRequestSnapshot {
   url: string;
   /** 有序 header 元组。HTTP 允许重名 header，故用列表而非 map。 */
   headers: Array<[string, string]>;
-  /** body 内容。没有 body 时为 null。 */
+  /**
+   * body 内容。没有 body 时为 null。
+   *
+   * 请求侧没有二进制形态：`binary` 与 `multipart` 的文件只记路径，字节在发请求时按路径
+   * 现读，故这里存的是文本（`multipart` 是分片 JSON，`binary` 是文件描述的 JSON）。
+   */
   body: string | null;
-  /** body 的字节（base64）。与 `body` 互斥：二进制请求体走这里。写这一列之前存的行没有它，故它是可选的。 */
-  bodyBase64?: string | null;
 }
 
 /**

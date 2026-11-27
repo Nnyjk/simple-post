@@ -1,14 +1,14 @@
 import type { AuthConfig, BodyMode, KeyValue } from '@/types/domain';
 import { resolveVarsWithMissing } from '../url';
-import { multipartContentType } from '../multipart';
 import { b64Basic } from './auth';
 import type { MissingTracker } from './pool';
 
 /**
  * 按 body mode 自动补 Content-Type（`none` 与 `multipart` 返回 `null`）。
  *
- * multipart 的 Content-Type 含 boundary，而 boundary 在 `prepareRequest` 里现生成，故它由那条路径
- * 单独处理（见 `buildOrderedHeaders`）。
+ * multipart 的 Content-Type 含 boundary，而 boundary 是执行层装配时现生成的，故这里给不了：
+ * 由 `http_executor` 在发请求前就地改写（用户写过同名的就换值，没写过就追加）。
+ * 渲染进程不生成 boundary，也不碰这条头。
  *
  * `binaryContentType` 是 `binary` 模式下文件自己的 MIME 类型：整个请求体就是一个文件时，用文件
  * 那个类型才描述得了它。它只在 `bodyMode === 'binary'` 时被读，其余模式传 `null`。
@@ -31,16 +31,15 @@ function autoContentType(mode: BodyMode, binaryContentType?: string | null): str
 }
 
 /**
- * 有序 header 列表：先是用户 header，再是自动 Content-Type（缺失才补，multipart 例外）与
+ * 有序 header 列表：先是用户 header，再是自动 Content-Type（缺失才补）与
  * Accept，最后是 auth 派生的 header（`Authorization` 或 header 位置的 apikey）。查重大小写不敏感
  * ——HTTP header 名本就大小写不敏感。`apikey.inLocation === 'query'` 不出 header，调用方通过
  * `appendApikeyToQuery` 拼到 URL 上。
  *
- * **multipart 的 Content-Type 位置与其它模式不同。** 它的值含 boundary，而 boundary 每次请求
- * 现生成，故它不能与别的自动 Content-Type 那样在 header 阶段决定位置。Rust 侧
- * （`variable_fill::build_headers` + `mcp::http_ops::multipart::apply`）的做法是：multipart 模式在
- * header 阶段**不**补 Content-Type；装配 body 的那一步若发现用户写过 Content-Type 就地替换它的值，
- * 没写过就追加到列表**末尾**。本函数照同一规则做，故两侧的头部顺序逐条相同。
+ * **multipart 不在这里补 Content-Type。** 它的值含 boundary，而 boundary 由执行层装配时现生成
+ * （`simple-post-core::multipart`），这条头也在那时就地改写。故这里既不给它定位置，也不生成值；
+ * `PreparedRequest.headers` 里看不到 multipart 的 Content-Type，而真正发出去的那一条由后端报回来
+ * （`requestHeaders`）。
  */
 export function buildOrderedHeaders(
   headers: readonly KeyValue[],
@@ -48,7 +47,6 @@ export function buildOrderedHeaders(
   auth: AuthConfig,
   pool: Record<string, string>,
   missing: MissingTracker,
-  boundary: string | null,
   binaryContentType?: string | null,
   /**
    * GraphQL 的 Content-Type。payload 的形状由组装器决定，用户的 body 设置不参与，故这里
@@ -64,20 +62,17 @@ export function buildOrderedHeaders(
     out.push([h.key, r.value]);
   }
 
-  const isMultipart = bodyMode === 'multipart';
-  const multipartCt = isMultipart && boundary !== null ? multipartContentType(boundary) : null;
-  // GraphQL 的 payload 一律是 JSON，与 multipart 一样由组装期决定值：用户写过就就地替换，
-  // 没写过就补一条。两者不会同时成立——protocol 为 graphql 时 body 设置不参与组装。
-  const fixedCt = overrideContentType ?? multipartCt;
+  // GraphQL 的 payload 一律是 JSON，由组装期决定值：用户写过就就地替换，没写过就补一条。
+  // multipart 不在此列——它的 Content-Type 要等执行层生成 boundary。
+  const fixedCt = overrideContentType ?? null;
   const existingCt = out.findIndex(([k]) => k.toLowerCase() === 'content-type');
 
   if (fixedCt !== null) {
-    // `buildOrderedHeaders` 就地替换用户自己写过的那条 Content-Type 的**值**，header 名保留用户的
-    // 大小写。multipart 的 body 由 boundary 框出来、GraphQL 的 payload 是 JSON，用户那条值在结构上
-    // 描述不了它——留着就是「发得错」：请求发得出去、服务端解析不出内容，而用户看不出异常。
+    // 就地替换用户自己写过的那条 Content-Type 的**值**，header 名保留用户的大小写：GraphQL 的
+    // payload 是 JSON，用户那条值在结构上描述不了它——留着就是「发得错」。
     if (existingCt !== -1) {
       out[existingCt] = [out[existingCt]![0], fixedCt];
-    } else if (overrideContentType !== null) {
+    } else {
       // GraphQL 的值在组装前就定了，位置与 body 模式推导出的 Content-Type 相同：
       // Accept 之前。Rust 侧同样先放它再加默认 Accept（见 fixtures/resolve-parity.json）。
       out.push(['Content-Type', fixedCt]);
@@ -111,13 +106,6 @@ export function buildOrderedHeaders(
     if (!out.some(([k]) => k.toLowerCase() === auth.apikey!.key.toLowerCase())) {
       out.push([auth.apikey.key, auth.apikey.value]);
     }
-  }
-
-  // multipart 的 Content-Type 含每次都现生成的 boundary，故它与 Rust 侧 `multipart::apply`
-  // 一样在装配 body 时才追加，位置在列表**末尾**（Accept 之后）。GraphQL 不在这里：它的值
-  // 已经在上面的固定位放好了。
-  if (multipartCt !== null && existingCt === -1) {
-    out.push(['Content-Type', multipartCt]);
   }
 
   return out;

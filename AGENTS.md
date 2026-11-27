@@ -89,7 +89,6 @@
 | 样本 | 两侧实现 |
 |---|---|
 | `resolve-parity.json` | `resolve_endpoint` / `prepareRequest` |
-| `multipart-parity.json` | `mcp::http_ops` / `src/lib/multipart.ts` |
 | `body-parity.json` | `core::body` / `src/lib/body` |
 | `dynamic-parity.json` | `core::dynamic` / `src/lib/dynamic-vars.ts` |
 | `path-params-parity.json` | `core::path_params` / `src/lib/path-params.ts` |

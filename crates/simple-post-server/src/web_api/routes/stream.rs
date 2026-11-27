@@ -63,7 +63,7 @@ pub(crate) async fn http_stream(
         url: request.url,
         headers: request.headers,
         body: request.body,
-        body_base64: request.body_base64,
+        body_mode: request.body_mode,
         timeout_ms: request.timeout_ms,
         follow_redirects: request.follow_redirects,
         max_response_size_kb: request.max_response_size_kb,

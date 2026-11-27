@@ -190,14 +190,14 @@ fn a_multipart_text_part_is_templated_and_a_file_part_is_not() {
     let out = resolve_body(
         &body(
             BodyMode::Multipart,
-            r#"[{"name":"field","value":"{{t}}"},{"name":"file","filename":"a.png","base64":"iVBORw0KGgo="}]"#,
+            r#"[{"name":"field","value":"{{t}}"},{"name":"file","filename":"a.png","path":"C:\\tmp\\{{t}}.png"}]"#,
         ),
         &vars(&[("t", "v1")]),
     );
     let parts = parse_multipart_parts(out.text.as_deref().unwrap_or_default());
     assert_eq!(parts[0].value, "v1");
-    // 文件分片的字节不模板化。
-    assert_eq!(parts[1].base64.as_deref(), Some("iVBORw0KGgo="));
+    // 文件分片只有路径：路径不是用户填的模板，模板化它会把 `{{` 当成变量。
+    assert_eq!(parts[1].path.as_deref(), Some(r"C:\tmp\{{t}}.png"));
     assert_eq!(parts[1].filename.as_deref(), Some("a.png"));
 }
 
@@ -206,35 +206,36 @@ fn a_multipart_text_part_is_templated_and_a_file_part_is_not() {
 // -------------------------------------------------------------------------
 
 #[test]
-fn a_binary_body_carries_the_file_bytes() {
+fn a_binary_body_carries_the_file_description_untouched() {
     let out = resolve_body(
         &body(
             BodyMode::Binary,
-            r#"{"name":"a.png","size":3,"contentType":"image/png","base64":"iVBORw0KGgo="}"#,
+            r#"{"name":"a.png","size":3,"contentType":"image/png","path":"/tmp/a.png"}"#,
         ),
         &vars(&[]),
     );
-    assert_eq!(out.base64.as_deref(), Some("iVBORw0KGgo="));
-    assert!(out.text.is_none());
+    let text = out.text.expect("the file description");
+    let file = parse_body_file(&text).expect("the description must read back");
+    assert_eq!(file.path, "/tmp/a.png");
+    assert_eq!(file.content_type, "image/png");
 }
 
 #[test]
 fn a_binary_body_whose_content_is_not_a_file_description_has_no_body() {
     let out = resolve_body(&body(BodyMode::Binary, "not json"), &vars(&[]));
     assert!(out.text.is_none());
-    assert!(out.base64.is_none());
 }
 
 #[test]
 fn the_file_description_is_read_back() {
     let file = parse_body_file(
-        r#"{"name":"a.png","size":3,"contentType":"image/png","base64":"iVBORw0KGgo="}"#,
+        r#"{"name":"a.png","size":3,"contentType":"image/png","path":"/tmp/a.png"}"#,
     )
     .expect("the file description");
     assert_eq!(file.name, "a.png");
     assert_eq!(file.size, 3);
     assert_eq!(file.content_type, "image/png");
-    assert_eq!(file.base64, "iVBORw0KGgo=");
+    assert_eq!(file.path, "/tmp/a.png");
 
     let empty: Option<BodyFile> = parse_body_file("{}");
     assert!(
@@ -251,14 +252,12 @@ fn the_file_description_is_read_back() {
 fn a_text_body_is_templated_as_a_whole() {
     let out = resolve_body(&body(BodyMode::Xml, "<a>{{t}}</a>"), &vars(&[("t", "1")]));
     assert_eq!(out.text.as_deref(), Some("<a>1</a>"));
-    assert!(out.base64.is_none());
 }
 
 #[test]
 fn no_mode_has_no_body() {
     let out = resolve_body(&body(BodyMode::None, "ignored"), &vars(&[]));
     assert!(out.text.is_none());
-    assert!(out.base64.is_none());
 }
 
 #[test]

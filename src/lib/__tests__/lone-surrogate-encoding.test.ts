@@ -137,29 +137,16 @@ describe('组装请求：每一个字符串都是良构的', () => {
 
 describe('二进制模式的请求体', () => {
   it('文件描述里会发出去的字段已归一', () => {
-    // Content-Type 会作为请求头发出去，故它不能带落单代理项
+    // Content-Type 会作为请求头发出去，路径会进线上 JSON —— 两者都不能带落单代理项
     const content = JSON.stringify({
       name: 'a.bin',
       size: 3,
       contentType: 'application/x-\uD800',
-      base64: '//8=',
+      path: 'C:\\tmp\\a\uD800.bin',
     });
     const prepared = prepareRequest(prep({ body: { mode: 'binary', content } }));
     const ct = prepared.headers.find(([k]) => k.toLowerCase() === 'content-type');
     assert.equal(ct?.[1], 'application/x-\uFFFD');
-  });
-
-  it('文件字节原样带出去，二进制模式的 content 不进归一', () => {
-    // base64 是文件字节，按构造只有 ASCII 字符；扫过那份可能很大的字符串纯属浪费，
-    // 故这个模式的 content 不进归一
-    const base64 = '//8=' + LONE_HIGH;
-    const content = JSON.stringify({
-      name: 'a.bin',
-      size: 3,
-      contentType: 'application/octet-stream',
-      base64,
-    });
-    const prepared = prepareRequest(prep({ body: { mode: 'binary', content } }));
-    assert.equal(prepared.bodyBase64, base64);
+    assert.ok(!LONE.test(prepared.body ?? ''), '文件描述里的路径不能带落单代理项');
   });
 });

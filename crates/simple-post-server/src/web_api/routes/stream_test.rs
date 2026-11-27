@@ -74,7 +74,7 @@ fn input(url: &str) -> HttpRequestInput {
         url: url.into(),
         headers: Vec::new(),
         body: None,
-        body_base64: None,
+        body_mode: simple_post_core::domain::BodyMode::None,
         timeout_ms: 60_000,
         follow_redirects: false,
         max_response_size_kb: 1024,

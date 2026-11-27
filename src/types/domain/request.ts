@@ -82,33 +82,34 @@ export interface MultipartPart {
   value: string;
   /** 这一分片是否参与发送。缺省为真。 */
   enabled: boolean;
-  /** 有值即文件分片：`Content-Disposition` 带上 `filename=`，并默认 `application/octet-stream`。 */
+  /** 有路径时缺省取它；显式给了就以它为准。 */
   filename?: string;
   /** 分片自己的 Content-Type；文件分片缺省为 `application/octet-stream`。 */
   contentType?: string;
   /**
-   * 文件分片的字节（base64）。有它时 `value` 不参与发包。
+   * 文件分片的路径（运行请求那台机器上的绝对路径）。有它即文件分片，`value` 不参与发包。
    *
-   * 分片数组存在 JSON 文本里，而文件是字节，故字节只能以 base64 的形态进去。
+   * 库里不存文件内容：字节由执行层在发请求时按路径现读，故大文件不进 JSON、不进历史。
    */
-  base64?: string;
+  path?: string;
   /** 说明。界面上那一列写着什么，不上线。 */
   description?: string;
 }
 
 /**
  * `binary` 模式选中的那个文件，与 Rust 的 `simple_post_core::domain::BodyFile` 一一对应。
- * 文件**不在库里存路径**——路径由运行请求的那台机器解析，桌面端与服务端容器不是一个文件系统。
+ * 存的是**文件引用**：路径由执行层解析，桌面端与服务端容器不是一个文件系统，故浏览器形态
+ * 发这种请求要由服务端看到一个它能读的路径。
  */
 export interface BodyFile {
-  /** 文件名。界面上显示它；它不上线（请求体只有字节与 Content-Type）。 */
+  /** 文件名。界面上显示它；它不上线。 */
   name: string;
-  /** 文件有多少字节。 */
+  /** 文件有多少字节（选中那一刻的读数，仅供显示）。 */
   size: number;
   /** 文件自己的 MIME 类型。缺省 `application/octet-stream`。 */
   contentType: string;
-  /** 文件的字节（base64）。 */
-  base64: string;
+  /** 文件路径（运行请求那台机器上的绝对路径）。字节由执行层按它现读。 */
+  path: string;
 }
 
 export interface RequestBody {
